@@ -199,6 +199,12 @@ func PrepareBedrockRequestBodyWithTokens(body []byte, modelID string, betaTokens
 	betaTokens = filterBedrockBetaTokens(betaTokens)
 	body = sanitizeBedrockFieldsForBetaTokens(body, betaTokens)
 
+	// 新世代模型已废弃 temperature/top_p/top_k，Bedrock 同样按 400 拒收。
+	// 必须用入参 modelID 判定：body.model 在下方会被删除（Bedrock 由 URL 指定模型）。
+	if sanitized, changed := stripDeprecatedSamplingParams(body, modelID); changed {
+		body = sanitized
+	}
+
 	// 注入 anthropic_version（Bedrock 要求）
 	body, err = sjson.SetBytes(body, "anthropic_version", "bedrock-2023-05-31")
 	if err != nil {

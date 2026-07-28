@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 )
 
 // ResponsesToAnthropicRequest converts a Responses API request into an
@@ -17,11 +19,17 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 	}
 
 	out := &AnthropicRequest{
-		Model:       req.Model,
-		Messages:    messages,
-		Temperature: req.Temperature,
-		TopP:        req.TopP,
-		Stream:      req.Stream,
+		Model:    req.Model,
+		Messages: messages,
+		Stream:   req.Stream,
+	}
+
+	// 新世代 Anthropic 模型（Opus 4.6+ / Sonnet 4.6+ / Sonnet 5 / Fable 5 ...）已废弃
+	// 采样参数：字段存在即 400 "`temperature` is deprecated for this model."，
+	// 与取值无关。只对仍支持的老模型转发。
+	if claude.SupportsSamplingParams(req.Model) {
+		out.Temperature = req.Temperature
+		out.TopP = req.TopP
 	}
 
 	if len(system) > 0 {

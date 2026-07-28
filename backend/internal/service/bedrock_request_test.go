@@ -1115,3 +1115,37 @@ func TestSanitizeBedrockCCBetaTokens(t *testing.T) {
 		assert.Contains(t, []string{tokens[0].String(), tokens[1].String()}, "context-1m-2025-08-07")
 	})
 }
+
+func TestPrepareBedrockRequestBody_DeprecatedSamplingParams(t *testing.T) {
+	t.Run("新世代模型剥离采样参数", func(t *testing.T) {
+		input := `{"model":"claude-opus-4-7","max_tokens":1024,"temperature":1,"top_p":0.9,"top_k":40,"messages":[{"role":"user","content":"hi"}]}`
+
+		result, err := PrepareBedrockRequestBody([]byte(input), "us.anthropic.claude-opus-4-7-v1:0", "")
+
+		require.NoError(t, err)
+		assert.False(t, gjson.GetBytes(result, "temperature").Exists(), "temperature must be stripped: %s", result)
+		assert.False(t, gjson.GetBytes(result, "top_p").Exists(), "top_p must be stripped: %s", result)
+		assert.False(t, gjson.GetBytes(result, "top_k").Exists(), "top_k must be stripped: %s", result)
+		assert.Equal(t, int64(1024), gjson.GetBytes(result, "max_tokens").Int())
+	})
+
+	t.Run("老模型保留采样参数", func(t *testing.T) {
+		input := `{"model":"claude-sonnet-4-5","max_tokens":1024,"temperature":0.7,"messages":[{"role":"user","content":"hi"}]}`
+
+		result, err := PrepareBedrockRequestBody([]byte(input), "us.anthropic.claude-sonnet-4-5-v1", "")
+
+		require.NoError(t, err)
+		require.True(t, gjson.GetBytes(result, "temperature").Exists(), "temperature must be preserved: %s", result)
+		assert.InDelta(t, 0.7, gjson.GetBytes(result, "temperature").Float(), 1e-9)
+	})
+
+	t.Run("判定用入参 modelID 而非已被删除的 body.model", func(t *testing.T) {
+		// body.model 是老模型、URL 模型是新世代 → 必须按 URL 模型剥离
+		input := `{"model":"claude-sonnet-4-5","max_tokens":1024,"temperature":0.7,"messages":[{"role":"user","content":"hi"}]}`
+
+		result, err := PrepareBedrockRequestBody([]byte(input), "us.anthropic.claude-sonnet-5-v1:0", "")
+
+		require.NoError(t, err)
+		assert.False(t, gjson.GetBytes(result, "temperature").Exists(), "must judge by modelID param: %s", result)
+	})
+}

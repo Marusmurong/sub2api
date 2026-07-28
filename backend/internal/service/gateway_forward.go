@@ -600,6 +600,58 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					}
 				}
 
+				// 采样参数已废弃：上游给出了权威答案，说明 buildUpstreamRequest 里
+				// 基于 claude.SupportsSamplingParams 的前置判定把该模型误判成了"仍支持"。
+				// 剥掉 temperature/top_p/top_k 重试一次，这样 Anthropic 上线新模型时
+				// 不需要改代码也不会把 400 透给下游。
+				if claude.IsSamplingParamsDeprecatedError(errMsg) {
+					strippedBody, applied := forceStripSamplingParams(body)
+					if applied && time.Since(retryStart) < maxRetryElapsed {
+						appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+							Platform:           account.Platform,
+							AccountID:          account.ID,
+							AccountName:        account.Name,
+							UpstreamStatusCode: resp.StatusCode,
+							UpstreamRequestID:  resp.Header.Get("x-request-id"),
+							UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
+							Kind:               "sampling_params_deprecated",
+							Message:            errMsg,
+							Detail: func() string {
+								if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
+									return truncateString(string(respBody), s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes)
+								}
+								return ""
+							}(),
+						})
+
+						logger.LegacyPrintf("service.gateway", "Account %d: model %s rejects sampling params, retrying with temperature/top_p/top_k stripped (remove it from claude.samplingCapableModelBases to avoid the extra round-trip)", account.ID, reqModel)
+						samplingRetryCtx, releaseSamplingRetryCtx := detachStreamUpstreamContext(ctx, reqStream)
+						samplingRetryReq, samplingWireBody, buildErr := s.buildUpstreamRequest(samplingRetryCtx, c, account, strippedBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
+						releaseSamplingRetryCtx()
+						if buildErr == nil {
+							samplingRetryResp, retryErr := s.httpUpstream.DoWithTLS(samplingRetryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+							if retryErr == nil {
+								if samplingRetryResp.StatusCode < 400 {
+									// 重试被接受后同步 ParsedRequest，保证 usage/日志看到真实请求体。
+									lastWireBody = samplingWireBody
+									if err := replaceBody(samplingWireBody); err != nil {
+										_ = samplingRetryResp.Body.Close()
+										return nil, err
+									}
+								}
+								resp = samplingRetryResp
+								break
+							}
+							if samplingRetryResp != nil && samplingRetryResp.Body != nil {
+								_ = samplingRetryResp.Body.Close()
+							}
+							logger.LegacyPrintf("service.gateway", "Account %d: sampling params strip retry failed: %v", account.ID, retryErr)
+						} else {
+							logger.LegacyPrintf("service.gateway", "Account %d: sampling params strip retry build failed: %v", account.ID, buildErr)
+						}
+					}
+				}
+
 				resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			}
 		}

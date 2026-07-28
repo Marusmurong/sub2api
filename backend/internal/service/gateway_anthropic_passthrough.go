@@ -328,6 +328,13 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 		body = sanitized
 	}
 
+	// 模型维度 body sanitize：新世代模型已废弃 temperature/top_p/top_k。
+	// 透传分支明确禁止 400 后改写请求体重试（见 forwardAnthropicAPIKeyPassthroughWithInput），
+	// 所以这条前置净化是本路径唯一的防线。模型取 body.model（此处已是映射后的上游模型 ID）。
+	if sanitized, changed := stripDeprecatedSamplingParams(body, ""); changed {
+		body = sanitized
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err

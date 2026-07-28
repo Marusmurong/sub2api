@@ -167,9 +167,11 @@ func createTestPayload(modelID string) (map[string]any, error) {
 		"metadata": map[string]string{
 			"user_id": sessionID,
 		},
-		"max_tokens":  1024,
-		"temperature": 1,
-		"stream":      true,
+		// 不带 temperature：新世代模型（Opus 4.6+ / Sonnet 5 / Fable 5 ...）只要
+		// 该字段存在就 400 "`temperature` is deprecated for this model."，而探测
+		// 模型由管理员任选。省略对所有模型都合法，探测语义也不依赖采样温度。
+		"max_tokens": 1024,
+		"stream":     true,
 	}, nil
 }
 
@@ -427,8 +429,8 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 				},
 			},
 		},
-		"max_tokens":  256,
-		"temperature": 1,
+		// 同 createTestPayload：不带 temperature，避免新世代模型直接 400。
+		"max_tokens": 256,
 	}
 	bedrockBody, _ := json.Marshal(bedrockPayload)
 

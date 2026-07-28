@@ -116,6 +116,12 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		body = sanitized
 	}
 
+	// 模型维度 body sanitize：新世代模型已废弃 temperature/top_p/top_k，
+	// 下游客户端常常无条件带上。必须在 CCH 签名与 NewRequest 之前完成。
+	if sanitized, changed := stripDeprecatedSamplingParams(body, modelID); changed {
+		body = sanitized
+	}
+
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err
