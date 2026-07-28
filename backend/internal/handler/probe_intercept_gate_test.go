@@ -166,9 +166,12 @@ func TestInterceptNonUpstreamRequest_LetThrough(t *testing.T) {
 			maxTokens: 1024, reason: "真实对话",
 		},
 		{
-			name: "带实质 system 不拦", probeTools: true, greeting: true,
-			body:      `{"system":"You are a coding assistant","messages":[{"role":"user","content":"hi"}]}`,
-			maxTokens: 1024, reason: "真实会话",
+			// 分层拦截后：带 session 才算真实会话，此时带 system 的问候放行。
+			// 无 session 的同形请求属于脚本测活，会被宽松档拦下（见下方 Tier 用例）。
+			name: "有 session + 带实质 system 不拦", probeTools: true, greeting: true,
+			body: `{"metadata":{"user_id":"u_x_account__session_9f8e7d6c-1111-2222-3333-444455556666"},` +
+				`"system":"You are a coding assistant","messages":[{"role":"user","content":"hi"}]}`,
+			maxTokens: 1024, reason: "真实 Claude Code 会话",
 		},
 		{
 			name: "max_tokens=1 让行给既有 haiku 探测分支", probeTools: true, greeting: true,
@@ -204,6 +207,69 @@ func TestInterceptNonUpstreamRequest_LetThrough(t *testing.T) {
 			}
 			if rec.Body.Len() != 0 {
 				t.Errorf("let-through path must not write a response: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+// 分层拦截的接入点验证：UA 自称探针、以及无 session 的脚本测活。
+func TestInterceptNonUpstreamRequest_LivenessTiers(t *testing.T) {
+	tests := []struct {
+		name      string
+		userAgent string
+		body      string
+		want      bool
+		reason    string
+	}{
+		{
+			name:      "UA 自称探针即使内容是实质提问也拦",
+			userAgent: "openox-claude-emergency-full-capability-probe",
+			body:      `{"messages":[{"role":"user","content":"帮我写一个快排"}]}`,
+			want:      true, reason: "最强信号",
+		},
+		{
+			name:      "无 session + 大 system + hi（Go-http-client 形态）",
+			userAgent: "Go-http-client/2.0",
+			body:      `{"system":"You are Claude Code with a very long prompt","messages":[{"role":"user","content":"hi"}]}`,
+			want:      true, reason: "宽松档",
+		},
+		{
+			name:      "无 session + test",
+			userAgent: "GatewayClient/1.0",
+			body:      `{"messages":[{"role":"user","content":"test"}]}`,
+			want:      true, reason: "宽松档扩展文案",
+		},
+		{
+			name:      "有 session + 大 system + hi → 放行",
+			userAgent: "claude-cli/2.1.220 (external, cli)",
+			body: `{"metadata":{"user_id":"u_x_account__session_9f8e7d6c-1111-2222-3333-444455556666"},` +
+				`"system":"You are Claude Code","messages":[{"role":"user","content":"hi"}]}`,
+			want: false, reason: "严格档：真实 CLI 会话",
+		},
+		{
+			name:      "无 session 但内容是实质提问 → 放行",
+			userAgent: "Go-http-client/2.0",
+			body:      `{"messages":[{"role":"user","content":"解释一下 CAP 定理"}]}`,
+			want:      false, reason: "非测活文案",
+		},
+		{
+			name:      "无 session 但带 tools → 放行",
+			userAgent: "Go-http-client/2.0",
+			body:      `{"tools":[{"name":"Read"}],"messages":[{"role":"user","content":"hi"}]}`,
+			want:      false, reason: "带工具是真实会话",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newInterceptTestHandler(true, true)
+			c, rec := newInterceptTestContext()
+			c.Request.Header.Set("User-Agent", tt.userAgent)
+
+			got := h.interceptNonUpstreamRequest(c, []byte(tt.body), "claude-opus-4-8", 1024, false, zap.NewNop())
+
+			if got != tt.want {
+				t.Errorf("intercepted = %v, want %v (%s); body: %s", got, tt.want, tt.reason, rec.Body.String())
 			}
 		})
 	}

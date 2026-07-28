@@ -56,20 +56,42 @@ func (h *GatewayHandler) interceptNonUpstreamRequest(
 		return false
 	}
 
-	if h.cfg.Gateway.InterceptGreeting && isTrivialGreetingRequest(body) {
-		reqLog.Info("gateway.intercept_greeting",
-			zap.String("model", model),
-			zap.Bool("stream", stream))
-		text := greetingReplyText(body)
-		if stream {
-			sendGreetingInterceptStream(c, model, text)
-		} else {
-			sendGreetingInterceptResponse(c, model, text)
-		}
-		return true
+	if !h.cfg.Gateway.InterceptGreeting {
+		return false
 	}
 
-	return false
+	// 分层测活拦截，按信号强度从强到弱：
+	//   1) UA 自称探针 —— 最强信号，无条件拦
+	//   2) 无 session + 测活文案（宽松档）/ 有 session + 纯问候（严格档）
+	userAgent := ""
+	if c != nil && c.Request != nil {
+		userAgent = c.Request.UserAgent()
+	}
+
+	tier := ""
+	switch {
+	case isProbeUserAgent(userAgent):
+		tier = "user_agent"
+	case isLivenessProbeRequest(body):
+		tier = "request_shape"
+	default:
+		return false
+	}
+
+	reqLog.Info("gateway.intercept_liveness_probe",
+		zap.String("tier", tier),
+		zap.String("model", model),
+		zap.Bool("stream", stream),
+		zap.Bool("has_session", hasSessionMarker(body)),
+		zap.String("user_agent", userAgent))
+
+	text := greetingReplyText(body)
+	if stream {
+		sendGreetingInterceptStream(c, model, text)
+	} else {
+		sendGreetingInterceptResponse(c, model, text)
+	}
+	return true
 }
 
 // probeToolTypePrefix 是人造探针最常见的排序前缀：真实 Anthropic server tool
