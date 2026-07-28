@@ -31,6 +31,7 @@ func (h *GatewayHandler) interceptNonUpstreamRequest(
 	model string,
 	maxTokens int,
 	stream bool,
+	isClaudeCodeClient bool,
 	reqLog *zap.Logger,
 ) bool {
 	if h.cfg == nil {
@@ -48,10 +49,33 @@ func (h *GatewayHandler) interceptNonUpstreamRequest(
 		}
 	}
 
-	// max_tokens=1 是 Claude Code / cc-switch 的连通性探测约定：客户端期待的是
-	// 被 max_tokens 截断的响应（stop_reason=max_tokens，正文 "#"），由既有的
-	// InterceptTypeMaxTokensOneHaiku 分支处理。这里若抢先返回完整问候语，
-	// stop_reason 会变成 end_turn，与客户端预期不符，故让行。
+	// Claude Code 的预热类请求（Warmup / SUGGESTION MODE / max_tokens=1 haiku 探测）。
+	//
+	// 这段判定原本在账号选择之后（gateway_handler.go 里两处 IsInterceptWarmupEnabled
+	// 分支），命中后还要手动 ReleaseFunc() 把刚占的账号槽还回去。虽然同样不发上游，
+	// 但请求已经排过用户并发队列、占过账号并发槽——在槽位打满时甚至会先拿到 503。
+	// 提到这里之后，这类请求恒定秒回，与账号池状态完全无关。
+	//
+	// 各类型的响应形态由 sendMockIntercept* 决定（如 max_tokens=1 探测必须回
+	// stop_reason=max_tokens 且正文为 "#"），沿用原实现不变。
+	if h.cfg.Gateway.InterceptWarmup {
+		if interceptType := detectInterceptType(body, model, maxTokens, isClaudeCodeClient); interceptType != InterceptTypeNone {
+			reqLog.Info("gateway.intercept_warmup",
+				zap.Int("intercept_type", int(interceptType)),
+				zap.String("model", model),
+				zap.Bool("stream", stream))
+			if stream {
+				sendMockInterceptStream(c, model, interceptType)
+			} else {
+				sendMockInterceptResponse(c, model, interceptType)
+			}
+			return true
+		}
+	}
+
+	// max_tokens=1 若未被上面的预热分支接走（例如该开关关闭、或非 haiku 模型），
+	// 不能落到下面的问候拦截：客户端期待被 max_tokens 截断的响应，
+	// 返回完整问候会让 stop_reason 变成 end_turn，与预期不符。
 	if maxTokens == 1 {
 		return false
 	}

@@ -39,7 +39,7 @@ func TestInterceptNonUpstreamRequest_ProbeTool(t *testing.T) {
 		"messages":[{"role":"user","content":"hi"}]}`)
 
 	// Act
-	intercepted := h.interceptNonUpstreamRequest(c, body, "claude-opus-4-8", 1024, false, zap.NewNop())
+	intercepted := h.interceptNonUpstreamRequest(c, body, "claude-opus-4-8", 1024, false, false, zap.NewNop())
 
 	// Assert
 	if !intercepted {
@@ -82,7 +82,7 @@ func TestInterceptNonUpstreamRequest_Greeting(t *testing.T) {
 		c, rec := newInterceptTestContext()
 		body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[{"role":"user","content":"hi"}]}`)
 
-		intercepted := h.interceptNonUpstreamRequest(c, body, "claude-opus-4-8", 1024, false, zap.NewNop())
+		intercepted := h.interceptNonUpstreamRequest(c, body, "claude-opus-4-8", 1024, false, false, zap.NewNop())
 
 		if !intercepted {
 			t.Fatalf("intercepted = false, want true")
@@ -122,7 +122,7 @@ func TestInterceptNonUpstreamRequest_Greeting(t *testing.T) {
 		c, rec := newInterceptTestContext()
 		body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[{"role":"user","content":"你好"}]}`)
 
-		intercepted := h.interceptNonUpstreamRequest(c, body, "claude-opus-4-8", 1024, true, zap.NewNop())
+		intercepted := h.interceptNonUpstreamRequest(c, body, "claude-opus-4-8", 1024, true, false, zap.NewNop())
 
 		if !intercepted {
 			t.Fatalf("intercepted = false, want true")
@@ -200,7 +200,7 @@ func TestInterceptNonUpstreamRequest_LetThrough(t *testing.T) {
 			h := newInterceptTestHandler(tt.probeTools, tt.greeting)
 			c, rec := newInterceptTestContext()
 
-			intercepted := h.interceptNonUpstreamRequest(c, []byte(tt.body), "claude-opus-4-8", tt.maxTokens, false, zap.NewNop())
+			intercepted := h.interceptNonUpstreamRequest(c, []byte(tt.body), "claude-opus-4-8", tt.maxTokens, false, false, zap.NewNop())
 
 			if intercepted {
 				t.Errorf("intercepted = true, want false (%s); body written: %s", tt.reason, rec.Body.String())
@@ -266,7 +266,7 @@ func TestInterceptNonUpstreamRequest_LivenessTiers(t *testing.T) {
 			c, rec := newInterceptTestContext()
 			c.Request.Header.Set("User-Agent", tt.userAgent)
 
-			got := h.interceptNonUpstreamRequest(c, []byte(tt.body), "claude-opus-4-8", 1024, false, zap.NewNop())
+			got := h.interceptNonUpstreamRequest(c, []byte(tt.body), "claude-opus-4-8", 1024, false, false, zap.NewNop())
 
 			if got != tt.want {
 				t.Errorf("intercepted = %v, want %v (%s); body: %s", got, tt.want, tt.reason, rec.Body.String())
@@ -281,7 +281,7 @@ func TestInterceptNonUpstreamRequest_ProbeTakesPrecedence(t *testing.T) {
 	c, rec := newInterceptTestContext()
 	body := []byte(`{"tools":[{"type":"zzz_probe_00000000"}],"messages":[{"role":"user","content":"hi"}]}`)
 
-	intercepted := h.interceptNonUpstreamRequest(c, body, "claude-opus-4-8", 1024, false, zap.NewNop())
+	intercepted := h.interceptNonUpstreamRequest(c, body, "claude-opus-4-8", 1024, false, false, zap.NewNop())
 
 	if !intercepted {
 		t.Fatalf("intercepted = false, want true")
@@ -296,7 +296,71 @@ func TestInterceptNonUpstreamRequest_NilConfig(t *testing.T) {
 	h := &GatewayHandler{}
 	c, _ := newInterceptTestContext()
 
-	if h.interceptNonUpstreamRequest(c, []byte(`{"messages":[{"role":"user","content":"hi"}]}`), "m", 1024, false, zap.NewNop()) {
+	if h.interceptNonUpstreamRequest(c, []byte(`{"messages":[{"role":"user","content":"hi"}]}`), "m", 1024, false, false, zap.NewNop()) {
 		t.Errorf("intercepted = true, want false when cfg is nil")
 	}
+}
+
+// 预热类拦截（Warmup / SUGGESTION MODE / max_tokens=1 haiku 探测）上移到账号选择
+// 之前后的接入点验证。这些请求原本也不发上游，但会先排并发队列、占账号槽，
+// 槽位打满时甚至先拿到 503；现在应恒定秒回。
+func TestInterceptNonUpstreamRequest_WarmupTier(t *testing.T) {
+	newWarmupHandler := func(warmup bool) *GatewayHandler {
+		cfg := &config.Config{}
+		cfg.Gateway.InterceptWarmup = warmup
+		cfg.Gateway.InterceptProbeTools = true
+		cfg.Gateway.InterceptGreeting = true
+		return &GatewayHandler{cfg: cfg}
+	}
+
+	t.Run("max_tokens=1 + haiku 返回 max_tokens 截断形态", func(t *testing.T) {
+		h := newWarmupHandler(true)
+		c, rec := newInterceptTestContext()
+		body := []byte(`{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`)
+
+		intercepted := h.interceptNonUpstreamRequest(c, body, "claude-haiku-4-5-20251001", 1, false, true, zap.NewNop())
+
+		if !intercepted {
+			t.Fatalf("intercepted = false, want true")
+		}
+		var resp struct {
+			StopReason string `json:"stop_reason"`
+			Content    []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("invalid JSON: %v (%s)", err, rec.Body.String())
+		}
+		// 客户端据此判定连通性，形态不能变成 end_turn
+		if resp.StopReason != "max_tokens" {
+			t.Errorf("stop_reason = %q, want max_tokens", resp.StopReason)
+		}
+		if len(resp.Content) != 1 || resp.Content[0].Text != "#" {
+			t.Errorf("content = %+v, want single \"#\" block", resp.Content)
+		}
+	})
+
+	t.Run("Warmup 请求被拦", func(t *testing.T) {
+		h := newWarmupHandler(true)
+		c, rec := newInterceptTestContext()
+		body := []byte(`{"model":"claude-opus-4-8","max_tokens":512,"messages":[{"role":"user","content":[{"type":"text","text":"Warmup"}]}]}`)
+
+		if !h.interceptNonUpstreamRequest(c, body, "claude-opus-4-8", 512, false, true, zap.NewNop()) {
+			t.Fatalf("intercepted = false, want true; body: %s", rec.Body.String())
+		}
+	})
+
+	t.Run("开关关闭时 max_tokens=1 让行而非落到问候拦截", func(t *testing.T) {
+		h := newWarmupHandler(false)
+		c, rec := newInterceptTestContext()
+		body := []byte(`{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`)
+
+		if h.interceptNonUpstreamRequest(c, body, "claude-haiku-4-5-20251001", 1, false, true, zap.NewNop()) {
+			t.Errorf("intercepted = true, want false; body: %s", rec.Body.String())
+		}
+		if rec.Body.Len() != 0 {
+			t.Errorf("let-through must not write a response: %s", rec.Body.String())
+		}
+	})
 }

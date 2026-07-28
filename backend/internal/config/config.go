@@ -974,6 +974,14 @@ type GatewayConfig struct {
 	// 是否允许对部分 400 错误触发 failover（默认关闭以避免改变语义）
 	FailoverOn400 bool `mapstructure:"failover_on_400"`
 
+	// 是否在账号选择之前拦截 Claude Code 的预热类请求（Warmup / SUGGESTION MODE /
+	// max_tokens=1 haiku 探测），默认开启。
+	//
+	// 这些请求原先由账号级开关 credentials.intercept_warmup_requests 控制，且在
+	// 选完账号之后才拦——虽然同样不发上游，但已经排过用户并发队列、占过账号并发槽，
+	// 在槽位紧张时甚至会先拿到 503。提前到账号选择之前后，它们恒定秒回。
+	InterceptWarmup bool `mapstructure:"intercept_warmup"`
+
 	// 是否本地拦截人造探针工具类型的请求（默认开启）。
 	// 命中时返回与官方 Anthropic 形态一致的 400，不发上游、不占并发槽。
 	InterceptProbeTools bool `mapstructure:"intercept_probe_tools"`
@@ -2202,6 +2210,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.log_upstream_error_body_max_bytes", 2048)
 	viper.SetDefault("gateway.inject_beta_for_apikey", false)
 	viper.SetDefault("gateway.failover_on_400", false)
+	viper.SetDefault("gateway.intercept_warmup", true)
 	viper.SetDefault("gateway.intercept_probe_tools", true)
 	viper.SetDefault("gateway.intercept_greeting", true)
 	viper.SetDefault("gateway.max_account_switches", 10)

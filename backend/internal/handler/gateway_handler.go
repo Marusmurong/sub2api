@@ -212,7 +212,7 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	// 必须放在这里：位于用户并发槽（下方 AcquireUserSlotWithWait）与账号选择之前，
 	// 因此探针与健康检查既不占并发槽、也不发上游。既有的 warmup/SUGGESTION 拦截
 	// 在账号选完之后才生效（还要手动 ReleaseFunc），对"打满并发槽"型的流量无效。
-	if h.interceptNonUpstreamRequest(c, body, reqModel, parsedReq.MaxTokens, reqStream, reqLog) {
+	if h.interceptNonUpstreamRequest(c, body, reqModel, parsedReq.MaxTokens, reqStream, isClaudeCodeClient, reqLog) {
 		return
 	}
 
@@ -363,21 +363,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			account := selection.Account
 			setOpsSelectedAccount(c, account.ID, account.Platform)
 
-			// 检查请求拦截（预热请求、SUGGESTION MODE等）
-			if account.IsInterceptWarmupEnabled() {
-				interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, isClaudeCodeClient)
-				if interceptType != InterceptTypeNone {
-					if selection.Acquired && selection.ReleaseFunc != nil {
-						selection.ReleaseFunc()
-					}
-					if reqStream {
-						sendMockInterceptStream(c, reqModel, interceptType)
-					} else {
-						sendMockInterceptResponse(c, reqModel, interceptType)
-					}
-					return
-				}
-			}
+			// 注：预热 / SUGGESTION MODE / max_tokens=1 探测的拦截已上移到账号选择
+			// 之前（见 interceptNonUpstreamRequest）。放在这里时请求已排过并发队列、
+			// 占过账号槽，槽位打满时甚至会先拿到 503。
 
 			// 3. 获取账号并发槽位
 			accountReleaseFunc := selection.ReleaseFunc
@@ -663,21 +651,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				zap.Bool("sticky_honored", sessionBoundAccountID > 0 && sessionBoundAccountID == account.ID),
 			)
 
-			// 检查请求拦截（预热请求、SUGGESTION MODE等）
-			if account.IsInterceptWarmupEnabled() {
-				interceptType := detectInterceptType(body, reqModel, parsedReq.MaxTokens, isClaudeCodeClient)
-				if interceptType != InterceptTypeNone {
-					if selection.Acquired && selection.ReleaseFunc != nil {
-						selection.ReleaseFunc()
-					}
-					if reqStream {
-						sendMockInterceptStream(c, reqModel, interceptType)
-					} else {
-						sendMockInterceptResponse(c, reqModel, interceptType)
-					}
-					return
-				}
-			}
+			// 注：预热 / SUGGESTION MODE / max_tokens=1 探测的拦截已上移到账号选择
+			// 之前（见 interceptNonUpstreamRequest）。放在这里时请求已排过并发队列、
+			// 占过账号槽，槽位打满时甚至会先拿到 503。
 
 			// 3. 获取账号并发槽位
 			accountReleaseFunc := selection.ReleaseFunc
