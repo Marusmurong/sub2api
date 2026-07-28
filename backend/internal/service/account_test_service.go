@@ -52,8 +52,17 @@ type TestEvent struct {
 	Error    string `json:"error,omitempty"`
 }
 
+// defaultConnectivityTestPrompt 是账号连通性探测统一使用的提示词。
+//
+// 刻意不用 "hi"：那是各家中转健康检查的通用文案，上游看到"同一批账号反复收到
+// 完全相同的极短请求"是明显的中转特征。换成一句自然的开发者提问，既降低这种
+// 特征，也不会被网关侧的纯问候语拦截命中（见 handler/probe_intercept.go）。
+//
+// 要求：短、语义明确、不属于问候语。改这里即可全局生效。
+const defaultConnectivityTestPrompt = "What does the git status command show?"
+
 const (
-	defaultGeminiTextTestPrompt  = "hi"
+	defaultGeminiTextTestPrompt  = defaultConnectivityTestPrompt
 	defaultGeminiImageTestPrompt = "Generate a cute orange cat astronaut sticker on a clean pastel background."
 	defaultOpenAIImageTestPrompt = "Generate a cute orange cat astronaut sticker on a clean pastel background."
 )
@@ -147,7 +156,7 @@ func createTestPayload(modelID string) (map[string]any, error) {
 				"content": []map[string]any{
 					{
 						"type": "text",
-						"text": "hi",
+						"text": defaultConnectivityTestPrompt,
 						"cache_control": map[string]string{
 							"type": "ephemeral",
 						},
@@ -424,7 +433,7 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 				"content": []map[string]any{
 					{
 						"type": "text",
-						"text": "hi",
+						"text": defaultConnectivityTestPrompt,
 					},
 				},
 			},
@@ -1446,7 +1455,7 @@ func createOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
 				"content": []map[string]any{
 					{
 						"type": "input_text",
-						"text": "hi",
+						"text": defaultConnectivityTestPrompt,
 					},
 				},
 			},
@@ -1468,7 +1477,7 @@ func createOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
 func createOpenAIChatCompletionsTestPayload(modelID string, prompt string) map[string]any {
 	testPrompt := strings.TrimSpace(prompt)
 	if testPrompt == "" {
-		testPrompt = "hi"
+		testPrompt = defaultConnectivityTestPrompt
 	}
 
 	return map[string]any{

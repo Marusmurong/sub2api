@@ -207,6 +207,15 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 
+	// 本地拦截"不该消耗上游配额"的请求。
+	//
+	// 必须放在这里：位于用户并发槽（下方 AcquireUserSlotWithWait）与账号选择之前，
+	// 因此探针与健康检查既不占并发槽、也不发上游。既有的 warmup/SUGGESTION 拦截
+	// 在账号选完之后才生效（还要手动 ReleaseFunc），对"打满并发槽"型的流量无效。
+	if h.interceptNonUpstreamRequest(c, body, reqModel, parsedReq.MaxTokens, reqStream, reqLog) {
+		return
+	}
+
 	if decision := h.checkSecurityAudit(c, reqLog, apiKey, subject, service.ContentModerationProtocolAnthropicMessages, reqModel, body); decision != nil && !decision.AllowNextStage {
 		h.anthropicSecurityAuditError(c, decision)
 		return

@@ -974,6 +974,16 @@ type GatewayConfig struct {
 	// 是否允许对部分 400 错误触发 failover（默认关闭以避免改变语义）
 	FailoverOn400 bool `mapstructure:"failover_on_400"`
 
+	// 是否本地拦截人造探针工具类型的请求（默认开启）。
+	// 命中时返回与官方 Anthropic 形态一致的 400，不发上游、不占并发槽。
+	InterceptProbeTools bool `mapstructure:"intercept_probe_tools"`
+
+	// 是否本地拦截纯问候语请求（默认开启）。
+	// 主要拦其他中转的健康检查（new-api / sub2api 一类默认发 "hi"），
+	// 命中时返回一句自然的问候回复，不发上游、不占并发槽。
+	// 判定极窄：单条 user 消息 + 无 tools + 无实质 system + 内容为纯问候。
+	InterceptGreeting bool `mapstructure:"intercept_greeting"`
+
 	// 账户切换最大次数（遇到上游错误时切换到其他账户的次数上限）
 	MaxAccountSwitches int `mapstructure:"max_account_switches"`
 	// Gemini 账户切换最大次数（Gemini 平台单独配置，因 API 限制更严格）
@@ -2192,6 +2202,8 @@ func setDefaults() {
 	viper.SetDefault("gateway.log_upstream_error_body_max_bytes", 2048)
 	viper.SetDefault("gateway.inject_beta_for_apikey", false)
 	viper.SetDefault("gateway.failover_on_400", false)
+	viper.SetDefault("gateway.intercept_probe_tools", true)
+	viper.SetDefault("gateway.intercept_greeting", true)
 	viper.SetDefault("gateway.max_account_switches", 10)
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
 	viper.SetDefault("gateway.force_codex_cli", false)
