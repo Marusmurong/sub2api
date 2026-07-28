@@ -348,6 +348,21 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	if err := replaceBody(FilterThinkingBlocks(body, reqModel)); err != nil {
 		return nil, err
 	}
+	// 跨账号复用会话：上一轮的 thinking 签名由别的账号签发，本账号必然拒绝
+	// （"Invalid `signature` in `thinking` block"，生产实测约 595 次/天）。
+	// 与上面的 FilterThinkingBlocks 互补——那个处理"签名字段缺失"，这里处理
+	// "签名有效但属于另一个账号"。详见 stripThinkingForAccountSwitch 的说明：
+	// 换账号时 prompt 缓存本就是冷的，剥离零损失；同账号路径完全不动。
+	if boundAccountID := prefetchedStickyAccountIDFromContext(ctx, parsed.GroupID); boundAccountID > 0 {
+		if filtered, applied := stripThinkingForAccountSwitch(body, reqModel, boundAccountID, account.ID); applied {
+			if err := replaceBody(filtered); err != nil {
+				return nil, err
+			}
+			logger.LegacyPrintf("service.gateway",
+				"Account %d: session was bound to account %d, pre-stripped thinking blocks (cross-account signatures are always rejected)",
+				account.ID, boundAccountID)
+		}
+	}
 	// Chinese LLM thinking.type 协议差异补正（如 MiniMax 只接受 adaptive；Anthropic-SDK
 	// 客户端默认发 enabled）。仅对 passback-required 上游生效（claude-* 不会进来）。
 	if ResolveThinkingProtocol(reqModel) == ThinkingProtocolPassbackRequired {
