@@ -122,6 +122,12 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		body = sanitized
 	}
 
+	// schema 维度 body sanitize：stream_options / effort / adaptive thinking 等
+	// 会被上游按 400 拒收的字段，本地改好再转发。
+	if sanitized, changed := sanitizeAnthropicRequestFields(body, modelID); changed {
+		body = sanitized
+	}
+
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err
@@ -488,6 +494,30 @@ func mergeAnthropicBetaDropping(required []string, incoming string, drop map[str
 // 未传”处理。body 是已经 metadata 重写 / billing version sync 之后但未 sanitize 上游
 // 不兼容字段之前的版本。
 func (s *GatewayService) computeFinalAnthropicBeta(
+	tokenType string,
+	mimicClaudeCode bool,
+	modelID string,
+	clientHeaders http.Header,
+	body []byte,
+	effectiveDropSet map[string]struct{},
+) (string, bool) {
+	value, shouldSet := s.computeBaseAnthropicBeta(tokenType, mimicClaudeCode, modelID, clientHeaders, body, effectiveDropSet)
+
+	// 能力补齐：body 用到了某个需要 beta 才被上游 schema 承认的能力（当前是
+	// computer-use 工具），但 header 没带对应 token 时补上。缺这一步会得到
+	// "Input tag 'computer_20250124' ... does not match any of the expected tags"。
+	//
+	// 注意必须能把 shouldSet 从 false 抬成 true：API-key 账号在客户端未传 beta 时
+	// 原本不设置该 header，但只要 body 里有 computer 工具就必须设置，否则必然 400。
+	if injected, changed := injectRequiredBetaTokens(value, body, effectiveDropSet); changed {
+		return injected, true
+	}
+	return value, shouldSet
+}
+
+// computeBaseAnthropicBeta 是 computeFinalAnthropicBeta 的原始计算逻辑（不含
+// body 能力补齐），按 token 类型与 mimicry 分支决定基础 beta 集合。
+func (s *GatewayService) computeBaseAnthropicBeta(
 	tokenType string,
 	mimicClaudeCode bool,
 	modelID string,

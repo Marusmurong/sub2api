@@ -335,6 +335,11 @@ func (s *GatewayService) buildUpstreamRequestAnthropicAPIKeyPassthrough(
 		body = sanitized
 	}
 
+	// schema 维度 body sanitize：同上，模型取 body.model。
+	if sanitized, changed := sanitizeAnthropicRequestFields(body, gjson.GetBytes(body, "model").String()); changed {
+		body = sanitized
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err

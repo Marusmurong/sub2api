@@ -205,6 +205,13 @@ func PrepareBedrockRequestBodyWithTokens(body []byte, modelID string, betaTokens
 		body = sanitized
 	}
 
+	// schema 维度 body sanitize：stream_options / effort 档位等。
+	// 注意 output_config 在下方会被整体删除（Bedrock Invoke 不支持），这里的
+	// effort 处理主要对 stream_options 与 thinking 生效，保持三条路径逻辑一致。
+	if sanitized, changed := sanitizeAnthropicRequestFields(body, modelID); changed {
+		body = sanitized
+	}
+
 	// 注入 anthropic_version（Bedrock 要求）
 	body, err = sjson.SetBytes(body, "anthropic_version", "bedrock-2023-05-31")
 	if err != nil {
