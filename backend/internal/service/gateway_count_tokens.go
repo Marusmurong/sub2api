@@ -59,7 +59,12 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	shouldMimicClaudeCode := account.IsOAuth() && !isClaudeCodeCT
 
 	if shouldMimicClaudeCode {
-		normalizeOpts := claudeOAuthNormalizeOptions{stripSystemCacheControl: true}
+		// count_tokens 是严格 schema，出现 max_tokens/temperature 会被 400
+		// `Extra inputs are not permitted`，故不补这两个只属于 /v1/messages 的字段。
+		normalizeOpts := claudeOAuthNormalizeOptions{
+			stripSystemCacheControl: true,
+			skipMessagesOnlyFields:  true,
+		}
 		var normalizedBody []byte
 		normalizedBody, reqModel = normalizeClaudeOAuthRequestBody(body, reqModel, normalizeOpts)
 		if err := replaceBody(normalizedBody); err != nil {

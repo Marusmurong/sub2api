@@ -264,7 +264,23 @@ func applyToolsLastCacheBreakpoint(body []byte) []byte {
 	if len(arr) == 0 {
 		return body
 	}
-	lastIdx := len(arr) - 1
+
+	// 断点必须落在未延迟加载的 tool 上：上游对 defer_loading=true 且带 cache_control
+	// 的 tool 直接 400 —— `Tool 'X' cannot have both defer_loading=true and
+	// cache_control set`。从尾部往前找第一个可承载断点的 tool；全都延迟加载时
+	// 不打断点（宁可少一个缓存断点，也不要整个请求被拒）。
+	lastIdx := -1
+	for i := len(arr) - 1; i >= 0; i-- {
+		if arr[i].Get("defer_loading").Bool() {
+			continue
+		}
+		lastIdx = i
+		break
+	}
+	if lastIdx < 0 {
+		return body
+	}
+
 	existingCC := arr[lastIdx].Get("cache_control")
 
 	if existingCC.Exists() && existingCC.Get("ttl").String() != "" {

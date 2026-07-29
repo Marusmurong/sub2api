@@ -45,6 +45,15 @@ type claudeOAuthNormalizeOptions struct {
 	injectMetadata          bool
 	metadataUserID          string
 	stripSystemCacheControl bool
+
+	// skipMessagesOnlyFields 跳过只属于 /v1/messages 的字段补齐（max_tokens、temperature）。
+	//
+	// /v1/messages/count_tokens 是严格 schema：出现它不认识的字段直接 400
+	// `Extra inputs are not permitted`。我们为对齐真实 CLI 而补的 max_tokens/temperature
+	// 恰好是该端点不接受的，补了就打不通。
+	//
+	// 采取「不注入」而非「注入后再剥离」：少一次改写，也不必猜该端点还拒绝哪些字段。
+	skipMessagesOnlyFields bool
 }
 
 // sanitizeSystemText rewrites only the fixed OpenCode identity sentence (if present).
@@ -261,21 +270,25 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 		}
 	}
 
-	// temperature：真实 Claude Code CLI 总是发送 temperature（默认 1，客户端可覆盖）。
-	// 之前的实现直接 delete 会导致 payload 缺字段，与真实 CLI 字节级不一致。
-	// 策略：客户端传了什么就透传；没传则补默认 1。
-	if !gjson.GetBytes(out, "temperature").Exists() {
-		if next, ok := setJSONValueBytes(out, "temperature", 1); ok {
-			out = next
-			modified = true
+	// temperature / max_tokens 只在 /v1/messages 上补齐；count_tokens 不接受它们，
+	// 见 claudeOAuthNormalizeOptions.skipMessagesOnlyFields。
+	if !opts.skipMessagesOnlyFields {
+		// temperature：真实 Claude Code CLI 总是发送 temperature（默认 1，客户端可覆盖）。
+		// 之前的实现直接 delete 会导致 payload 缺字段，与真实 CLI 字节级不一致。
+		// 策略：客户端传了什么就透传；没传则补默认 1。
+		if !gjson.GetBytes(out, "temperature").Exists() {
+			if next, ok := setJSONValueBytes(out, "temperature", 1); ok {
+				out = next
+				modified = true
+			}
 		}
-	}
 
-	// max_tokens：真实 CLI 的默认值是 128000。缺失时补齐以对齐指纹。
-	if !gjson.GetBytes(out, "max_tokens").Exists() {
-		if next, ok := setJSONValueBytes(out, "max_tokens", 128000); ok {
-			out = next
-			modified = true
+		// max_tokens：真实 CLI 的默认值是 128000。缺失时补齐以对齐指纹。
+		if !gjson.GetBytes(out, "max_tokens").Exists() {
+			if next, ok := setJSONValueBytes(out, "max_tokens", 128000); ok {
+				out = next
+				modified = true
+			}
 		}
 	}
 
