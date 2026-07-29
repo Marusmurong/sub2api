@@ -4,6 +4,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
+	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/tidwall/gjson"
 )
@@ -15,26 +18,56 @@ import (
 // 进一步触发 Anthropic 的第三方检测。
 const fingerprintSalt = "59cf53e54c78"
 
+// fingerprintCharIndices 是真实 CLI 的取样位置。语义是 JS 字符串下标，
+// 即 UTF-16 code unit，见 fingerprintSampleChars。
+var fingerprintCharIndices = []int{4, 7, 20}
+
+// fingerprintSampleChars 按真实 CLI 的语义在 text 上取样。
+//
+// 真实 CLI 是 JS，text[i] 索引的是 **UTF-16 code unit**——既不是字节，也不是码点：
+//
+//	ASCII        三者一致
+//	中文         一个字符 3 字节 / 1 个 code unit；按字节取会落在 UTF-8 续字节上，
+//	             取到的是半个字的碎片而非字符
+//	星外字符     emoji 等占 1 个码点 / 2 个 code unit；按码点取又会与 CLI 错位
+//
+// 因此只有 UTF-16 与 CLI 对齐。越界位置补 '0'，与 CLI 一致。
+func fingerprintSampleChars(text string) string {
+	units := utf16.Encode([]rune(text))
+	var b strings.Builder
+	for _, i := range fingerprintCharIndices {
+		if i >= len(units) {
+			b.WriteByte('0')
+			continue
+		}
+		b.WriteRune(decodeUTF16Unit(units[i]))
+	}
+	return b.String()
+}
+
+// decodeUTF16Unit 还原单个 UTF-16 code unit 对应的字符。
+//
+// 取样点落在代理对的任一半时返回 U+FFFD：JS 的 text[i] 拿到的正是一个孤立代理项，
+// 而孤立代理项在 UTF-8 编码时就是替换字符——哈希的输入因此是 U+FFFD 而非原字符。
+func decodeUTF16Unit(u uint16) rune {
+	if u >= 0xD800 && u <= 0xDFFF {
+		return utf8.RuneError
+	}
+	return rune(u)
+}
+
 // computeClaudeCodeFingerprint 复刻真实 Claude Code CLI 的 cc_version 指纹算法：
 //
 //  1. 取 messages 中第一条 role=user 的纯文本（首块 text）
-//  2. 取该文本的第 4、7、20 字符（不足以 '0' 补齐）
+//  2. 取该文本的第 4、7、20 字符（不足以 '0' 补齐，见 fingerprintSampleChars）
 //  3. SHA256(SALT + chars + cc_version) 取 hex 前 3 字符
 //
 // 算法来自 Parrot src/transform/cc_mimicry.py:compute_fingerprint，与官方 CLI 字节对齐。
-// 任何偏差都会导致 cc_version=X.Y.Z.{fp} 在上游侧与真实 CLI 不一致。
+// 任何偏差都会导致 cc_version=X.Y.Z.{fp} 在上游侧与真实 CLI 不一致——而上游持有
+// messages 与 cc_version，可以自行复算比对，这是一条确定性校验而非概率特征。
 func computeClaudeCodeFingerprint(body []byte, version string) string {
-	firstText := extractFirstUserText(body)
-	indices := []int{4, 7, 20}
-	chars := make([]byte, 0, 3)
-	for _, i := range indices {
-		if i < len(firstText) {
-			chars = append(chars, firstText[i])
-		} else {
-			chars = append(chars, '0')
-		}
-	}
-	sum := sha256.Sum256([]byte(fingerprintSalt + string(chars) + version))
+	chars := fingerprintSampleChars(extractFirstUserText(body))
+	sum := sha256.Sum256([]byte(fingerprintSalt + chars + version))
 	return hex.EncodeToString(sum[:])[:3]
 }
 
