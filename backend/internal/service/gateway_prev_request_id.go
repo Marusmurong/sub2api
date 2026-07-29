@@ -4,8 +4,10 @@ import (
 	"context"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 )
@@ -111,6 +113,50 @@ func (s *GatewayService) lookupPrevRequestID(ctx context.Context, account *Accou
 		return ""
 	}
 	return id
+}
+
+// persistFingerprintClientID 把 ClientID 落到 accounts.extra.fingerprint.client_id。
+//
+// ClientID 决定 metadata.user_id 的 device_id。它原本只存在于 Redis（7 天 TTL + 每 24
+// 小时懒续期），于是：账号闲置超 7 天会换 device_id（弱信号，可接受），而 **Redis 整体
+// 丢失会让全池账号在同一天集体更换 device_id**——单账号换机器很正常，一批账号同时换
+// 不正常，且旧值一旦丢失不可恢复。
+//
+// 写入后 resolveForcedFingerprintSpec 的取值优先级 extra → redis → 生成 会命中 extra，
+// 身份不再依赖 Redis 存活。
+//
+// 只对已走强制指纹路径的账号写（extra.fingerprint 非空或启用了 TLS 指纹）。legacy 路径
+// 的账号不写：给它们凭空造出 extra.fingerprint 会让 HasForcedFingerprint() 翻真，
+// 把"按客户端头派生"改成"锁定身份"，那是行为变更而非持久化。
+//
+// 每账号只写一次（值已一致就跳过），失败只告警不影响请求。
+func (s *GatewayService) persistFingerprintClientID(ctx context.Context, account *Account, fp *Fingerprint) {
+	if s == nil || s.accountRepo == nil || account == nil || fp == nil {
+		return
+	}
+	clientID := strings.TrimSpace(fp.ClientID)
+	if clientID == "" || !account.HasForcedFingerprint() {
+		return
+	}
+
+	existing := account.rawFingerprintMap()
+	if v, _ := existing["client_id"].(string); strings.TrimSpace(v) == clientID {
+		return
+	}
+
+	merged := make(map[string]any, len(existing)+1)
+	for k, v := range existing {
+		merged[k] = v
+	}
+	merged["client_id"] = clientID
+
+	if err := s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{"fingerprint": merged}); err != nil {
+		logger.LegacyPrintf("service.gateway",
+			"Warning: failed to persist fingerprint client_id for account %d: %v", account.ID, err)
+		return
+	}
+	logger.LegacyPrintf("service.gateway",
+		"Persisted fingerprint client_id for account %d (was redis-only)", account.ID)
 }
 
 // rememberUpstreamRequestID 在上游接受本轮请求后记录 request id，供下一轮作 parent-link。

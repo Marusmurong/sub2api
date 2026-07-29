@@ -69,6 +69,10 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 				fingerprint = fp
 			}
 
+			// 1.5 ClientID 落库：它决定 metadata.user_id 的 device_id，原本只存在于
+			// Redis，实例丢失会让全池账号同时更换 device_id。每账号只写一次。
+			s.persistFingerprintClientID(ctx, account, fp)
+
 			// 2. 重写metadata.user_id（需要指纹中的ClientID和账号的account_uuid）
 			// 如果启用了会话ID伪装，会在重写后替换 session 部分为固定值
 			// 当 metadata 透传开启时跳过重写
