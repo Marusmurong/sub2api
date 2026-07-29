@@ -21,6 +21,17 @@ import (
 // It is intentionally not advertised; value is a secret, not a boolean flag.
 const HeaderName = "X-Sub2API-Admin-Probe"
 
+// ConnectivityTestUserText is the fixed user message used by Admin account
+// connectivity tests (AccountTestService). The gateway also treats this exact
+// sole-user-text shape as an admin probe so self-looped tests cannot be
+// mistaken for external HI liveness traffic.
+const ConnectivityTestUserText = "What does the git status command show?"
+
+// UserAgent is set on admin-initiated outbound probes that would otherwise use
+// Go's default client UA. Must NOT contain markers from isProbeUserAgent
+// ("probe", "monitor", "healthcheck", ...).
+const UserAgent = "Sub2API-AdminCheck/1.0"
+
 var (
 	mu    sync.RWMutex
 	token = generateToken()
@@ -60,6 +71,9 @@ func Token() string {
 
 // Apply sets the trusted admin-probe marker on an outbound request.
 // Call after any account-level header overrides so the marker cannot be stripped.
+//
+// Also normalizes bare Go default User-Agents so logs can attribute admin checks,
+// without matching gateway isProbeUserAgent markers.
 func Apply(h http.Header) {
 	if h == nil {
 		return
@@ -74,6 +88,11 @@ func Apply(h http.Header) {
 		}
 	}
 	h.Set(HeaderName, v)
+
+	ua := strings.TrimSpace(h.Get("User-Agent"))
+	if ua == "" || strings.HasPrefix(ua, "Go-http-client/") {
+		h.Set("User-Agent", UserAgent)
+	}
 }
 
 // IsTrusted reports whether the request carries a valid admin-probe marker.

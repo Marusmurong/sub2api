@@ -85,12 +85,22 @@ func (h *GatewayHandler) interceptNonUpstreamRequest(
 		return false
 	}
 
-	// Admin UI 主动发起的账号连通性 / 渠道监控检测（AccountTest、channel_monitor）
-	// 会在出站请求上打 adminprobe 密钥头。这些请求必须穿透测活拦截，否则管理员
-	// 只能看到本地假问候、无法判断真实账号状态。外部客户端无法伪造该密钥。
+	// Admin UI 主动探测必须穿透测活拦截，否则管理员只能看到本地假问候、
+	// 无法判断账号是否真挂。识别信号（任一即可）：
+	//   1) 出站密钥头 X-Sub2API-Admin-Probe（AccountTest / channel_monitor 写入）
+	//   2) Admin 账号连通性测试的固定 user 文案（自环到本网关时的兜底）
+	// 外部客户端可抄文案 2，但抄了就会真发上游、产生费用，不会白嫖测活假回复。
 	// 注意：此旁路只作用于问候/测活；探针工具（zzz_*）仍按上面分支拦截。
 	if c != nil && c.Request != nil && adminprobe.IsTrusted(c.Request.Header) {
 		reqLog.Info("gateway.skip_liveness_intercept_admin_probe",
+			zap.String("reason", "header"),
+			zap.String("model", model),
+			zap.Bool("stream", stream))
+		return false
+	}
+	if isAdminAccountConnectivityTestBody(body) {
+		reqLog.Info("gateway.skip_liveness_intercept_admin_probe",
+			zap.String("reason", "account_test_body"),
 			zap.String("model", model),
 			zap.Bool("stream", stream))
 		return false
@@ -215,6 +225,28 @@ var greetingTexts = map[string]struct{}{
 	"hi": {}, "hello": {}, "hey": {}, "yo": {},
 	"hi there": {}, "hello there": {},
 	"你好": {}, "您好": {}, "哈喽": {}, "哈啰": {}, "嗨": {},
+}
+
+// isAdminAccountConnectivityTestBody 识别 Admin「测试连接」出站 body：
+// 恰好一条 user 消息，且纯文本等于 AccountTest 固定探测句。
+// 该句刻意不是问候语；用于自环到本网关时即使密钥头丢失也能穿透测活拦截。
+func isAdminAccountConnectivityTestBody(body []byte) bool {
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		return false
+	}
+	messages := gjson.GetBytes(body, "messages")
+	if !messages.IsArray() {
+		return false
+	}
+	arr := messages.Array()
+	if len(arr) != 1 || arr[0].Get("role").String() != "user" {
+		return false
+	}
+	text, ok := plainTextOfMessageContent(arr[0].Get("content"))
+	if !ok {
+		return false
+	}
+	return strings.TrimSpace(text) == adminprobe.ConnectivityTestUserText
 }
 
 // greetingTrimCutset 是归一化时剥掉的首尾标点与空白。

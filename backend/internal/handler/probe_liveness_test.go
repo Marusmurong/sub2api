@@ -40,9 +40,19 @@ func TestHasSessionMarker(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "Claude Code 带 session 的 metadata",
+			name: "Claude Code 带 session 的 metadata（旧拼接）",
 			body: `{"metadata":{"user_id":"user_abc123_account__session_9f8e7d6c-1111-2222-3333-444455556666"}}`,
 			want: true,
+		},
+		{
+			name: "Claude Code JSON user_id 含 session_id",
+			body: `{"metadata":{"user_id":"{\"device_id\":\"abc\",\"account_uuid\":\"\",\"session_id\":\"9f8e7d6c-1111-2222-3333-444455556666\"}"}}`,
+			want: true,
+		},
+		{
+			name: "JSON user_id 有 device 无 session_id",
+			body: `{"metadata":{"user_id":"{\"device_id\":\"abc\",\"account_uuid\":\"\",\"session_id\":\"\"}"}}`,
+			want: false,
 		},
 		{
 			name: "metadata 存在但无 session 段",
@@ -60,6 +70,14 @@ func TestHasSessionMarker(t *testing.T) {
 				t.Errorf("hasSessionMarker(%s) = %v, want %v", tt.body, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestIsLivenessProbeRequest_JSONSessionStrictTier(t *testing.T) {
+	// 新 CLI JSON session + 大 system + hi 必须走严格档（不拦）
+	body := `{"metadata":{"user_id":"{\"device_id\":\"abc\",\"session_id\":\"9f8e7d6c-1111-2222-3333-444455556666\"}"},"system":"You are Claude Code","messages":[{"role":"user","content":"hi"}]}`
+	if isLivenessProbeRequest([]byte(body)) {
+		t.Fatal("JSON session + system + hi must NOT intercept")
 	}
 }
 

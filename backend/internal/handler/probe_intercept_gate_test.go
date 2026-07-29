@@ -318,6 +318,17 @@ func TestInterceptNonUpstreamRequest_AdminProbeSkipsLiveness(t *testing.T) {
 	}
 }
 
+func TestInterceptNonUpstreamRequest_AdminAccountTestBodySkipsLiveness(t *testing.T) {
+	// Admin「测试连接」固定探测句：即使密钥头丢失（自环/代理），也不能当 HI 拦掉。
+	h := newInterceptTestHandler(true, true)
+	c, rec := newInterceptTestContext()
+	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"system":[{"type":"text","text":"You are Claude Code"}],"messages":[{"role":"user","content":[{"type":"text","text":"` + adminprobe.ConnectivityTestUserText + `"}]}]}`)
+
+	if h.interceptNonUpstreamRequest(c, body, "claude-opus-4-8", 1024, false, false, zap.NewNop()) {
+		t.Fatalf("account test body must not be intercepted; body=%s", rec.Body.String())
+	}
+}
+
 func TestInterceptNonUpstreamRequest_SpoofedAdminProbeHeaderStillIntercepts(t *testing.T) {
 	// 固定值 / 错误 token 不能绕过拦截，否则外部 HI 探针加个头就穿透。
 	h := newInterceptTestHandler(true, true)

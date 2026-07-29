@@ -49,7 +49,7 @@ func isProbeUserAgent(userAgent string) bool {
 	return false
 }
 
-// sessionMarker 是 Claude Code 写入 metadata.user_id 的会话段前缀。
+// sessionMarker 是 Claude Code 旧版拼接 user_id 里的会话段前缀。
 const sessionMarker = "_session_"
 
 // hasSessionMarker 判断请求是否携带会话标识。
@@ -57,12 +57,36 @@ const sessionMarker = "_session_"
 // 取的是客户端**原始**的 metadata.user_id：网关自身的重写发生在
 // buildUpstreamRequest 阶段，而拦截点远在其之前，所以这里看到的确实是
 // 客户端有没有主动带会话。
+//
+// 兼容两种格式：
+//   - 旧拼接：user_{device}_account_{uuid}_session_{uuid}（含 `_session_`）
+//   - 新 JSON（CLI ≥2.1.78）：{"device_id":"...","session_id":"..."}
+//
+// 旧实现只认 `_session_` 子串，会把 JSON 格式误判为「无 session」，从而把
+// 真实 CLI 的短问候误送进宽松测活档。
 func hasSessionMarker(body []byte) bool {
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return false
 	}
-	uid := gjson.GetBytes(body, "metadata.user_id").String()
-	return strings.Contains(uid, sessionMarker)
+	uid := gjson.GetBytes(body, "metadata.user_id")
+	if !uid.Exists() {
+		return false
+	}
+	// JSON object form (gjson parses nested object when user_id is an object —
+	// but Claude sends user_id as a JSON-encoded string). Prefer string parse.
+	raw := strings.TrimSpace(uid.String())
+	if raw == "" {
+		return false
+	}
+	if strings.Contains(raw, sessionMarker) {
+		return true
+	}
+	// user_id 本身是 JSON 字符串：{"device_id":"...","session_id":"uuid"}
+	if strings.HasPrefix(raw, "{") && gjson.Valid(raw) {
+		sid := strings.TrimSpace(gjson.Get(raw, "session_id").String())
+		return sid != ""
+	}
+	return false
 }
 
 // livenessProbeTexts 是无 session 时额外认定为测活的文案（宽松档专用）。

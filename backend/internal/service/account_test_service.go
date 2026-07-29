@@ -56,12 +56,12 @@ type TestEvent struct {
 
 // defaultConnectivityTestPrompt 是账号连通性探测统一使用的提示词。
 //
-// 刻意不用 "hi"：那是各家中转健康检查的通用文案，上游看到"同一批账号反复收到
-// 完全相同的极短请求"是明显的中转特征。换成一句自然的开发者提问，既降低这种
-// 特征，也不会被网关侧的纯问候语拦截命中（见 handler/probe_intercept.go）。
+// 刻意不用 "hi"：那是各家中转健康检查的通用文案。必须与
+// adminprobe.ConnectivityTestUserText 保持一致——网关靠这句识别 Admin
+// 测试连接并跳过 HI 测活拦截。
 //
-// 要求：短、语义明确、不属于问候语。改这里即可全局生效。
-const defaultConnectivityTestPrompt = "What does the git status command show?"
+// 要求：短、语义明确、不属于问候语。改 adminprobe 常量即可全局生效。
+const defaultConnectivityTestPrompt = adminprobe.ConnectivityTestUserText
 
 const (
 	defaultGeminiTextTestPrompt  = defaultConnectivityTestPrompt
