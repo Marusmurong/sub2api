@@ -463,5 +463,17 @@ func BuildClaudeAccountCredentials(tokenInfo *TokenInfo) map[string]any {
 	if tokenInfo.Scope != "" {
 		creds["scope"] = tokenInfo.Scope
 	}
+	// 账号身份字段：account_uuid 会进 metadata.user_id 发给上游，缺失时该字段是空串，
+	// 而空串在所有账号上完全一致，可被用来把整个账号池聚成一类。
+	// 只在响应带值时写入——MergeCredentials 保留旧值，避免刷新响应不返回时把已有值抹掉。
+	if tokenInfo.AccountUUID != "" {
+		creds["account_uuid"] = tokenInfo.AccountUUID
+	}
+	if tokenInfo.OrgUUID != "" {
+		creds["org_uuid"] = tokenInfo.OrgUUID
+	}
+	if tokenInfo.EmailAddress != "" {
+		creds["email_address"] = tokenInfo.EmailAddress
+	}
 	return creds
 }

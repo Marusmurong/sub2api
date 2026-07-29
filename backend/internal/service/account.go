@@ -964,6 +964,18 @@ func (a *Account) GetClaudeUserID() string {
 	return ""
 }
 
+// GetAccountUUID 返回账号的上游 account uuid，供 metadata.user_id 使用。
+//
+// 与 GetClaudeUserID 同构：extra 优先（admin 手工设置 / CRS 同步写在这里），
+// 回退到 credentials（OAuth 授权与刷新写在这里，见 BuildClaudeAccountCredentials）。
+// 两处都取不到时返回空串，调用方据此跳过重写而不是发出 account_uuid="" 的请求。
+func (a *Account) GetAccountUUID() string {
+	if v := strings.TrimSpace(a.GetExtraString("account_uuid")); v != "" {
+		return v
+	}
+	return strings.TrimSpace(a.GetCredential("account_uuid"))
+}
+
 // matchAntigravityWildcard 通配符匹配（仅支持末尾 *）
 // 用于 model_mapping 的通配符匹配
 func matchAntigravityWildcard(pattern, str string) bool {

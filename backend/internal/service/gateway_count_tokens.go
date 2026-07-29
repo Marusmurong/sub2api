@@ -469,7 +469,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 		if err == nil {
 			ctFingerprint = fp
 			if !ctEnableMPT {
-				accountUUID := account.GetExtraString("account_uuid")
+				accountUUID := account.GetAccountUUID()
 				if accountUUID != "" && fp.ClientID != "" {
 					if newBody, err := s.identityService.RewriteUserIDWithMasking(ctx, body, account, accountUUID, fp.ClientID, fp.UserAgent); err == nil && len(newBody) > 0 {
 						body = newBody

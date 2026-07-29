@@ -264,22 +264,37 @@ func (s *OAuthService) exchangeCodeForToken(ctx context.Context, code, codeVerif
 		Scope:        tokenResp.Scope,
 	}
 
+	applyOAuthIdentityFields(tokenInfo, tokenResp)
+
+	return tokenInfo, nil
+}
+
+// applyOAuthIdentityFields 把 token 响应里的账号身份字段（org / account uuid / 邮箱）
+// 填入 TokenInfo。
+//
+// 授权与刷新都必须走这里：account_uuid 会进 metadata.user_id，缺失时该字段会以空串
+// 发给上游——那是一个跨全部账号完全相同的常量，等于把整个账号池标记成同一来源。
+// 刷新路径此前直接丢弃这几个字段，导致只要账号是"先授权、后续只刷新"，
+// 值就再也补不回来。
+func applyOAuthIdentityFields(tokenInfo *TokenInfo, tokenResp *oauth.TokenResponse) {
+	if tokenInfo == nil || tokenResp == nil {
+		return
+	}
 	if tokenResp.Organization != nil && tokenResp.Organization.UUID != "" {
 		tokenInfo.OrgUUID = tokenResp.Organization.UUID
 		log.Printf("[OAuth] Got org_uuid")
 	}
-	if tokenResp.Account != nil {
-		if tokenResp.Account.UUID != "" {
-			tokenInfo.AccountUUID = tokenResp.Account.UUID
-			log.Printf("[OAuth] Got account_uuid")
-		}
-		if tokenResp.Account.EmailAddress != "" {
-			tokenInfo.EmailAddress = tokenResp.Account.EmailAddress
-			log.Printf("[OAuth] Got email_address")
-		}
+	if tokenResp.Account == nil {
+		return
 	}
-
-	return tokenInfo, nil
+	if tokenResp.Account.UUID != "" {
+		tokenInfo.AccountUUID = tokenResp.Account.UUID
+		log.Printf("[OAuth] Got account_uuid")
+	}
+	if tokenResp.Account.EmailAddress != "" {
+		tokenInfo.EmailAddress = tokenResp.Account.EmailAddress
+		log.Printf("[OAuth] Got email_address")
+	}
 }
 
 // RefreshToken refreshes an OAuth token
@@ -289,14 +304,18 @@ func (s *OAuthService) RefreshToken(ctx context.Context, refreshToken string, pr
 		return nil, err
 	}
 
-	return &TokenInfo{
+	tokenInfo := &TokenInfo{
 		AccessToken:  tokenResp.AccessToken,
 		TokenType:    tokenResp.TokenType,
 		ExpiresIn:    tokenResp.ExpiresIn,
 		ExpiresAt:    time.Now().Unix() + tokenResp.ExpiresIn,
 		RefreshToken: tokenResp.RefreshToken,
 		Scope:        tokenResp.Scope,
-	}, nil
+	}
+	// 刷新响应若带回身份字段就一并保留，供 BuildClaudeAccountCredentials 落库。
+	applyOAuthIdentityFields(tokenInfo, tokenResp)
+
+	return tokenInfo, nil
 }
 
 // RefreshAccountToken refreshes token for an account

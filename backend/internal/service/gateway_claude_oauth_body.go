@@ -353,7 +353,7 @@ func (s *GatewayService) buildOAuthMetadataUserID(parsed *ParsedRequest, account
 	if fp != nil {
 		uaVersion = ExtractCLIVersion(fp.UserAgent)
 	}
-	accountUUID := strings.TrimSpace(account.GetExtraString("account_uuid"))
+	accountUUID := account.GetAccountUUID()
 	return FormatMetadataUserID(userID, accountUUID, sessionID, uaVersion)
 }
 
@@ -475,7 +475,7 @@ func (s *GatewayService) buildOAuthMetadataUserIDFromBody(
 	if fp != nil {
 		uaVersion = ExtractCLIVersion(fp.UserAgent)
 	}
-	accountUUID := strings.TrimSpace(account.GetExtraString("account_uuid"))
+	accountUUID := account.GetAccountUUID()
 	return FormatMetadataUserID(userID, accountUUID, sessionID, uaVersion)
 }
 
