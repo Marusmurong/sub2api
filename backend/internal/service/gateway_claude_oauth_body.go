@@ -570,6 +570,47 @@ func hasClaudeCodePrefix(text string) bool {
 	return false
 }
 
+// matchedClaudeCodePrefix 返回文本命中的最长 Claude Code 身份前缀，未命中返回空串。
+// 取最长匹配是为了正确处理 Agent SDK 变体（它以标准前缀开头但更长）。
+func matchedClaudeCodePrefix(text string) string {
+	longest := ""
+	for _, prefix := range claudeCodePromptPrefixes {
+		if strings.HasPrefix(text, prefix) && len(prefix) > len(longest) {
+			longest = prefix
+		}
+	}
+	return longest
+}
+
+// stripClaudeCodeIdentityPrefix 剥掉文本开头的 Claude Code 身份声明，返回其后的客户端自定义
+// 指令。若整段仅是身份声明（无附加内容），返回空串。
+//
+// 该函数服务于 system→messages 搬运：注入的 system 里已经有一份规范身份句，搬运副本里再留
+// 一份属于重复，且身份句出现在 user 消息中并不符合真实 CLI 形态。但身份句之后的自定义指令
+// 必须保留——丢弃它们会让客户端指令静默失效。
+func stripClaudeCodeIdentityPrefix(text string) string {
+	trimmed := strings.TrimSpace(text)
+	prefix := matchedClaudeCodePrefix(trimmed)
+	if prefix == "" {
+		return trimmed
+	}
+
+	// 优先按段落剥：身份声明与自定义指令通常以空行分隔。
+	if idx := strings.Index(trimmed, "\n\n"); idx >= 0 {
+		if rest := strings.TrimSpace(trimmed[idx+2:]); rest != "" {
+			return rest
+		}
+	}
+
+	// 回退按句剥：身份句与自定义指令挤在同一段时，从前缀末尾起找第一个句号。
+	// 从 len(prefix) 起搜索可正确跳过 Agent SDK 变体的后半句。
+	if idx := strings.Index(trimmed[len(prefix):], "."); idx >= 0 {
+		return strings.TrimSpace(trimmed[len(prefix)+idx+1:])
+	}
+
+	return ""
+}
+
 // injectClaudeCodePrompt 在 system 开头注入 Claude Code 提示词
 // 处理 null、字符串、数组三种格式
 func injectClaudeCodePrompt(body []byte, system any) []byte {
@@ -904,12 +945,16 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 
 	// 3. 将原始 system prompt 作为 user/assistant 消息对注入到 messages 开头
 	//    模型仍通过 messages 接收完整指令，保留客户端功能
-	ccPromptTrimmed := strings.TrimSpace(claudeCodeSystemPrompt)
-	if originalSystemText != "" && originalSystemText != ccPromptTrimmed && !hasClaudeCodePrefix(originalSystemText) {
+	//
+	//    搬运前剥掉客户端自带的 Claude Code 身份声明：注入的 system 里已有一份规范身份句，
+	//    副本里再留一份既冗余、也不符合真实 CLI 形态（真实 CLI 不会在 user 消息里写这句）。
+	//    注意只剥身份句本身——其后的自定义指令必须搬走，否则客户端指令会静默失效。
+	instructionText := stripClaudeCodeIdentityPrefix(originalSystemText)
+	if instructionText != "" {
 		instrMsg, err1 := json.Marshal(map[string]any{
 			"role": "user",
 			"content": []map[string]any{
-				{"type": "text", "text": "[System Instructions]\n" + originalSystemText},
+				{"type": "text", "text": "[System Instructions]\n" + instructionText},
 			},
 		})
 		ackMsg, err2 := json.Marshal(map[string]any{

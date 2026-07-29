@@ -250,6 +250,8 @@ var forbiddenHeaderNames = map[string]bool{
 	"content-encoding":  true,
 	"transfer-encoding": true,
 	"connection":        true,
+	// 内部测活旁路标记，禁止用户经 ExtraHeaders 注入（运行时也会被 Apply 覆盖）。
+	"x-sub2api-admin-probe": true,
 }
 
 // IsForbiddenHeaderName 对外暴露，checker 运行时也会再过滤一次做兜底。

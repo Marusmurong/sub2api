@@ -2,11 +2,13 @@ package handler
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/adminprobe"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -298,6 +300,51 @@ func TestInterceptNonUpstreamRequest_NilConfig(t *testing.T) {
 
 	if h.interceptNonUpstreamRequest(c, []byte(`{"messages":[{"role":"user","content":"hi"}]}`), "m", 1024, false, false, zap.NewNop()) {
 		t.Errorf("intercepted = true, want false when cfg is nil")
+	}
+}
+
+func TestInterceptNonUpstreamRequest_AdminProbeSkipsLiveness(t *testing.T) {
+	// Admin UI 账号测试 / 渠道监控出站会带密钥头：HI 必须穿透，才能测真实账号。
+	h := newInterceptTestHandler(true, true)
+	c, rec := newInterceptTestContext()
+	adminprobe.Apply(c.Request.Header)
+	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[{"role":"user","content":"hi"}]}`)
+
+	if h.interceptNonUpstreamRequest(c, body, "claude-opus-4-8", 1024, false, false, zap.NewNop()) {
+		t.Fatalf("admin probe hi must not be intercepted; body=%s", rec.Body.String())
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("let-through must not write a response: %s", rec.Body.String())
+	}
+}
+
+func TestInterceptNonUpstreamRequest_SpoofedAdminProbeHeaderStillIntercepts(t *testing.T) {
+	// 固定值 / 错误 token 不能绕过拦截，否则外部 HI 探针加个头就穿透。
+	h := newInterceptTestHandler(true, true)
+	c, rec := newInterceptTestContext()
+	c.Request.Header.Set(adminprobe.HeaderName, "1")
+	body := []byte(`{"model":"claude-opus-4-8","max_tokens":1024,"messages":[{"role":"user","content":"hi"}]}`)
+
+	if !h.interceptNonUpstreamRequest(c, body, "claude-opus-4-8", 1024, false, false, zap.NewNop()) {
+		t.Fatal("spoofed admin-probe header must still intercept hi")
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 greeting intercept", rec.Code)
+	}
+}
+
+func TestInterceptNonUpstreamRequest_AdminProbeDoesNotSkipProbeTools(t *testing.T) {
+	// 旁路只针对测活问候，人造 zzz 探针工具仍拦截。
+	h := newInterceptTestHandler(true, true)
+	c, rec := newInterceptTestContext()
+	adminprobe.Apply(c.Request.Header)
+	body := []byte(`{"tools":[{"type":"zzz_probe_00000000"}],"messages":[{"role":"user","content":"hi"}]}`)
+
+	if !h.interceptNonUpstreamRequest(c, body, "claude-opus-4-8", 1024, false, false, zap.NewNop()) {
+		t.Fatal("probe tools must still intercept even with admin-probe marker")
+	}
+	if rec.Code != 400 {
+		t.Errorf("status = %d, want 400", rec.Code)
 	}
 }
 

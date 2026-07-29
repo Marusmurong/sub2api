@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/adminprobe"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/servertiming"
 	"github.com/tidwall/gjson"
 )
@@ -514,6 +515,9 @@ func postRawJSON(ctx context.Context, fullURL string, payload []byte, headers ma
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
+	// 渠道监控属于 admin 侧主动探测；自环到本网关时跳过 HI 拦截。
+	// 在用户 ExtraHeaders 之后写入，避免被覆盖或伪造固定值绕过。
+	adminprobe.Apply(req.Header)
 
 	resp, err := monitorHTTPClient.Do(req)
 	if err != nil {

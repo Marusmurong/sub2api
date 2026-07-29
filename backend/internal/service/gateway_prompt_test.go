@@ -507,3 +507,118 @@ func TestRewriteSystemForNonClaudeCodeWithPromptBlocks_UsesConfiguredBlocks(t *t
 	require.Equal(t, "tail", arr[2].Get("text").String())
 	require.Equal(t, "1h", arr[2].Get("cache_control.ttl").String())
 }
+
+// TestStripClaudeCodeIdentityPrefix 覆盖身份前缀剥离的各种形态。
+func TestStripClaudeCodeIdentityPrefix(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"空串", "", ""},
+		{"纯身份句", "You are Claude Code, Anthropic's official CLI for Claude.", ""},
+		{"纯身份句带空白", "  You are Claude Code, Anthropic's official CLI for Claude.  ", ""},
+		{"AgentSDK纯身份句", "You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK.", ""},
+		{"身份句+自定义_分段", "You are Claude Code, Anthropic's official CLI for Claude.\n\nAnswer in French.", "Answer in French."},
+		{"身份句+自定义_同段", "You are Claude Code, Anthropic's official CLI for Claude. Answer in French.", "Answer in French."},
+		{"AgentSDK+自定义_分段", "You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK.\n\nAnswer in French.", "Answer in French."},
+		{"AgentSDK+自定义_同段", "You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK. Answer in French.", "Answer in French."},
+		{"Explore变体+自定义", "You are a file search specialist for Claude Code.\n\nAnswer in French.", "Answer in French."},
+		{"Compact变体+自定义", "You are a helpful AI assistant tasked with summarizing conversations.\n\nAnswer in French.", "Answer in French."},
+		{"无关内容原样返回", "You are a personal assistant running inside OpenClaw.", "You are a personal assistant running inside OpenClaw."},
+		{"无关内容多段原样返回", "Be helpful.\n\nBe concise.", "Be helpful.\n\nBe concise."},
+		{"身份句+多段自定义", "You are Claude Code, Anthropic's official CLI for Claude.\n\nRule one.\n\nRule two.", "Rule one.\n\nRule two."},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, stripClaudeCodeIdentityPrefix(tt.in))
+		})
+	}
+}
+
+// TestRewriteSystemPreservesInstructionsAfterCCPrefix 锁住回归：客户端 system 以 Claude Code
+// 身份句开头时，其后的自定义指令必须被搬进 messages，不得静默丢弃。
+func TestRewriteSystemPreservesInstructionsAfterCCPrefix(t *testing.T) {
+	const body = `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`
+
+	tests := []struct {
+		name            string
+		system          any
+		wantMessagesLen int
+		wantInstruction string // 空串表示不应注入指令消息
+	}{
+		{
+			name:            "纯身份句不搬运",
+			system:          "You are Claude Code, Anthropic's official CLI for Claude.",
+			wantMessagesLen: 1,
+		},
+		{
+			name:            "身份句+自定义_同段",
+			system:          "You are Claude Code, Anthropic's official CLI for Claude. Answer in French.",
+			wantMessagesLen: 3,
+			wantInstruction: "[System Instructions]\nAnswer in French.",
+		},
+		{
+			name:            "身份句+自定义_分段",
+			system:          "You are Claude Code, Anthropic's official CLI for Claude.\n\nAnswer in French.",
+			wantMessagesLen: 3,
+			wantInstruction: "[System Instructions]\nAnswer in French.",
+		},
+		{
+			name:            "AgentSDK变体+自定义",
+			system:          "You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK.\n\nAnswer in French.",
+			wantMessagesLen: 3,
+			wantInstruction: "[System Instructions]\nAnswer in French.",
+		},
+		{
+			name: "数组_身份块在前_自定义块在后",
+			system: []any{
+				map[string]any{"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude."},
+				map[string]any{"type": "text", "text": "Answer in French."},
+			},
+			wantMessagesLen: 3,
+			wantInstruction: "[System Instructions]\nAnswer in French.",
+		},
+		{
+			name: "数组_自定义块在前_身份块在后",
+			system: []any{
+				map[string]any{"type": "text", "text": "Answer in French."},
+				map[string]any{"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude."},
+			},
+			wantMessagesLen: 3,
+			wantInstruction: "[System Instructions]\nAnswer in French.\n\nYou are Claude Code, Anthropic's official CLI for Claude.",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := rewriteSystemForNonClaudeCode([]byte(body), tt.system)
+
+			var parsed map[string]any
+			require.NoError(t, json.Unmarshal(result, &parsed))
+
+			// system 形态不受本次修复影响，仍应为 3 块。
+			systemArr, ok := parsed["system"].([]any)
+			require.True(t, ok)
+			require.Len(t, systemArr, 3)
+
+			messages, ok := parsed["messages"].([]any)
+			require.True(t, ok)
+			require.Len(t, messages, tt.wantMessagesLen)
+
+			if tt.wantInstruction == "" {
+				return
+			}
+			firstMsg, ok := messages[0].(map[string]any)
+			require.True(t, ok)
+			require.Equal(t, "user", firstMsg["role"])
+			firstContent, ok := firstMsg["content"].([]any)
+			require.True(t, ok)
+			require.Len(t, firstContent, 1)
+			firstBlock, ok := firstContent[0].(map[string]any)
+			require.True(t, ok)
+			require.Equal(t, tt.wantInstruction, firstBlock["text"])
+		})
+	}
+}

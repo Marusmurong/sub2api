@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/adminprobe"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
@@ -81,6 +82,17 @@ func (h *GatewayHandler) interceptNonUpstreamRequest(
 	}
 
 	if !h.cfg.Gateway.InterceptGreeting {
+		return false
+	}
+
+	// Admin UI 主动发起的账号连通性 / 渠道监控检测（AccountTest、channel_monitor）
+	// 会在出站请求上打 adminprobe 密钥头。这些请求必须穿透测活拦截，否则管理员
+	// 只能看到本地假问候、无法判断真实账号状态。外部客户端无法伪造该密钥。
+	// 注意：此旁路只作用于问候/测活；探针工具（zzz_*）仍按上面分支拦截。
+	if c != nil && c.Request != nil && adminprobe.IsTrusted(c.Request.Header) {
+		reqLog.Info("gateway.skip_liveness_intercept_admin_probe",
+			zap.String("model", model),
+			zap.Bool("stream", stream))
 		return false
 	}
 
