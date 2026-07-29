@@ -895,12 +895,15 @@ func TestGatewayService_AnthropicOAuthMimic_RewritesSystemWithBillingBlock(t *te
 			require.True(t, system.Exists())
 			require.True(t, system.IsArray(), "system should be an array")
 			arr := system.Array()
-			require.Len(t, arr, 3, "system array should have billing block + cc prompt block + expansion block")
+			require.Len(t, arr, 4, "system array should have billing + cc prompt + expansion + 客户端 system 尾块")
 
 			billingText := arr[0].Get("text").String()
 			require.Contains(t, billingText, "x-anthropic-billing-header:")
 			require.Contains(t, billingText, "cc_version="+claude.CLICurrentVersion+".")
 			require.Contains(t, billingText, "cc_entrypoint=cli;")
+			// 真实 2.1.220 在 firstParty + 首方 baseURL 下恒发 cch 段（k7n），
+			// 由 normalizeBillingHeaderBlock 在转发前补齐。
+			require.Contains(t, billingText, " cch=00000;")
 
 			require.Equal(t, claudeCodeSystemPrompt, arr[1].Get("text").String())
 			require.False(t, arr[1].Get("cache_control").Exists(), "身份前缀 block 不应带 cache_control")
@@ -908,18 +911,21 @@ func TestGatewayService_AnthropicOAuthMimic_RewritesSystemWithBillingBlock(t *te
 			require.Equal(t, claudeCodeSystemPromptExpansion, arr[2].Get("text").String())
 			require.Equal(t, "ephemeral", arr[2].Get("cache_control.type").String())
 
-			// 原始 system prompt 应迁移至 messages 中。
+			// 原始 system prompt 作为 system 尾块保留（不再迁移至 messages）。
+			tail := arr[3]
+			require.Contains(t, tail.Get("text").String(), tt.wantOriginalSystem)
+			if tt.wantOriginalSystemCacheTTL != "" {
+				require.Equal(t, "ephemeral", tail.Get("cache_control.type").String())
+				require.Equal(t, tt.wantOriginalSystemCacheTTL, tail.Get("cache_control.ttl").String())
+			} else {
+				require.False(t, tail.Get("cache_control").Exists())
+			}
+
+			// messages 不被改写：首条仍是客户端原始消息
 			messages := gjson.GetBytes(upstream.lastBody, "messages")
 			require.True(t, messages.IsArray())
-			firstMsg := messages.Array()[0]
-			require.Equal(t, "user", firstMsg.Get("role").String())
-			require.Contains(t, firstMsg.Get("content.0.text").String(), tt.wantOriginalSystem)
-			if tt.wantOriginalSystemCacheTTL != "" {
-				require.Equal(t, "ephemeral", firstMsg.Get("content.0.cache_control.type").String())
-				require.Equal(t, tt.wantOriginalSystemCacheTTL, firstMsg.Get("content.0.cache_control.ttl").String())
-			} else {
-				require.False(t, firstMsg.Get("content.0.cache_control").Exists())
-			}
+			require.NotContains(t, string(upstream.lastBody), "[System Instructions]")
+			require.NotContains(t, string(upstream.lastBody), "Understood. I will follow these instructions.")
 
 			if tt.wantMetadataUserID != "" {
 				require.Equal(t, tt.wantMetadataUserID, gjson.GetBytes(upstream.lastBody, "metadata.user_id").String())

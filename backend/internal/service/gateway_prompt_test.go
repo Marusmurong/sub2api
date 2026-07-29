@@ -305,93 +305,96 @@ func TestInjectClaudeCodePrompt(t *testing.T) {
 }
 
 func TestRewriteSystemForNonClaudeCode(t *testing.T) {
+	// 客户端 system 现在作为 system **尾块**保留（对齐真实 CLI 的
+	// [billing, 身份块, ...调用方 system] 形态），不再搬成伪造的 user/assistant 消息对。
+	// 因此 messages 恒等于原始条数，system 块数为 3（无客户端 system）或 4（有）。
 	tests := []struct {
-		name             string
-		body             string
-		system           any
-		wantSystemText   string // system array 第一个 block 的 text
-		wantMessagesLen  int    // messages 数组长度
-		wantFirstMsgRole string // 第一条消息的 role
-		wantFirstMsgText string // 第一条消息的 content[0].text
-		wantAckMsgText   string // 第二条消息的 content[0].text
+		name              string
+		body              string
+		system            any
+		wantSystemText    string // system array 第二个 block（身份块）的 text
+		wantMessagesLen   int    // messages 数组长度：应与原始 body 一致
+		wantSystemBlocks  int    // system 块数
+		wantTailBlockText string // 尾块（客户端 system）的 text，空表示无尾块
 	}{
 		{
-			name:            "nil system - no messages injected",
-			body:            `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`,
-			system:          nil,
-			wantSystemText:  claudeCodeSystemPrompt,
-			wantMessagesLen: 1, // 原始 1 条消息，不注入
-		},
-		{
-			name:            "empty string system - no messages injected",
-			body:            `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`,
-			system:          "",
-			wantSystemText:  claudeCodeSystemPrompt,
-			wantMessagesLen: 1,
-		},
-		{
-			name:             "custom string system - migrated to messages",
+			name:             "nil system - no tail block",
 			body:             `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`,
-			system:           "You are a personal assistant running inside OpenClaw.",
+			system:           nil,
 			wantSystemText:   claudeCodeSystemPrompt,
-			wantMessagesLen:  3, // instruction + ack + original
-			wantFirstMsgRole: "user",
-			wantFirstMsgText: "[System Instructions]\nYou are a personal assistant running inside OpenClaw.",
-			wantAckMsgText:   "Understood. I will follow these instructions.",
+			wantMessagesLen:  1,
+			wantSystemBlocks: 3,
 		},
 		{
-			name:            "system equals Claude Code prompt - no messages injected",
-			body:            `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`,
-			system:          claudeCodeSystemPrompt,
-			wantSystemText:  claudeCodeSystemPrompt,
-			wantMessagesLen: 1,
+			name:             "empty string system - no tail block",
+			body:             `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`,
+			system:           "",
+			wantSystemText:   claudeCodeSystemPrompt,
+			wantMessagesLen:  1,
+			wantSystemBlocks: 3,
 		},
 		{
-			name: "array system with custom blocks - text joined and migrated",
+			name:              "custom string system - kept as system tail block",
+			body:              `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`,
+			system:            "You are a personal assistant running inside OpenClaw.",
+			wantSystemText:    claudeCodeSystemPrompt,
+			wantMessagesLen:   1,
+			wantSystemBlocks:  4,
+			wantTailBlockText: "You are a personal assistant running inside OpenClaw.",
+		},
+		{
+			name:             "system equals Claude Code prompt - identity stripped, no tail block",
+			body:             `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`,
+			system:           claudeCodeSystemPrompt,
+			wantSystemText:   claudeCodeSystemPrompt,
+			wantMessagesLen:  1,
+			wantSystemBlocks: 3,
+		},
+		{
+			name: "array system with custom blocks - text joined into tail block",
 			body: `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`,
 			system: []any{
 				map[string]any{"type": "text", "text": "First instruction"},
 				map[string]any{"type": "text", "text": "Second instruction"},
 			},
+			wantSystemText:    claudeCodeSystemPrompt,
+			wantMessagesLen:   1,
+			wantSystemBlocks:  4,
+			wantTailBlockText: "First instruction\n\nSecond instruction",
+		},
+		{
+			name:             "empty array system - no tail block",
+			body:             `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`,
+			system:           []any{},
 			wantSystemText:   claudeCodeSystemPrompt,
-			wantMessagesLen:  3,
-			wantFirstMsgRole: "user",
-			wantFirstMsgText: "[System Instructions]\nFirst instruction\n\nSecond instruction",
-			wantAckMsgText:   "Understood. I will follow these instructions.",
+			wantMessagesLen:  1,
+			wantSystemBlocks: 3,
 		},
 		{
-			name:            "empty array system - no messages injected",
-			body:            `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`,
-			system:          []any{},
-			wantSystemText:  claudeCodeSystemPrompt,
-			wantMessagesLen: 1,
+			name:              "json.RawMessage string system",
+			body:              `{"model":"claude-3","system":"Custom prompt","messages":[{"role":"user","content":"hello"}]}`,
+			system:            json.RawMessage(`"Custom prompt"`),
+			wantSystemText:    claudeCodeSystemPrompt,
+			wantMessagesLen:   1,
+			wantSystemBlocks:  4,
+			wantTailBlockText: "Custom prompt",
 		},
 		{
-			name:             "json.RawMessage string system",
-			body:             `{"model":"claude-3","system":"Custom prompt","messages":[{"role":"user","content":"hello"}]}`,
-			system:           json.RawMessage(`"Custom prompt"`),
+			name:             "json.RawMessage nil system",
+			body:             `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`,
+			system:           json.RawMessage(nil),
 			wantSystemText:   claudeCodeSystemPrompt,
-			wantMessagesLen:  3,
-			wantFirstMsgRole: "user",
-			wantFirstMsgText: "[System Instructions]\nCustom prompt",
-			wantAckMsgText:   "Understood. I will follow these instructions.",
+			wantMessagesLen:  1,
+			wantSystemBlocks: 3,
 		},
 		{
-			name:            "json.RawMessage nil system",
-			body:            `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`,
-			system:          json.RawMessage(nil),
-			wantSystemText:  claudeCodeSystemPrompt,
-			wantMessagesLen: 1,
-		},
-		{
-			name:             "multiple original messages preserved",
-			body:             `{"model":"claude-3","messages":[{"role":"user","content":"msg1"},{"role":"assistant","content":"resp1"},{"role":"user","content":"msg2"}]}`,
-			system:           "Be helpful",
-			wantSystemText:   claudeCodeSystemPrompt,
-			wantMessagesLen:  5, // 2 injected + 3 original
-			wantFirstMsgRole: "user",
-			wantFirstMsgText: "[System Instructions]\nBe helpful",
-			wantAckMsgText:   "Understood. I will follow these instructions.",
+			name:              "original messages left untouched",
+			body:              `{"model":"claude-3","messages":[{"role":"user","content":"msg1"},{"role":"assistant","content":"resp1"},{"role":"user","content":"msg2"}]}`,
+			system:            "Be helpful",
+			wantSystemText:    claudeCodeSystemPrompt,
+			wantMessagesLen:   3, // 原始 3 条，不再注入
+			wantSystemBlocks:  4,
+			wantTailBlockText: "Be helpful",
 		},
 	}
 
@@ -403,13 +406,14 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			err := json.Unmarshal(result, &parsed)
 			require.NoError(t, err)
 
-			// system 应为 array 格式，对齐真实 Claude Code CLI 的 3-block 形态：
+			// system 应为 array 格式，对齐真实 Claude Code CLI 的形态：
 			//   [0] billing attribution block (x-anthropic-billing-header: cc_version=...;)
 			//   [1] Claude Code 身份前缀 block (不带 cache_control)
 			//   [2] 工具无关的通用提示词扩充 block (带 cache_control，作为缓存断点)
+			//   [3] 客户端原 system（存在时），对应真实 CLI 的 "...调用方 system"
 			systemArr, ok := parsed["system"].([]any)
 			require.True(t, ok, "system should be an array, got %T", parsed["system"])
-			require.Len(t, systemArr, 3, "system array should have exactly 3 blocks (billing + cc prompt + expansion)")
+			require.Len(t, systemArr, tt.wantSystemBlocks)
 
 			billingBlock, ok := systemArr[0].(map[string]any)
 			require.True(t, ok)
@@ -417,7 +421,10 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			require.Contains(t, billingBlock["text"], "x-anthropic-billing-header:")
 			require.Contains(t, billingBlock["text"], "cc_version=")
 			require.Contains(t, billingBlock["text"], "cc_entrypoint=cli")
-			// 新版 CLI 已取消 cch=... 签名字段，注入的 billing block 不应再带 cch。
+			// cch 段不在本层注入：它由 normalizeBillingHeaderBlock 在转发前统一补齐，
+			// 这样 mimic 与透传两条路径共用同一处收口。
+			// （注意：真实 2.1.220 仍然发送 cch，只是值固定为 00000，
+			//   见 docs/CC_2.1.220_EGRESS_SPEC.md §3。）
 			require.NotContains(t, billingBlock["text"], "cch=")
 
 			systemBlock, ok := systemArr[1].(map[string]any)
@@ -435,36 +442,24 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			require.True(t, ok, "expansion block should have cache_control")
 			require.Equal(t, "ephemeral", cc["type"])
 
-			// 检查 messages
+			// 客户端 system 作为尾块保留
+			if tt.wantTailBlockText != "" {
+				tailBlock, ok := systemArr[len(systemArr)-1].(map[string]any)
+				require.True(t, ok)
+				require.Equal(t, "text", tailBlock["type"])
+				require.Equal(t, tt.wantTailBlockText, tailBlock["text"])
+			}
+
+			// messages 必须原封不动——不再注入伪造的 user/assistant 对。
+			// 这既是真实 CLI 的形态，也保证 cc_version 的 fp（按首条 user 消息计算）
+			// 与最终发出的 body 一致。
 			messages, ok := parsed["messages"].([]any)
 			require.True(t, ok, "messages should be an array")
 			require.Len(t, messages, tt.wantMessagesLen)
 
-			if tt.wantFirstMsgRole != "" && len(messages) >= 2 {
-				// 检查注入的 instruction 消息
-				firstMsg, ok := messages[0].(map[string]any)
-				require.True(t, ok)
-				require.Equal(t, tt.wantFirstMsgRole, firstMsg["role"])
-
-				firstContent, ok := firstMsg["content"].([]any)
-				require.True(t, ok)
-				require.Len(t, firstContent, 1)
-				firstBlock, ok := firstContent[0].(map[string]any)
-				require.True(t, ok)
-				require.Equal(t, tt.wantFirstMsgText, firstBlock["text"])
-
-				// 检查注入的 ack 消息
-				ackMsg, ok := messages[1].(map[string]any)
-				require.True(t, ok)
-				require.Equal(t, "assistant", ackMsg["role"])
-
-				ackContent, ok := ackMsg["content"].([]any)
-				require.True(t, ok)
-				require.Len(t, ackContent, 1)
-				ackBlock, ok := ackContent[0].(map[string]any)
-				require.True(t, ok)
-				require.Equal(t, tt.wantAckMsgText, ackBlock["text"])
-			}
+			raw := string(result)
+			require.NotContains(t, raw, "[System Instructions]")
+			require.NotContains(t, raw, "Understood. I will follow these instructions.")
 		})
 	}
 }
@@ -477,12 +472,15 @@ func TestRewriteSystemForNonClaudeCodeWithPrompt_UsesCustomExpansionPrompt(t *te
 
 	system := gjson.GetBytes(result, "system")
 	require.True(t, system.IsArray())
-	require.Len(t, system.Array(), 3)
+	// [billing, 身份块, 自定义扩充块, 客户端 system 尾块]
+	require.Len(t, system.Array(), 4)
 	require.Equal(t, customPrompt, system.Array()[2].Get("text").String())
 	require.Equal(t, "ephemeral", system.Array()[2].Get("cache_control.type").String())
+	require.Equal(t, "Project instructions", system.Array()[3].Get("text").String())
 }
 
-func TestRewriteSystemForNonClaudeCode_PreservesSystemCacheControlOnMigratedMessage(t *testing.T) {
+// 客户端 system 上的 cache_control 断点（含其自选 TTL）在搬进 system 尾块时必须保留。
+func TestRewriteSystemForNonClaudeCode_PreservesCacheControlOnTailBlock(t *testing.T) {
 	body := []byte(`{"model":"claude-3","system":[{"type":"text","text":"Stable project instructions","cache_control":{"type":"ephemeral","ttl":"1h"}}],"messages":[{"role":"user","content":"hello"}]}`)
 	system := []any{
 		map[string]any{
@@ -494,12 +492,13 @@ func TestRewriteSystemForNonClaudeCode_PreservesSystemCacheControlOnMigratedMess
 
 	result := rewriteSystemForNonClaudeCode(body, system)
 
-	require.Equal(t, "[System Instructions]\nStable project instructions", gjson.GetBytes(result, "messages.0.content.0.text").String())
-	require.Equal(t, "ephemeral", gjson.GetBytes(result, "messages.0.content.0.cache_control.type").String())
-	require.Equal(t, "1h", gjson.GetBytes(result, "messages.0.content.0.cache_control.ttl").String())
+	tail := gjson.GetBytes(result, "system.3")
+	require.Equal(t, "Stable project instructions", tail.Get("text").String())
+	require.Equal(t, "ephemeral", tail.Get("cache_control.type").String())
+	require.Equal(t, "1h", tail.Get("cache_control.ttl").String())
 }
 
-func TestRewriteSystemForNonClaudeCode_LeavesMigratedMessageUncachedWithoutSystemBreakpoint(t *testing.T) {
+func TestRewriteSystemForNonClaudeCode_LeavesTailBlockUncachedWithoutSystemBreakpoint(t *testing.T) {
 	body := []byte(`{"model":"claude-3","system":[{"type":"text","text":"Project instructions"}],"messages":[{"role":"user","content":"hello"}]}`)
 	system := []any{
 		map[string]any{"type": "text", "text": "Project instructions"},
@@ -507,7 +506,8 @@ func TestRewriteSystemForNonClaudeCode_LeavesMigratedMessageUncachedWithoutSyste
 
 	result := rewriteSystemForNonClaudeCode(body, system)
 
-	require.False(t, gjson.GetBytes(result, "messages.0.content.0.cache_control").Exists())
+	require.Equal(t, "Project instructions", gjson.GetBytes(result, "system.3.text").String())
+	require.False(t, gjson.GetBytes(result, "system.3.cache_control").Exists())
 }
 
 func TestRewriteSystemForNonClaudeCodeWithPromptBlocks_UsesConfiguredBlocks(t *testing.T) {
@@ -526,7 +526,8 @@ func TestRewriteSystemForNonClaudeCodeWithPromptBlocks_UsesConfiguredBlocks(t *t
 	system := gjson.GetBytes(result, "system")
 	require.True(t, system.IsArray())
 	arr := system.Array()
-	require.Len(t, arr, 3)
+	// 3 个启用的配置块 + 客户端 system 尾块
+	require.Len(t, arr, 4)
 	require.Contains(t, arr[0].Get("text").String(), "prefix "+claude.CLICurrentVersion+".")
 	require.Equal(t, "ephemeral", arr[0].Get("cache_control.type").String())
 	require.Equal(t, claude.DefaultCacheControlTTL, arr[0].Get("cache_control.ttl").String())
@@ -534,6 +535,7 @@ func TestRewriteSystemForNonClaudeCodeWithPromptBlocks_UsesConfiguredBlocks(t *t
 	require.False(t, arr[1].Get("cache_control").Exists())
 	require.Equal(t, "tail", arr[2].Get("text").String())
 	require.Equal(t, "1h", arr[2].Get("cache_control.ttl").String())
+	require.Equal(t, "Project instructions", arr[3].Get("text").String())
 }
 
 // TestStripClaudeCodeIdentityPrefix 覆盖身份前缀剥离的各种形态。
@@ -566,38 +568,38 @@ func TestStripClaudeCodeIdentityPrefix(t *testing.T) {
 }
 
 // TestRewriteSystemPreservesInstructionsAfterCCPrefix 锁住回归：客户端 system 以 Claude Code
-// 身份句开头时，其后的自定义指令必须被搬进 messages，不得静默丢弃。
+// 身份句开头时，其后的自定义指令必须被保留在 system 尾块，不得静默丢弃。
 func TestRewriteSystemPreservesInstructionsAfterCCPrefix(t *testing.T) {
 	const body = `{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`
 
 	tests := []struct {
-		name            string
-		system          any
-		wantMessagesLen int
-		wantInstruction string // 空串表示不应注入指令消息
+		name             string
+		system           any
+		wantSystemBlocks int
+		wantInstruction  string // 空串表示不应产生尾块
 	}{
 		{
-			name:            "纯身份句不搬运",
-			system:          "You are Claude Code, Anthropic's official CLI for Claude.",
-			wantMessagesLen: 1,
+			name:             "纯身份句不产生尾块",
+			system:           "You are Claude Code, Anthropic's official CLI for Claude.",
+			wantSystemBlocks: 3,
 		},
 		{
-			name:            "身份句+自定义_同段",
-			system:          "You are Claude Code, Anthropic's official CLI for Claude. Answer in French.",
-			wantMessagesLen: 3,
-			wantInstruction: "[System Instructions]\nAnswer in French.",
+			name:             "身份句+自定义_同段",
+			system:           "You are Claude Code, Anthropic's official CLI for Claude. Answer in French.",
+			wantSystemBlocks: 4,
+			wantInstruction:  "Answer in French.",
 		},
 		{
-			name:            "身份句+自定义_分段",
-			system:          "You are Claude Code, Anthropic's official CLI for Claude.\n\nAnswer in French.",
-			wantMessagesLen: 3,
-			wantInstruction: "[System Instructions]\nAnswer in French.",
+			name:             "身份句+自定义_分段",
+			system:           "You are Claude Code, Anthropic's official CLI for Claude.\n\nAnswer in French.",
+			wantSystemBlocks: 4,
+			wantInstruction:  "Answer in French.",
 		},
 		{
-			name:            "AgentSDK变体+自定义",
-			system:          "You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK.\n\nAnswer in French.",
-			wantMessagesLen: 3,
-			wantInstruction: "[System Instructions]\nAnswer in French.",
+			name:             "AgentSDK变体+自定义",
+			system:           "You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK.\n\nAnswer in French.",
+			wantSystemBlocks: 4,
+			wantInstruction:  "Answer in French.",
 		},
 		{
 			name: "数组_身份块在前_自定义块在后",
@@ -605,8 +607,8 @@ func TestRewriteSystemPreservesInstructionsAfterCCPrefix(t *testing.T) {
 				map[string]any{"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude."},
 				map[string]any{"type": "text", "text": "Answer in French."},
 			},
-			wantMessagesLen: 3,
-			wantInstruction: "[System Instructions]\nAnswer in French.",
+			wantSystemBlocks: 4,
+			wantInstruction:  "Answer in French.",
 		},
 		{
 			name: "数组_自定义块在前_身份块在后",
@@ -614,8 +616,8 @@ func TestRewriteSystemPreservesInstructionsAfterCCPrefix(t *testing.T) {
 				map[string]any{"type": "text", "text": "Answer in French."},
 				map[string]any{"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude."},
 			},
-			wantMessagesLen: 3,
-			wantInstruction: "[System Instructions]\nAnswer in French.\n\nYou are Claude Code, Anthropic's official CLI for Claude.",
+			wantSystemBlocks: 4,
+			wantInstruction:  "Answer in French.\n\nYou are Claude Code, Anthropic's official CLI for Claude.",
 		},
 	}
 
@@ -626,27 +628,22 @@ func TestRewriteSystemPreservesInstructionsAfterCCPrefix(t *testing.T) {
 			var parsed map[string]any
 			require.NoError(t, json.Unmarshal(result, &parsed))
 
-			// system 形态不受本次修复影响，仍应为 3 块。
 			systemArr, ok := parsed["system"].([]any)
 			require.True(t, ok)
-			require.Len(t, systemArr, 3)
+			require.Len(t, systemArr, tt.wantSystemBlocks)
 
+			// messages 恒不变
 			messages, ok := parsed["messages"].([]any)
 			require.True(t, ok)
-			require.Len(t, messages, tt.wantMessagesLen)
+			require.Len(t, messages, 1)
 
 			if tt.wantInstruction == "" {
 				return
 			}
-			firstMsg, ok := messages[0].(map[string]any)
+			tailBlock, ok := systemArr[len(systemArr)-1].(map[string]any)
 			require.True(t, ok)
-			require.Equal(t, "user", firstMsg["role"])
-			firstContent, ok := firstMsg["content"].([]any)
-			require.True(t, ok)
-			require.Len(t, firstContent, 1)
-			firstBlock, ok := firstContent[0].(map[string]any)
-			require.True(t, ok)
-			require.Equal(t, tt.wantInstruction, firstBlock["text"])
+			require.Equal(t, "text", tailBlock["type"])
+			require.Equal(t, tt.wantInstruction, tailBlock["text"])
 		})
 	}
 }

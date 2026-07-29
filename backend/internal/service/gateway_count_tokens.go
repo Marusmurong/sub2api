@@ -479,9 +479,15 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 		}
 	}
 
-	// 同步 billing header cc_version 与实际发送的 User-Agent 版本
-	if ctFingerprint != nil && ctEnableFP {
-		body = syncBillingHeaderVersion(body, ctFingerprint.UserAgent)
+	// 归一化 billing attribution block：同步 cc_version、补齐 cch 段。
+	// 与 buildUpstreamRequest 保持同一形态与同一门槛（只看 tokenType），避免同一账号
+	// 在 messages 与 count_tokens 两类请求上呈现不一致的 billing block。
+	if tokenType == "oauth" {
+		userAgent := ""
+		if ctFingerprint != nil && ctEnableFP {
+			userAgent = ctFingerprint.UserAgent
+		}
+		body = normalizeBillingHeaderBlock(body, userAgent, mimicClaudeCode)
 	}
 
 	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===

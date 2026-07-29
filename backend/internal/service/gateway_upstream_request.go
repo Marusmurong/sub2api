@@ -83,9 +83,21 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		}
 	}
 
-	// 同步 billing header cc_version 与实际发送的 User-Agent 版本
-	if fingerprint != nil {
-		body = syncBillingHeaderVersion(body, fingerprint.UserAgent)
+	// 归一化 billing attribution block：同步 cc_version 到实际发送的 UA 版本、补齐
+	// cch 段、并在 mimic 路径按最终 body 重算 fp。
+	//
+	// 位置必须在此处（buildUpstreamRequest 入口）：forward 链路对 messages 的改写
+	// （system 重写、dateline 归一化等）此时已全部完成。
+	//
+	// 条件只看 tokenType 而不看 fingerprint：cch 段属于 billing block 保真度，与
+	// enable_fingerprint_unification 开关无关；挂在 fingerprint 下会导致该开关关闭时
+	// 整个 block 不被归一化。UA 缺失时 normalizeBillingHeaderBlock 会跳过版本同步。
+	if tokenType == "oauth" {
+		userAgent := ""
+		if fingerprint != nil {
+			userAgent = fingerprint.UserAgent
+		}
+		body = normalizeBillingHeaderBlock(body, userAgent, mimicClaudeCode)
 	}
 
 	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===

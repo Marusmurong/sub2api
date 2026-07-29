@@ -953,58 +953,36 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 		logger.LegacyPrintf("service.gateway", "Warning: failed to build default Claude OAuth system blocks: %v", blockErr)
 		return body
 	}
+	// 3. 客户端原始 system 作为**尾块**追加进 system 数组。
+	//
+	//    真实 CLI 的 system 形态是 [billing, 身份块, ...调用方 system]（k7n 调用点，
+	//    见 docs/CC_2.1.220_EGRESS_SPEC.md §7）——调用方的 system 就留在 system 数组里。
+	//
+	//    此前实现把它搬成一对伪造对话注入 messages 开头：
+	//        user:      "[System Instructions]\n<客户端 system>"
+	//        assistant: "Understood. I will follow these instructions."
+	//    两句都是写死常量、真实 CLI 从不产生，一条正则即可命中；更要命的是它让
+	//    messages[0] 变成我们自己造的文本，而 cc_version 的 fp 正是按首条 user 消息
+	//    算的，导致 fp 与最终发出的 body 对不上。改回 system 尾块后两个问题同时消失。
+	//
+	//    追加前剥掉客户端自带的 Claude Code 身份声明：注入的 system 里已有一份规范
+	//    身份句，留两份既冗余也不合真实形态。只剥身份句本身——其后的自定义指令必须
+	//    保留，否则客户端指令会静默失效。原 system 的 cache_control 断点（含客户端
+	//    自选 TTL）一并保留。
+	instructionText := stripClaudeCodeIdentityPrefix(originalSystemText)
+	if instructionText != "" {
+		raw, err := marshalAnthropicSystemTextBlockWithCacheControl(instructionText, originalSystemCacheControl)
+		if err != nil {
+			logger.LegacyPrintf("service.gateway", "Warning: failed to marshal client system block: %v", err)
+		} else {
+			systemBlocks = append(systemBlocks, raw)
+		}
+	}
+
 	out, ok := setJSONRawBytes(body, "system", buildJSONArrayRaw(systemBlocks))
 	if !ok {
 		logger.LegacyPrintf("service.gateway", "Warning: failed to set Claude Code system prompt")
 		return body
-	}
-
-	// 3. 将原始 system prompt 作为 user/assistant 消息对注入到 messages 开头
-	//    模型仍通过 messages 接收完整指令，保留客户端功能
-	//
-	//    搬运前剥掉客户端自带的 Claude Code 身份声明：注入的 system 里已有一份规范身份句，
-	//    副本里再留一份既冗余、也不符合真实 CLI 形态（真实 CLI 不会在 user 消息里写这句）。
-	//    注意只剥身份句本身——其后的自定义指令必须搬走，否则客户端指令会静默失效。
-	//    同时保留原 system 上的 cache_control 断点（含客户端 TTL）。
-	instructionText := stripClaudeCodeIdentityPrefix(originalSystemText)
-	if instructionText != "" {
-		instructionBlock := map[string]any{
-			"type": "text",
-			"text": "[System Instructions]\n" + instructionText,
-		}
-		if originalSystemCacheControl != nil {
-			instructionBlock["cache_control"] = originalSystemCacheControl
-		}
-		instrMsg, err1 := json.Marshal(map[string]any{
-			"role": "user",
-			"content": []map[string]any{
-				instructionBlock,
-			},
-		})
-		ackMsg, err2 := json.Marshal(map[string]any{
-			"role": "assistant",
-			"content": []map[string]any{
-				{"type": "text", "text": "Understood. I will follow these instructions."},
-			},
-		})
-		if err1 != nil || err2 != nil {
-			logger.LegacyPrintf("service.gateway", "Warning: failed to marshal system-to-messages injection")
-			return out
-		}
-
-		// 重建 messages 数组：[instruction, ack, ...originalMessages]
-		items := [][]byte{instrMsg, ackMsg}
-		messagesResult := gjson.GetBytes(out, "messages")
-		if messagesResult.IsArray() {
-			messagesResult.ForEach(func(_, msg gjson.Result) bool {
-				items = append(items, []byte(msg.Raw))
-				return true
-			})
-		}
-
-		if next, setOk := setJSONRawBytes(out, "messages", buildJSONArrayRaw(items)); setOk {
-			out = next
-		}
 	}
 
 	return out
