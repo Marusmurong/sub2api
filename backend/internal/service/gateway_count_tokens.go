@@ -465,7 +465,7 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	}
 	var ctFingerprint *Fingerprint
 	if account.IsOAuth() && s.identityService != nil {
-		fp, err := s.identityService.GetOrCreateFingerprint(ctx, account.ID, clientHeaders)
+		fp, err := s.identityService.GetOrCreateFingerprint(ctx, account, clientHeaders)
 		if err == nil {
 			ctFingerprint = fp
 			if !ctEnableMPT {

@@ -72,16 +72,31 @@ func NewIdentityService(cache IdentityCache) *IdentityService {
 	return &IdentityService{cache: cache}
 }
 
-// GetOrCreateFingerprint 获取或创建账号的指纹
-// 如果缓存存在，检测user-agent版本，新版本则更新
-// 如果缓存不存在，生成随机ClientID并从请求头创建指纹，然后缓存
-func (s *IdentityService) GetOrCreateFingerprint(ctx context.Context, accountID int64, headers http.Header) (*Fingerprint, error) {
-	// 尝试从缓存获取指纹
+// GetOrCreateFingerprint 获取或创建账号的指纹。
+//
+// 优先级：
+//  1. 账号强制身份（extra.fingerprint，或启用 TLS 指纹时按 profile 自洽推导）
+//     —— 不从客户端头派生，也不允许客户端 merge OS/Arch/Runtime
+//  2. 遗留路径：Redis 缓存（可按客户端 UA 版本 merge）→ 否则从客户端头创建
+//
+// ClientID 在强制路径下优先用 extra.fingerprint.client_id，否则复用 Redis 中已有 ID，
+// 最后才生成新 ID 并写回 Redis（Redis 仅作缓存，丢了可用 extra 重建非 ClientID 字段）。
+func (s *IdentityService) GetOrCreateFingerprint(ctx context.Context, account *Account, headers http.Header) (*Fingerprint, error) {
+	if account == nil {
+		return nil, fmt.Errorf("account is nil")
+	}
+	accountID := account.ID
+
+	if forced := account.resolveForcedFingerprintSpec(); forced != nil {
+		return s.resolveForcedFingerprint(ctx, accountID, forced)
+	}
+
+	// --- legacy path: client-seeded, redis-cached ---
 	cached, err := s.cache.GetFingerprint(ctx, accountID)
 	if err == nil && cached != nil {
 		needWrite := false
 
-		// 检查客户端的user-agent是否是更新版本
+		// 检查客户端的 user-agent是否是更新版本
 		clientUA := headers.Get("User-Agent")
 		if clientUA != "" && isNewerVersion(clientUA, cached.UserAgent) {
 			// 版本升级：merge 语义 — 仅更新请求中实际携带的字段，保留缓存值
@@ -116,6 +131,35 @@ func (s *IdentityService) GetOrCreateFingerprint(ctx context.Context, accountID 
 	}
 
 	logger.LegacyPrintf("service.identity", "Created new fingerprint for account %d with client_id: %s", accountID, fp.ClientID)
+	return fp, nil
+}
+
+// resolveForcedFingerprint builds the locked identity and stabilizes ClientID via Redis.
+func (s *IdentityService) resolveForcedFingerprint(ctx context.Context, accountID int64, forced *forcedFingerprintSpec) (*Fingerprint, error) {
+	fp := forced.toFingerprint()
+	if fp == nil {
+		return nil, fmt.Errorf("forced fingerprint is empty")
+	}
+
+	// Prefer sticky ClientID: extra → redis → generate.
+	clientID := strings.TrimSpace(forced.ClientID)
+	if clientID == "" {
+		if cached, err := s.cache.GetFingerprint(ctx, accountID); err == nil && cached != nil && strings.TrimSpace(cached.ClientID) != "" {
+			clientID = cached.ClientID
+		}
+	}
+	if clientID == "" {
+		clientID = generateClientID()
+	}
+	fp.ClientID = clientID
+	fp.UpdatedAt = time.Now().Unix()
+
+	// Refresh redis so ClientID survives and debug tools still see the active identity.
+	// Ignore write errors: forced fields can always be rebuilt from extra/TLS.
+	if err := s.cache.SetFingerprint(ctx, accountID, fp); err != nil {
+		logger.LegacyPrintf("service.identity", "Warning: failed to cache forced fingerprint for account %d: %v", accountID, err)
+	}
+
 	return fp, nil
 }
 
