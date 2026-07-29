@@ -116,8 +116,10 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		body = sanitized
 	}
 
-	// 模型维度 body sanitize：新世代模型已废弃 temperature/top_p/top_k，
-	// 下游客户端常常无条件带上。必须在 CCH 签名与 NewRequest 之前完成。
+	// 模型维度 body sanitize：
+	//   - 新世代模型已废弃 temperature/top_p/top_k → 全部剥离
+	//   - 老模型仍支持采样，但 temperature 与 top_p 互斥 → 删 top_p 留 temperature
+	// 必须在 CCH 签名与 NewRequest 之前完成。
 	if sanitized, changed := stripDeprecatedSamplingParams(body, modelID); changed {
 		body = sanitized
 	}

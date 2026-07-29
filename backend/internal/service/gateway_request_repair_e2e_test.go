@@ -72,7 +72,7 @@ func TestBuildUpstreamRequest_PreservesSamplingParamsForLegacyModelEndToEnd(t *t
 	c := newRepairTestContext(t)
 	svc := &GatewayService{cfg: &config.Config{}}
 
-	// claude-opus-4-5 仍支持采样参数：必须原样透传，不能静默改变生成行为
+	// claude-opus-4-5 仍支持采样参数：单独 temperature 必须原样透传，不能静默改变生成行为
 	body := []byte(`{"model":"claude-opus-4-5-20251101","temperature":0.7,"max_tokens":64,"messages":[]}`)
 
 	req, _, err := svc.buildUpstreamRequest(
@@ -84,6 +84,27 @@ func TestBuildUpstreamRequest_PreservesSamplingParamsForLegacyModelEndToEnd(t *t
 	out := readRepairTestUpstreamBody(t, req)
 	require.InDelta(t, 0.7, gjson.GetBytes(out, "temperature").Float(), 1e-9,
 		"老模型的 temperature 必须原样保留: %s", out)
+}
+
+func TestBuildUpstreamRequest_StripsTopPWhenBothSamplingParamsOnLegacyModelEndToEnd(t *testing.T) {
+	c := newRepairTestContext(t)
+	svc := &GatewayService{cfg: &config.Config{}}
+
+	// 老模型仍支持采样，但 temperature 与 top_p 互斥：保留 temperature，删除 top_p
+	body := []byte(`{"model":"claude-opus-4-5-20251101","temperature":0.7,"top_p":0.9,"max_tokens":64,"messages":[]}`)
+
+	req, _, err := svc.buildUpstreamRequest(
+		context.Background(), c, newRepairTestOAuthAccount(), body,
+		"oauth-tok", "oauth", "claude-opus-4-5-20251101", false, true,
+	)
+	require.NoError(t, err)
+
+	out := readRepairTestUpstreamBody(t, req)
+	require.InDelta(t, 0.7, gjson.GetBytes(out, "temperature").Float(), 1e-9,
+		"temperature 必须保留: %s", out)
+	require.False(t, gjson.GetBytes(out, "top_p").Exists(),
+		"top_p 必须被剥离（互斥）: %s", out)
+	require.Equal(t, int64(64), gjson.GetBytes(out, "max_tokens").Int())
 }
 
 // —— 直连路径：schema 字段净化 ——

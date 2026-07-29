@@ -24,11 +24,26 @@ func TestStripDeprecatedSamplingParams(t *testing.T) {
 			wantPresent: []string{"model", "max_tokens"},
 		},
 		{
-			name:        "老模型原样保留",
-			body:        `{"model":"claude-opus-4-5-20251101","temperature":0.7,"top_p":0.9}`,
+			name:        "老模型只带 temperature 时原样保留",
+			body:        `{"model":"claude-opus-4-5-20251101","temperature":0.7}`,
 			model:       "claude-opus-4-5-20251101",
 			wantChanged: false,
-			wantPresent: []string{"temperature", "top_p"},
+			wantPresent: []string{"temperature"},
+		},
+		{
+			name:        "老模型只带 top_p 时原样保留",
+			body:        `{"model":"claude-opus-4-5-20251101","top_p":0.9}`,
+			model:       "claude-opus-4-5-20251101",
+			wantChanged: false,
+			wantPresent: []string{"top_p"},
+		},
+		{
+			name:        "老模型 temperature+top_p 同时存在时删 top_p 留 temperature",
+			body:        `{"model":"claude-opus-4-5-20251101","temperature":0.7,"top_p":0.9,"max_tokens":64}`,
+			model:       "claude-opus-4-5-20251101",
+			wantChanged: true,
+			wantAbsent:  []string{"top_p"},
+			wantPresent: []string{"temperature", "max_tokens"},
 		},
 		{
 			name:        "新世代模型但 body 本就没有采样参数",
@@ -52,10 +67,18 @@ func TestStripDeprecatedSamplingParams(t *testing.T) {
 			wantAbsent:  []string{"temperature"},
 		},
 		{
-			name:        "model 参数为空且 body.model 是老模型时保留",
+			name:        "model 参数为空且 body.model 是老模型时保留 temperature",
 			body:        `{"model":"claude-sonnet-4-5-20250929","temperature":0.5}`,
 			model:       "",
 			wantChanged: false,
+			wantPresent: []string{"temperature"},
+		},
+		{
+			name:        "model 参数为空且 body.model 是老模型 temperature+top_p 时删 top_p",
+			body:        `{"model":"claude-sonnet-4-5-20250929","temperature":0.5,"top_p":0.95}`,
+			model:       "",
+			wantChanged: true,
+			wantAbsent:  []string{"top_p"},
 			wantPresent: []string{"temperature"},
 		},
 		{
@@ -133,6 +156,54 @@ func TestForceStripSamplingParams(t *testing.T) {
 
 		_, changed := forceStripSamplingParams(body)
 
+		if changed {
+			t.Fatalf("changed = true, want false")
+		}
+	})
+}
+
+func TestStripMutuallyExclusiveSamplingParams(t *testing.T) {
+	t.Run("同时存在则删 top_p 留 temperature", func(t *testing.T) {
+		body := []byte(`{"temperature":0.7,"top_p":0.9,"max_tokens":16}`)
+		original := string(body)
+
+		got, changed := stripMutuallyExclusiveSamplingParams(body)
+		if !changed {
+			t.Fatalf("changed = false, want true")
+		}
+		if gjson.GetBytes(got, "top_p").Exists() {
+			t.Errorf("top_p should be stripped: %s", got)
+		}
+		if gjson.GetBytes(got, "temperature").Float() != 0.7 {
+			t.Errorf("temperature should be preserved: %s", got)
+		}
+		if gjson.GetBytes(got, "max_tokens").Int() != 16 {
+			t.Errorf("max_tokens should be preserved: %s", got)
+		}
+		if string(body) != original {
+			t.Errorf("original body was mutated in place: %s", body)
+		}
+	})
+
+	t.Run("仅 temperature 不改", func(t *testing.T) {
+		body := []byte(`{"temperature":0.5}`)
+		_, changed := stripMutuallyExclusiveSamplingParams(body)
+		if changed {
+			t.Fatalf("changed = true, want false")
+		}
+	})
+
+	t.Run("仅 top_p 不改", func(t *testing.T) {
+		body := []byte(`{"top_p":0.8}`)
+		_, changed := stripMutuallyExclusiveSamplingParams(body)
+		if changed {
+			t.Fatalf("changed = true, want false")
+		}
+	})
+
+	t.Run("两者都没有不改", func(t *testing.T) {
+		body := []byte(`{"max_tokens":8}`)
+		_, changed := stripMutuallyExclusiveSamplingParams(body)
 		if changed {
 			t.Fatalf("changed = true, want false")
 		}

@@ -94,11 +94,22 @@ var DefaultHeaders = map[string]string{
 	// Keep these in sync with recent Claude CLI traffic to reduce the chance
 	// that Claude Code-scoped OAuth credentials are rejected as "non-CLI" usage.
 	// 版本参考：对齐 Parrot (src/transform/cc_mimicry.py:49) 的 CLI_USER_AGENT。
-	"User-Agent":                                "claude-cli/" + CLICurrentVersion + " (external, cli)",
-	"X-Stainless-Lang":                          "js",
-	"X-Stainless-Package-Version":               "0.94.0",
-	"X-Stainless-OS":                            "Linux",
-	"X-Stainless-Arch":                          "arm64",
+	"User-Agent":                  "claude-cli/" + CLICurrentVersion + " (external, cli)",
+	"X-Stainless-Lang":            "js",
+	"X-Stainless-Package-Version": "0.94.0",
+	// MacOS/arm64 rather than Linux/arm64. Measured against the fingerprints
+	// real clients present to this gateway: of 23 samples, 20 reported
+	// Windows/x64 and 3 MacOS/arm64 — not one reported Linux/arm64. Mimicking a
+	// combination no real user reports puts every account served through
+	// mimicry alone in its cell of the (version x os x arch) space, which is
+	// the opposite of what mimicry is for.
+	"X-Stainless-OS":   "MacOS",
+	"X-Stainless-Arch": "arm64",
+	// Left at v24.3.0 on purpose, even though real 2.1.220 clients report
+	// v26.3.0: the TLS profile in pkg/tlsfingerprint was captured from Node.js
+	// 24.x, so claiming v26 here would make the HTTP layer contradict the
+	// ClientHello. An unusual-but-consistent runtime beats a self-contradicting
+	// one — revisit together with the TLS profile, not on its own.
 	"X-Stainless-Runtime":                       "node",
 	"X-Stainless-Runtime-Version":               "v24.3.0",
 	"X-Stainless-Retry-Count":                   "0",
