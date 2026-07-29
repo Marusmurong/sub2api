@@ -56,7 +56,7 @@ func TestNormalizeBillingHeaderBlockSyncsVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := normalizeBillingHeaderBlock([]byte(tt.body), tt.userAgent, false)
+			result := normalizeBillingHeaderBlock([]byte(tt.body), tt.userAgent, false, "")
 			if tt.unchanged {
 				assert.Equal(t, tt.body, string(result), "body should remain unchanged")
 			} else {
@@ -72,7 +72,7 @@ func TestNormalizeBillingHeaderBlockSyncsVersion(t *testing.T) {
 func TestNormalizeBillingHeaderBlockSyncsVersionAndAddsCCH(t *testing.T) {
 	body := `{"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.81.df2; cc_entrypoint=cli;"}],"messages":[]}`
 
-	result := string(normalizeBillingHeaderBlock([]byte(body), "claude-cli/2.1.220 (external, cli)", false))
+	result := string(normalizeBillingHeaderBlock([]byte(body), "claude-cli/2.1.220 (external, cli)", false, ""))
 
 	assert.Contains(t, result, "cc_version=2.1.220.df2")
 	assert.Contains(t, result, " cch=00000;")

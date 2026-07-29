@@ -56,8 +56,32 @@ func (c *gatewayCache) DeleteSessionAccountID(ctx context.Context, groupID int64
 	return c.rdb.Del(ctx, key).Err()
 }
 
+// prevRequestIDPrefix 是 cc_prev_req parent-link 的 key 前缀。
+// 格式: cc_prev_req:{accountID}:{sessionID}
+//
+// key 必须含 accountID：parent-link 只在产生该 request id 的账号上有效，
+// 换号后必须 miss（见 service.lookupPrevRequestID）。
+const prevRequestIDPrefix = "cc_prev_req:"
+
+func buildPrevRequestIDKey(accountID int64, sessionID string) string {
+	return fmt.Sprintf("%s%d:%s", prevRequestIDPrefix, accountID, sessionID)
+}
+
+func (c *gatewayCache) GetPrevRequestID(ctx context.Context, accountID int64, sessionID string) (string, error) {
+	return c.rdb.Get(ctx, buildPrevRequestIDKey(accountID, sessionID)).Result()
+}
+
+func (c *gatewayCache) SetPrevRequestID(ctx context.Context, accountID int64, sessionID, requestID string, ttl time.Duration) error {
+	return c.rdb.Set(ctx, buildPrevRequestIDKey(accountID, sessionID), requestID, ttl).Err()
+}
+
 // Compile-time assertion: gatewayCache must implement CyberSessionBlockStore.
 var _ service.CyberSessionBlockStore = (*gatewayCache)(nil)
+
+// Compile-time assertion: gatewayCache must implement PrevRequestIDStore.
+// 该断言是 cc_prev_req 能力生效的前提——service 侧走运行时类型断言，
+// 断了只会静默降级，不会编译失败。
+var _ service.PrevRequestIDStore = (*gatewayCache)(nil)
 var _ service.LiveCallStore = (*gatewayCache)(nil)
 
 const cyberSessionBlockPrefix = "cyber_session_block:"

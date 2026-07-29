@@ -328,7 +328,7 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 			AccountID:          account.ID,
 			AccountName:        account.Name,
 			UpstreamStatusCode: resp.StatusCode,
-			UpstreamRequestID:  resp.Header.Get("x-request-id"),
+			UpstreamRequestID:  upstreamRequestID(resp.Header),
 			UpstreamURL:        safeUpstreamURL(upstreamReq.URL.String()),
 			Passthrough:        true,
 			Kind:               "http_error",
@@ -487,7 +487,10 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 		if ctFingerprint != nil && ctEnableFP {
 			userAgent = ctFingerprint.UserAgent
 		}
-		body = normalizeBillingHeaderBlock(body, userAgent, mimicClaudeCode)
+		// count_tokens 不产生 assistant 响应，因此不参与 parent-link：
+		// 既不注入 cc_prev_req（真实 CLI 的 count_tokens 同样没有上一轮 assistant
+		// 条目可指），也不记录本轮 id。
+		body = normalizeBillingHeaderBlock(body, userAgent, mimicClaudeCode, "")
 	}
 
 	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===

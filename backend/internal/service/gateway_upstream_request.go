@@ -97,7 +97,14 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		if fingerprint != nil {
 			userAgent = fingerprint.UserAgent
 		}
-		body = normalizeBillingHeaderBlock(body, userAgent, mimicClaudeCode)
+		// parent-link：取本会话在本账号上的上一轮 upstream request id。
+		// 会话标识同时暂存到 gin.Context，供响应侧落存本轮 id 时复用。
+		sessionID := ccPrevReqSessionID(body)
+		if c != nil && sessionID != "" {
+			c.Set(ccPrevReqSessionIDKey, sessionID)
+		}
+		body = normalizeBillingHeaderBlock(body, userAgent, mimicClaudeCode,
+			s.lookupPrevRequestID(ctx, account, sessionID))
 	}
 
 	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===

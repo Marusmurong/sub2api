@@ -50,7 +50,7 @@ const billingHeaderCCHSegment = " cch=00000;"
 // 是按最终 messages 算 fp 的（见 EGRESS_SPEC §4.2）。透传路径的 block 由真实客户端
 // 生成，其取样口径含 transcript 的 isMeta 过滤，我们无法从 API body 完全复现，重算
 // 反而可能引入偏差，故保持客户端原值。
-func normalizeBillingHeaderBlock(body []byte, userAgent string, recomputeFingerprint bool) []byte {
+func normalizeBillingHeaderBlock(body []byte, userAgent string, recomputeFingerprint bool, prevRequestID string) []byte {
 	systemResult := gjson.GetBytes(body, "system")
 	if !systemResult.Exists() || !systemResult.IsArray() {
 		return body
@@ -80,6 +80,7 @@ func normalizeBillingHeaderBlock(body []byte, userAgent string, recomputeFingerp
 			next = ccVersionFingerprintInBillingRe.ReplaceAllString(next, "${1}."+fingerprint)
 		}
 		next = ensureBillingHeaderCCH(next)
+		next = ensureBillingHeaderPrevReq(next, prevRequestID)
 
 		if next != original {
 			if updated, err := sjson.SetBytes(body, fmt.Sprintf("system.%d.text", idx), next); err == nil {
@@ -91,6 +92,23 @@ func normalizeBillingHeaderBlock(body []byte, userAgent string, recomputeFingerp
 	})
 
 	return body
+}
+
+// ensureBillingHeaderPrevReq 在 block 末尾追加 cc_prev_req 段。
+//
+// 位置对齐真实 k7n 的拼接顺序：cc_version; cc_entrypoint; [cch] [cc_workload]
+// [cc_is_subagent] [cc_prev_req]——parent-link 恒在最后。
+//
+// prevRequestID 为空表示会话首轮或换过号，此时真实 CLI 同样不发该段。
+// 已存在时不覆盖：透传路径上客户端若自己带了，以客户端的为准。
+func ensureBillingHeaderPrevReq(text, prevRequestID string) string {
+	if prevRequestID == "" || strings.Contains(text, "cc_prev_req=") {
+		return text
+	}
+	if !upstreamRequestIDPattern.MatchString(prevRequestID) {
+		return text
+	}
+	return strings.TrimRight(text, " ") + " cc_prev_req=" + prevRequestID + ";"
 }
 
 // ensureBillingHeaderCCH 在 cc_entrypoint 段之后补上 cch 段；已存在则原样返回。

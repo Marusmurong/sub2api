@@ -72,7 +72,7 @@ func TestNormalizeBillingHeaderBlockAddsCCHOnBothPaths(t *testing.T) {
 
 	for _, mimic := range []bool{true, false} {
 		body := billingBody(t, billing, "hello world this is a test message")
-		out := normalizeBillingHeaderBlock(body, ua, mimic)
+		out := normalizeBillingHeaderBlock(body, ua, mimic, "")
 		got := gjson.GetBytes(out, "system.0.text").String()
 		if !strings.Contains(got, " cch=00000;") {
 			t.Errorf("mimic=%v 时未补齐 cch: %q", mimic, got)
@@ -86,7 +86,7 @@ func TestNormalizeBillingHeaderBlockKeepsClientFingerprintOnPassthrough(t *testi
 	const billing = "x-anthropic-billing-header: cc_version=2.1.220.abc; cc_entrypoint=cli;"
 	body := billingBody(t, billing, "hello world this is a test message")
 
-	out := normalizeBillingHeaderBlock(body, "claude-cli/2.1.220 (external, cli)", false)
+	out := normalizeBillingHeaderBlock(body, "claude-cli/2.1.220 (external, cli)", false, "")
 
 	got := gjson.GetBytes(out, "system.0.text").String()
 	if !strings.Contains(got, "cc_version=2.1.220.abc") {
@@ -101,7 +101,7 @@ func TestNormalizeBillingHeaderBlockRecomputesFingerprintOnMimic(t *testing.T) {
 	const firstText = "你好，请帮我把这段话翻译成英文"
 
 	body := billingBody(t, billing, firstText)
-	out := normalizeBillingHeaderBlock(body, "claude-cli/2.1.220 (external, cli)", true)
+	out := normalizeBillingHeaderBlock(body, "claude-cli/2.1.220 (external, cli)", true, "")
 
 	want := computeClaudeCodeFingerprint(body, "2.1.220")
 	got := gjson.GetBytes(out, "system.0.text").String()
