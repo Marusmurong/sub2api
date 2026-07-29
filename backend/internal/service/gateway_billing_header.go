@@ -38,40 +38,6 @@ var ccEntrypointSegmentRe = regexp.MustCompile(`(cc_entrypoint=[^;]*;)`)
 // 判断字段已被移除，是误读；字段一直都在。详见 docs/CC_2.1.220_EGRESS_SPEC.md §3。
 const billingHeaderCCHSegment = " cch=00000;"
 
-// syncBillingHeaderVersion rewrites cc_version in x-anthropic-billing-header
-// system text blocks to match the version extracted from userAgent.
-// Only touches system array blocks whose text starts with "x-anthropic-billing-header".
-func syncBillingHeaderVersion(body []byte, userAgent string) []byte {
-	version := ExtractCLIVersion(userAgent)
-	if version == "" {
-		return body
-	}
-
-	systemResult := gjson.GetBytes(body, "system")
-	if !systemResult.Exists() || !systemResult.IsArray() {
-		return body
-	}
-
-	replacement := "cc_version=" + version
-	idx := 0
-	systemResult.ForEach(func(_, item gjson.Result) bool {
-		text := item.Get("text")
-		if text.Exists() && text.Type == gjson.String &&
-			strings.HasPrefix(text.String(), billingHeaderPrefix) {
-			newText := ccVersionInBillingRe.ReplaceAllString(text.String(), replacement)
-			if newText != text.String() {
-				if updated, err := sjson.SetBytes(body, fmt.Sprintf("system.%d.text", idx), newText); err == nil {
-					body = updated
-				}
-			}
-		}
-		idx++
-		return true
-	})
-
-	return body
-}
-
 // normalizeBillingHeaderBlock 归一化 system 里的 billing attribution block，
 // 是转发前对该 block 的唯一收口点：
 //

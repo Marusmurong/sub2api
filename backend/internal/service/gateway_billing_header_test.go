@@ -6,7 +6,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSyncBillingHeaderVersion(t *testing.T) {
+// 用例的 fixture 里本就带着 cch=00000;——它一直存在于真实流量中。
+// 这里以透传口径（recomputeFingerprint=false）验证版本同步与幂等性。
+func TestNormalizeBillingHeaderBlockSyncsVersion(t *testing.T) {
 	tests := []struct {
 		name      string
 		body      string
@@ -54,7 +56,7 @@ func TestSyncBillingHeaderVersion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := syncBillingHeaderVersion([]byte(tt.body), tt.userAgent)
+			result := normalizeBillingHeaderBlock([]byte(tt.body), tt.userAgent, false)
 			if tt.unchanged {
 				assert.Equal(t, tt.body, string(result), "body should remain unchanged")
 			} else {
@@ -64,4 +66,15 @@ func TestSyncBillingHeaderVersion(t *testing.T) {
 			}
 		})
 	}
+}
+
+// 版本同步与 cch 补齐互不干扰：缺 cch 的 block 在同步版本的同时被补齐。
+func TestNormalizeBillingHeaderBlockSyncsVersionAndAddsCCH(t *testing.T) {
+	body := `{"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.81.df2; cc_entrypoint=cli;"}],"messages":[]}`
+
+	result := string(normalizeBillingHeaderBlock([]byte(body), "claude-cli/2.1.220 (external, cli)", false))
+
+	assert.Contains(t, result, "cc_version=2.1.220.df2")
+	assert.Contains(t, result, " cch=00000;")
+	assert.NotContains(t, result, "cc_version=2.1.81")
 }
