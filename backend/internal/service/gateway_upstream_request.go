@@ -87,6 +87,19 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		}
 	}
 
+	// 兜底：任何一条消息的 content 都不能是空数组，否则上游直接
+	//   400 messages.N: user messages must have non-empty content
+	//
+	// 空内容有两个来源，且都不该指望上游宽容：
+	//   1) 客户端本来就发了 content: []（生产实测的主要来源）
+	//   2) 某个改写步骤把消息删空了——空文本块清洗、thinking 剥离都可能造成
+	//
+	// 之所以放在这里而不是各改写点内部：改写链上任何一环都可能制造空内容，逐点加守卫
+	// 既容易漏（filterThinkingBlocksInternal 就漏了，占位符逻辑只写在 ForRetry 版本里）
+	// 又难保证顺序正确。这里是出口唯一收口，与下面 billing block 归一化同理——
+	// forward 链路对 messages 的改写此时已全部完成。
+	body = ensureNonEmptyMessageContent(body)
+
 	// 归一化 billing attribution block：同步 cc_version 到实际发送的 UA 版本、补齐
 	// cch 段、并在 mimic 路径按最终 body 重算 fp。
 	//

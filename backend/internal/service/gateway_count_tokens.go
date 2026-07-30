@@ -485,6 +485,10 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 		}
 	}
 
+	// 与 buildUpstreamRequest 同样的空内容兜底：count_tokens 走独立的构建函数，
+	// 漏掉它同样会被上游 400。
+	body = ensureNonEmptyMessageContent(body)
+
 	// 归一化 billing attribution block：同步 cc_version、补齐 cch 段。
 	// 与 buildUpstreamRequest 保持同一形态与同一门槛（只看 tokenType），避免同一账号
 	// 在 messages 与 count_tokens 两类请求上呈现不一致的 billing block。

@@ -75,3 +75,53 @@ func TestStripEmptyTextBlocks_OnlyEmptiedMessageGetsPlaceholder(t *testing.T) {
 	require.Equal(t, "(content removed)", gjson.GetBytes(out, "messages.1.content.0.text").String())
 	require.Equal(t, "第三条", gjson.GetBytes(out, "messages.2.content.0.text").String())
 }
+
+// ===== 出口兜底：ensureNonEmptyMessageContent =====
+//
+// 上游对空 content 一律 400。空内容有两个来源，逐点加守卫会漏——
+// filterThinkingBlocksInternal 就漏了（占位符逻辑只写在 ForRetry 版本里），
+// 客户端直接发 content:[] 更是没人管。所以在出口做统一兜底。
+
+func TestEnsureNonEmptyMessageContent_ClientSentEmptyArray(t *testing.T) {
+	body := []byte(`{"model":"m","messages":[` +
+		`{"role":"user","content":[{"type":"text","text":"hi"}]},` +
+		`{"role":"assistant","content":[{"type":"text","text":"ok"}]},` +
+		`{"role":"user","content":[]}]}`)
+
+	out := ensureNonEmptyMessageContent(body)
+
+	require.Equal(t, "(content removed)",
+		gjson.GetBytes(out, "messages.2.content.0.text").String(),
+		"客户端原样发来的空 content 必须被兜住")
+	require.Equal(t, "hi", gjson.GetBytes(out, "messages.0.content.0.text").String())
+	require.Equal(t, "ok", gjson.GetBytes(out, "messages.1.content.0.text").String())
+}
+
+func TestEnsureNonEmptyMessageContent_AssistantEmptiedByThinkingStrip(t *testing.T) {
+	// thinking=disabled 时 assistant 的 thinking 块被剥离，整条消息变空
+	body := []byte(`{"model":"claude-opus-4-8","thinking":{"type":"disabled"},"messages":[` +
+		`{"role":"user","content":[{"type":"text","text":"hi"}]},` +
+		`{"role":"assistant","content":[{"type":"thinking","thinking":"t","signature":"s"}]}]}`)
+
+	stripped := FilterThinkingBlocks(body, "claude-opus-4-8")
+	require.Empty(t, gjson.GetBytes(stripped, "messages.1.content").Array(),
+		"前提：剥离确实会把 assistant 清空（此处不修它，由出口兜底）")
+
+	out := ensureNonEmptyMessageContent(stripped)
+	require.Equal(t, "(assistant content removed)",
+		gjson.GetBytes(out, "messages.1.content.0.text").String())
+}
+
+// 无空内容时必须原样返回：反序列化会打乱字段顺序，影响 prompt cache 前缀。
+func TestEnsureNonEmptyMessageContent_NoEmptyContentUntouched(t *testing.T) {
+	body := []byte(`{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]}`)
+	require.Equal(t, string(body), string(ensureNonEmptyMessageContent(body)))
+}
+
+// content 是字符串（而非数组）时不受影响
+func TestEnsureNonEmptyMessageContent_StringContentUntouched(t *testing.T) {
+	body := []byte(`{"model":"m","messages":[{"role":"user","content":"hi"},{"role":"assistant","content":[]}]}`)
+	out := ensureNonEmptyMessageContent(body)
+	require.Equal(t, "hi", gjson.GetBytes(out, "messages.0.content").String())
+	require.Equal(t, "(assistant content removed)", gjson.GetBytes(out, "messages.1.content.0.text").String())
+}

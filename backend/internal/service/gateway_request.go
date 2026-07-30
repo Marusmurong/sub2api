@@ -510,6 +510,63 @@ func stripEmptyTextBlocksFromSlice(blocks []any) ([]any, bool) {
 // 上游对 content 为空数组的消息一律 400（"user messages must have non-empty content"），
 // 所以任何会删块的清洗都必须保证不把消息删空。占位文案区分 role，便于在排查时一眼看出
 // 是哪一侧的内容被清掉了。
+// ensureNonEmptyMessageContent 保证没有任何一条消息的 content 是空数组。
+//
+// 上游对空 content 一律 400（"user messages must have non-empty content"）。空内容
+// 既可能是客户端原样发来的，也可能由我们的改写链造成（空文本块清洗、thinking 剥离）。
+// 这里只做最后兜底，不替代各改写点自身的处理。
+//
+// 快路径：body 里没有空 content 字面量时原样返回，避免对绝大多数请求做无谓的
+// 反序列化——那会改变字段顺序，进而影响 prompt cache 前缀。
+func ensureNonEmptyMessageContent(body []byte) []byte {
+	if len(body) == 0 {
+		return body
+	}
+	if !bytes.Contains(body, patternEmptyContent) &&
+		!bytes.Contains(body, patternEmptyContentSpaced) &&
+		!bytes.Contains(body, patternEmptyContentSp1) &&
+		!bytes.Contains(body, patternEmptyContentSp2) {
+		return body
+	}
+
+	msgsRes := gjson.GetBytes(body, "messages")
+	if !msgsRes.Exists() || !msgsRes.IsArray() {
+		return body
+	}
+	var messages []any
+	if err := json.Unmarshal(sliceRawFromBody(body, msgsRes), &messages); err != nil {
+		return body
+	}
+
+	modified := false
+	for _, msg := range messages {
+		msgMap, ok := msg.(map[string]any)
+		if !ok {
+			continue
+		}
+		content, ok := msgMap["content"].([]any)
+		if !ok || len(content) > 0 {
+			continue
+		}
+		role, _ := msgMap["role"].(string)
+		msgMap["content"] = emptyContentPlaceholder(role)
+		modified = true
+	}
+	if !modified {
+		return body
+	}
+
+	msgsBytes, err := json.Marshal(messages)
+	if err != nil {
+		return body
+	}
+	out, err := sjson.SetRawBytes(body, "messages", msgsBytes)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
 func emptyContentPlaceholder(role string) []any {
 	placeholder := "(content removed)"
 	if role == "assistant" {
