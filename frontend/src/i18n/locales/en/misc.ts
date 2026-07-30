@@ -306,6 +306,8 @@ export default {
       link: 'Link',
       alipay_direct: 'Alipay (Direct)',
       wxpay_direct: 'WeChat Pay (Direct)',
+      // Cashback ledger rows written by the cashback plugin, not a real channel
+      cashback: 'Recharge Cashback',
     },
     status: {
       pending: 'Pending',

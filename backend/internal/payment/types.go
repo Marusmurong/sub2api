@@ -18,6 +18,14 @@ const (
 	TypeLink         PaymentType = "link"
 	TypeEasyPay      PaymentType = "easypay"
 	TypeAirwallex    PaymentType = "airwallex"
+
+	// TypeCashback 标记由充返插件写入的返现流水，不是真实支付渠道。
+	//
+	// 这类订单让客户能在 /orders 上查到自己的返现记录（支付方式列显示"充值返现"）。
+	// 它们刻意不设 paid_at 与 provider_instance_id —— 收入看板、渠道日额度、
+	// 每用户每日充值上限都只按 status + paid_at 过滤，留空即天然排除：返现是费用
+	// 而非收入，也不该占用户的充值额度。
+	TypeCashback PaymentType = "cashback"
 )
 
 // Order status constants shared across payment and service layers.

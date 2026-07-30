@@ -330,6 +330,8 @@ export default {
       link: 'Link',
       alipay_direct: '支付宝（直连）',
       wxpay_direct: '微信支付（直连）',
+      // 充返插件写入的返现流水，非真实支付渠道
+      cashback: '充值返现',
     },
     status: {
       pending: '待支付',

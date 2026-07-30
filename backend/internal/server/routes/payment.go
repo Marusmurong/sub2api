@@ -85,6 +85,9 @@ func RegisterPaymentRoutes(
 		adminOrders := adminGroup.Group("/orders")
 		{
 			adminOrders.GET("", adminPaymentHandler.ListOrders)
+			// 静态段需在 :id 之前注册；同层混用的先例见 routes/admin.go 的
+			// POST /:id/balance 与 POST /batch-concurrency。
+			adminOrders.POST("/cashback", adminPaymentHandler.CreateCashbackOrderRecord)
 			adminOrders.GET("/:id", adminPaymentHandler.GetOrderDetail)
 			adminOrders.POST("/:id/cancel", adminPaymentHandler.CancelOrder)
 			adminOrders.POST("/:id/retry", adminPaymentHandler.RetryFulfillment)

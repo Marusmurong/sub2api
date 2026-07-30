@@ -191,6 +191,11 @@ func (s *PaymentService) validateRefundRequest(ctx context.Context, oid, uid int
 	if o.OrderType != payment.OrderTypeBalance {
 		return nil, infraerrors.BadRequest("INVALID_ORDER_TYPE", "only balance orders can request refund")
 	}
+	// 返现流水不是真实支付，没有可退的款。它是 balance + COMPLETED 且属于该用户，
+	// 上面几项检查都拦不住，必须显式排除 —— 否则用户可对返现记录发起退款。
+	if o.PaymentType == payment.TypeCashback {
+		return nil, infraerrors.BadRequest("CASHBACK_NOT_REFUNDABLE", "cashback records cannot be refunded")
+	}
 	if o.Status != OrderStatusCompleted {
 		return nil, infraerrors.BadRequest("INVALID_STATUS", "only completed orders can request refund")
 	}
@@ -209,6 +214,11 @@ func (s *PaymentService) PrepareRefund(ctx context.Context, oid int64, amt float
 	o, err := s.entClient.PaymentOrder.Get(ctx, oid)
 	if err != nil {
 		return nil, nil, infraerrors.NotFound("NOT_FOUND", "order not found")
+	}
+	// 返现流水不是真实支付：没有 provider_instance_id，走到下面也只会以
+	// "REFUND_DISABLED" 隐式失败。显式拒绝，给出可诊断的错误。
+	if o.PaymentType == payment.TypeCashback {
+		return nil, nil, infraerrors.BadRequest("CASHBACK_NOT_REFUNDABLE", "cashback records cannot be refunded")
 	}
 	ok := []string{OrderStatusCompleted, OrderStatusRefundRequested, OrderStatusRefundPending, OrderStatusRefundFailed}
 	if !psSliceContains(ok, o.Status) {

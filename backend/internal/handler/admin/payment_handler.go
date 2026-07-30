@@ -102,6 +102,39 @@ func (h *PaymentHandler) CancelOrder(c *gin.Context) {
 	response.Success(c, gin.H{"message": msg})
 }
 
+// CashbackOrderRecordBody 是返现流水的写入请求。
+type CashbackOrderRecordBody struct {
+	UserID        int64   `json:"user_id" binding:"required"`
+	Amount        float64 `json:"amount" binding:"required"`
+	SourceOrderID int64   `json:"source_order_id"`
+	Reference     string  `json:"reference" binding:"required"`
+	Notes         string  `json:"notes"`
+}
+
+// CreateCashbackOrderRecord 为一笔已发放的返现落一条订单流水，使客户能在
+// /orders 上查到（支付方式显示"充值返现"）。由充返插件调用，按 reference 幂等。
+// POST /api/v1/admin/payment/orders/cashback
+func (h *PaymentHandler) CreateCashbackOrderRecord(c *gin.Context) {
+	var req CashbackOrderRecordBody
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	order, created, err := h.paymentService.CreateCashbackOrderRecord(
+		c.Request.Context(), service.CreateCashbackOrderRecordRequest{
+			UserID:        req.UserID,
+			Amount:        req.Amount,
+			SourceOrderID: req.SourceOrderID,
+			Reference:     req.Reference,
+			Notes:         req.Notes,
+		})
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, gin.H{"order_id": order.ID, "created": created})
+}
+
 // RetryFulfillment retries fulfillment for a paid order.
 // POST /api/v1/admin/payment/orders/:id/retry
 func (h *PaymentHandler) RetryFulfillment(c *gin.Context) {
