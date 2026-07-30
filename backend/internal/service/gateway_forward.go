@@ -239,17 +239,32 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if err := replaceBody(s.rewriteMessageCacheControlIfEnabled(ctx, body)); err != nil {
 			return nil, err
 		}
-		if rw := buildToolNameRewriteFromBody(body); rw != nil {
-			if err := replaceBody(applyToolNameRewriteToBody(body, rw)); err != nil {
+		// 工具名混淆只对**非** Claude Code 客户端做。
+		//
+		// 它的用途是把第三方工具链（opencode 等）的工具名换成通用假名。真 CC 客户端
+		// 的工具名（Task / Bash / Read / WebFetch…）本来就是官方的，换成 invoke_Age00
+		// 这种假名反而更不像 Claude Code——上游当然知道官方客户端有哪些工具。
+		//
+		// 还有一个硬故障：改写只覆盖 tools[*].name、tool_choice.name、tool_use.name，
+		// 不含 tool_reference.tool_name（tool search 特性产生）。工具表里已是假名、
+		// 历史引用仍是原名，上游直接
+		//   400 Tool reference 'WebFetch' not found in available tools
+		// 这个漏改是既有的，但在真 CC 走透传时一直是潜伏的；统一伪装后才被激活。
+		//
+		// 身份统一（header / billing block / beta）仍然一律做，与本项无关。
+		var toolRewrite *ToolNameRewrite
+		if !isClaudeCode {
+			toolRewrite = buildToolNameRewriteFromBody(body)
+		}
+		if toolRewrite != nil {
+			if err := replaceBody(applyToolNameRewriteToBody(body, toolRewrite)); err != nil {
 				return nil, err
 			}
 			if c != nil {
-				c.Set(toolNameRewriteKey, rw)
+				c.Set(toolNameRewriteKey, toolRewrite)
 			}
-		} else {
-			if err := replaceBody(applyToolsLastCacheBreakpoint(body)); err != nil {
-				return nil, err
-			}
+		} else if err := replaceBody(applyToolsLastCacheBreakpoint(body)); err != nil {
+			return nil, err
 		}
 	}
 
