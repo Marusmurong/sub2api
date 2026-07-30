@@ -239,32 +239,35 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if err := replaceBody(s.rewriteMessageCacheControlIfEnabled(ctx, body)); err != nil {
 			return nil, err
 		}
-		// 工具名混淆只对**非** Claude Code 客户端做。
+		// tools 相关的两项改写（工具名混淆、tools[-1] 缓存断点）只对**非** Claude Code
+		// 客户端做。它们都是"让第三方请求更像 CC"的辅助手段，而真 CC 本来就是 CC——
+		// 对它动手只会帮倒忙：
 		//
-		// 它的用途是把第三方工具链（opencode 等）的工具名换成通用假名。真 CC 客户端
-		// 的工具名（Task / Bash / Read / WebFetch…）本来就是官方的，换成 invoke_Age00
-		// 这种假名反而更不像 Claude Code——上游当然知道官方客户端有哪些工具。
+		// 1) 工具名混淆：真 CC 的工具名（Task / Bash / Read / WebFetch…）就是官方的，
+		//    换成 invoke_Age00 反而更不像。而且改写只覆盖 tools[*].name、
+		//    tool_choice.name、tool_use.name，不含 tool_reference.tool_name
+		//    （tool search 特性产生），于是工具表已是假名、历史引用仍是原名：
+		//      400 Tool reference 'WebFetch' not found in available tools
 		//
-		// 还有一个硬故障：改写只覆盖 tools[*].name、tool_choice.name、tool_use.name，
-		// 不含 tool_reference.tool_name（tool search 特性产生）。工具表里已是假名、
-		// 历史引用仍是原名，上游直接
-		//   400 Tool reference 'WebFetch' not found in available tools
-		// 这个漏改是既有的，但在真 CC 走透传时一直是潜伏的；统一伪装后才被激活。
+		// 2) tools[-1] 缓存断点：写死 ttl=5m。真 CC 自己管断点，其 system 可能用
+		//    ttl=1h（querySource 决定）。上游按 tools → system → messages 顺序校验
+		//    TTL 单调性，我们插的 5m 排在客户端的 1h 前面，直接：
+		//      400 system.N.cache_control.ttl: a ttl='1h' cache_control block
+		//          must not come after a ttl='5m' cache_control block
 		//
+		// 两处缺口都是既有的，但真 CC 走透传时一直潜伏；统一伪装后才被激活。
 		// 身份统一（header / billing block / beta）仍然一律做，与本项无关。
-		var toolRewrite *ToolNameRewrite
 		if !isClaudeCode {
-			toolRewrite = buildToolNameRewriteFromBody(body)
-		}
-		if toolRewrite != nil {
-			if err := replaceBody(applyToolNameRewriteToBody(body, toolRewrite)); err != nil {
+			if toolRewrite := buildToolNameRewriteFromBody(body); toolRewrite != nil {
+				if err := replaceBody(applyToolNameRewriteToBody(body, toolRewrite)); err != nil {
+					return nil, err
+				}
+				if c != nil {
+					c.Set(toolNameRewriteKey, toolRewrite)
+				}
+			} else if err := replaceBody(applyToolsLastCacheBreakpoint(body)); err != nil {
 				return nil, err
 			}
-			if c != nil {
-				c.Set(toolNameRewriteKey, toolRewrite)
-			}
-		} else if err := replaceBody(applyToolsLastCacheBreakpoint(body)); err != nil {
-			return nil, err
 		}
 	}
 

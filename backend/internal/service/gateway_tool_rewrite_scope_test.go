@@ -60,3 +60,24 @@ func TestBuildToolNameRewrite_BelowThresholdStillNoRewrite(t *testing.T) {
 	body := []byte(`{"model":"m","messages":[],"tools":` + toolsJSON("Bash", "Read") + `}`)
 	require.Nil(t, buildToolNameRewriteFromBody(body))
 }
+
+// tools[-1] 缓存断点写死 ttl=5m。真 CC 自己管断点，其 system 可能用 ttl=1h；
+// 上游按 tools → system → messages 校验 TTL 单调性，我们插的 5m 排在 1h 前面就 400。
+func TestApplyToolsLastCacheBreakpoint_InjectsFiveMinuteTTL(t *testing.T) {
+	body := []byte(`{"model":"m","tools":` + toolsJSON("Bash", "Read") + `}`)
+
+	out := applyToolsLastCacheBreakpoint(body)
+
+	require.Equal(t, "5m", gjson.GetBytes(out, "tools.1.cache_control.ttl").String(),
+		"锁住这个写死的 5m —— 它与客户端 system 的 1h 冲突，故对真 CC 不得注入")
+}
+
+// 客户端已自带带 ttl 的断点时不覆盖（既有行为，确认未被本次改动破坏）
+func TestApplyToolsLastCacheBreakpoint_RespectsExistingTTL(t *testing.T) {
+	body := []byte(`{"model":"m","tools":[{"name":"Bash","description":"d","input_schema":{"type":"object"},` +
+		`"cache_control":{"type":"ephemeral","ttl":"1h"}}]}`)
+
+	out := applyToolsLastCacheBreakpoint(body)
+
+	require.Equal(t, "1h", gjson.GetBytes(out, "tools.0.cache_control.ttl").String())
+}
