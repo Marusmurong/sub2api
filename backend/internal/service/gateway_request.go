@@ -505,9 +505,27 @@ func stripEmptyTextBlocksFromSlice(blocks []any) ([]any, bool) {
 	return result, true
 }
 
+// emptyContentPlaceholder 返回把消息内容清空后用于占位的单个文本块。
+//
+// 上游对 content 为空数组的消息一律 400（"user messages must have non-empty content"），
+// 所以任何会删块的清洗都必须保证不把消息删空。占位文案区分 role，便于在排查时一眼看出
+// 是哪一侧的内容被清掉了。
+func emptyContentPlaceholder(role string) []any {
+	placeholder := "(content removed)"
+	if role == "assistant" {
+		placeholder = "(assistant content removed)"
+	}
+	return []any{map[string]any{"type": "text", "text": placeholder}}
+}
+
 // StripEmptyTextBlocks removes empty text blocks from the request body (including nested tool_result content).
 // This is a lightweight pre-filter for the initial request path to prevent upstream 400 errors.
 // Returns the original body unchanged if no empty text blocks are found.
+//
+// 注意：删块本身可能把一条消息删空——客户端发来的 user 消息若整条只有空文本块，
+// 清洗后就变成 content: []，换来另一个 400。这个函数原本没有守卫，生产上每天几十次
+// "user messages must have non-empty content" 都出自这里。清空时补占位块，与
+// FilterThinkingBlocks 的既有处理保持一致。
 func StripEmptyTextBlocks(body []byte) []byte {
 	// Fast path: check if body contains empty text patterns
 	hasEmptyTextBlock := bytes.Contains(body, patternEmptyText) ||
@@ -541,6 +559,10 @@ func StripEmptyTextBlocks(body []byte) []byte {
 		}
 		if cleaned, changed := stripEmptyTextBlocksFromSlice(content); changed {
 			modified = true
+			if len(cleaned) == 0 {
+				role, _ := msgMap["role"].(string)
+				cleaned = emptyContentPlaceholder(role)
+			}
 			msgMap["content"] = cleaned
 		}
 	}
@@ -778,22 +800,14 @@ func FilterThinkingBlocksForRetry(body []byte, mappedModel string) []byte {
 		if newContent == nil {
 			if len(content) == 0 {
 				modified = true
-				placeholder := "(content removed)"
-				if role == "assistant" {
-					placeholder = "(assistant content removed)"
-				}
-				msgMap["content"] = []any{map[string]any{"type": "text", "text": placeholder}}
+				msgMap["content"] = emptyContentPlaceholder(role)
 			}
 			continue
 		}
 
 		if len(newContent) == 0 {
 			modified = true
-			placeholder := "(content removed)"
-			if role == "assistant" {
-				placeholder = "(assistant content removed)"
-			}
-			msgMap["content"] = []any{map[string]any{"type": "text", "text": placeholder}}
+			msgMap["content"] = emptyContentPlaceholder(role)
 			continue
 		}
 
