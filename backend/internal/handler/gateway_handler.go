@@ -310,6 +310,19 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	// 判断是否真的绑定了粘性会话：有 sessionKey 且已经绑定到某个账号
 	hasBoundSession := sessionKey != "" && sessionBoundAccountID > 0
 
+	// 上游已确认不存在的模型（退役型号、客户端拼错的名字）在选号之前就拒掉。
+	//
+	// 不拦的话，一次这样的请求会被故障转移依次打到多个账号上，每个账号都往上游发一次
+	// 不存在的模型名、每个都被冷却 30 分钟。对订阅号既是无谓暴露也是异常信号。
+	// 这条记忆是全局的、由上游 404 自学得来（见 service.rememberMissingModel）。
+	if h.gatewayService.IsKnownMissingModel(c.Request.Context(), platform, reqModel) {
+		reqLog.Info("gateway.model_known_missing",
+			zap.String("model", reqModel), zap.String("platform", platform))
+		h.errorResponse(c, http.StatusNotFound, "model_not_found",
+			fmt.Sprintf("Model %q is not available upstream", reqModel))
+		return
+	}
+
 	if platform == service.PlatformGemini {
 		fs := NewFailoverState(h.maxAccountSwitchesGemini, hasBoundSession)
 

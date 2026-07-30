@@ -75,8 +75,35 @@ func (c *gatewayCache) SetPrevRequestID(ctx context.Context, accountID int64, se
 	return c.rdb.Set(ctx, buildPrevRequestIDKey(accountID, sessionID), requestID, ttl).Err()
 }
 
+// modelNotFoundPrefix 记录"某平台上某模型不存在"。
+//
+// 格式: model_not_found:{platform}:{model}
+//
+// key 刻意**不含** accountID：模型下架是全局事实，记成账号维度就失去了意义——
+// 原有的 (账号, 模型) 冷却正是因此让同一次请求依次喷遍整个账号池。
+const modelNotFoundPrefix = "model_not_found:"
+
+func buildModelNotFoundKey(platform, model string) string {
+	return fmt.Sprintf("%s%s:%s", modelNotFoundPrefix, platform, model)
+}
+
+func (c *gatewayCache) IsModelNotFound(ctx context.Context, platform, model string) (bool, error) {
+	n, err := c.rdb.Exists(ctx, buildModelNotFoundKey(platform, model)).Result()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+func (c *gatewayCache) MarkModelNotFound(ctx context.Context, platform, model string, ttl time.Duration) error {
+	return c.rdb.Set(ctx, buildModelNotFoundKey(platform, model), "1", ttl).Err()
+}
+
 // Compile-time assertion: gatewayCache must implement CyberSessionBlockStore.
 var _ service.CyberSessionBlockStore = (*gatewayCache)(nil)
+
+// Compile-time assertion: gatewayCache must implement ModelNotFoundStore.
+var _ service.ModelNotFoundStore = (*gatewayCache)(nil)
 
 // Compile-time assertion: gatewayCache must implement PrevRequestIDStore.
 // 该断言是 cc_prev_req 能力生效的前提——service 侧走运行时类型断言，

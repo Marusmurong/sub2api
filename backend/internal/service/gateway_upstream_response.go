@@ -407,6 +407,15 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		Detail:             upstreamDetail,
 	})
 
+	// 上游确认模型不存在时，把这件事记成全局事实（与账号无关）。
+	//
+	// 下面的 HandleUpstreamError 会把 (账号, 模型) 冷却 30 分钟并要求故障转移，于是同一次
+	// 客户端请求会依次打到多个账号上，每个都往上游发一次不存在的模型名。记住模型本身之后，
+	// 后续请求在选号之前就被拒（见 isKnownMissingModel），账号池不再被喷。
+	if len(requestedModel) > 0 && isUpstreamModelNotFoundError(resp.StatusCode, body) {
+		s.rememberMissingModel(ctx, account, requestedModel[0])
+	}
+
 	// 处理上游错误，标记账号状态
 	shouldDisable := false
 	if s.rateLimitService != nil {
