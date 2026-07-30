@@ -1,6 +1,8 @@
 // Package claude provides constants and helpers for Claude API integration.
 package claude
 
+import "strings"
+
 // Claude Code 客户端相关常量
 
 // Beta header 常量
@@ -87,6 +89,72 @@ func FullClaudeCodeMimicryBetas() []string {
 		BetaContextManagement,
 		BetaExtendedCacheTTL,
 	}
+}
+
+// featureBetaAllowlist 是唯一允许从客户端透传上去的 beta。
+//
+// 伪装路径原则上只发固定集合——beta 集合的成分与大小本身就是客户端指纹，让它随下游
+// 变化，等于把"一个账号多个客户端"直接写在请求里（生产抓包实测单账号出现过 2/5/6/7
+// 四种集合大小）。但少数 beta 是真功能开关而非身份标记，丢掉会静默削弱客户能力，
+// 故按白名单放行。
+//
+// 加新条目前先自问：它是"客户端是谁"还是"这次请求要什么能力"。只有后者才能进。
+var featureBetaAllowlist = map[string]struct{}{
+	// 1M 上下文：仅 sonnet-5 系列支持，丢掉会让长上下文请求直接超限失败。
+	BetaContext1M: {},
+}
+
+// canonicalBetaOrder 决定出口 beta 的排列顺序。
+//
+// 顺序本身也是指纹，所以不能按客户端到达顺序拼接。这里的相对次序取自真实 CLI 抓包：
+// context-1m 出现在 oauth 之后、interleaved-thinking 之前；其余各项维持
+// FullClaudeCodeMimicryBetas 既有次序不动。
+var canonicalBetaOrder = []string{
+	BetaClaudeCode,
+	BetaOAuth,
+	BetaContext1M,
+	BetaInterleavedThinking,
+	BetaPromptCachingScope,
+	BetaEffort,
+	BetaContextManagement,
+	BetaExtendedCacheTTL,
+}
+
+// MimicryBetasWithClientFeatures 返回伪装路径的出口 beta 列表：
+// 固定身份集合 ∪（客户端请求了的、且在功能白名单内的 beta），按 canonicalBetaOrder 排列。
+//
+// clientBeta 为客户端原始 anthropic-beta 头（逗号分隔，可为空）。白名单之外的一律丢弃。
+func MimicryBetasWithClientFeatures(clientBeta string) []string {
+	want := make(map[string]struct{}, len(canonicalBetaOrder))
+	for _, b := range FullClaudeCodeMimicryBetas() {
+		want[b] = struct{}{}
+	}
+	for _, p := range strings.Split(clientBeta, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if _, ok := featureBetaAllowlist[p]; ok {
+			want[p] = struct{}{}
+		}
+	}
+
+	out := make([]string, 0, len(want))
+	for _, b := range canonicalBetaOrder {
+		if _, ok := want[b]; ok {
+			out = append(out, b)
+			delete(want, b)
+		}
+	}
+	// canonicalBetaOrder 未覆盖到的（将来往固定集合里加了新 beta 却忘了排序表）
+	// 兜底追加，保证不会被静默丢掉。
+	for _, b := range FullClaudeCodeMimicryBetas() {
+		if _, ok := want[b]; ok {
+			out = append(out, b)
+			delete(want, b)
+		}
+	}
+	return out
 }
 
 // DefaultHeaders 是 Claude Code 客户端默认请求头。

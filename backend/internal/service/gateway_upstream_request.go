@@ -557,11 +557,14 @@ func (s *GatewayService) computeBaseAnthropicBeta(
 
 	if tokenType == "oauth" {
 		if mimicClaudeCode {
-			// mimic 路径跳过白名单透传，incomingBeta 始终为空；所有模型都必须
-			// 携带完整 Claude Code beta 集合，避免 Haiku 被识别为第三方客户端。
-			return mergeAnthropicBetaDropping(claude.FullClaudeCodeMimicryBetas(), "", effectiveDropSet), true
+			// 固定身份集合 + 白名单内的功能 beta（见 claude.MimicryBetasWithClientFeatures）。
+			// incoming 传空：客户端 beta 已在白名单函数里筛过，不能再从这里二次并入，
+			// 否则等于放行全部客户端 beta，集合大小又会随下游变化。
+			// 所有模型（含 Haiku）都走这一份，避免 Haiku 被单独识别为第三方客户端。
+			return mergeAnthropicBetaDropping(
+				claude.MimicryBetasWithClientFeatures(clientBeta), "", effectiveDropSet), true
 		}
-		// 真 Claude Code 客户端透传路径
+		// 非 OAuth-mimic 的兜底（当前 OAuth 已恒为 mimic，此分支主要留给未来的非 OAuth 场景）
 		return stripBetaTokensWithSet(s.getBetaHeader(modelID, clientBeta), effectiveDropSet), true
 	}
 
@@ -604,12 +607,14 @@ func (s *GatewayService) computeFinalCountTokensAnthropicBeta(
 
 	if tokenType == "oauth" {
 		if mimicClaudeCode {
-			// 与原代码严格等价：original buildCountTokensRequest 在 count_tokens mimic
-			// 分支上**不**会跳过白名单透传（与 messages mimic 路径不同），所以
-			// incomingBeta = req.Header[anthropic-beta] = 客户端透传过来的 client beta。
-			// 重构后直接从 clientHeaders 拿同一个值，保持行为一致。
-			requiredBetas := append(claude.FullClaudeCodeMimicryBetas(), claude.BetaTokenCounting)
-			return mergeAnthropicBetaDropping(requiredBetas, clientBeta, effectiveDropSet), true
+			// 与 messages 路径一致：固定身份集合 + 白名单内的功能 beta，再补上
+			// count_tokens 专属的 token-counting。
+			//
+			// 原实现把 clientBeta 整个并进来（因为当时 count_tokens 的表头透传循环也没有
+			// mimic 守卫，两处行为是配套的）。现在守卫已补齐，这里也必须同步收窄，
+			// 否则 count_tokens 仍会把客户端 beta 集合原样带给上游。
+			requiredBetas := append(claude.MimicryBetasWithClientFeatures(clientBeta), claude.BetaTokenCounting)
+			return mergeAnthropicBetaDropping(requiredBetas, "", effectiveDropSet), true
 		}
 		if clientBeta == "" {
 			return claude.CountTokensBetaHeader, true

@@ -55,8 +55,9 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		return err
 	}
 
-	isClaudeCodeCT := IsClaudeCodeClient(ctx) || isClaudeCodeClient(c.GetHeader("User-Agent"), parsed.MetadataUserID)
-	shouldMimicClaudeCode := account.IsOAuth() && !isClaudeCodeCT
+	// 与 /v1/messages 保持一致：OAuth 账号一律统一伪装，不因下游像 CC 就透传其身份。
+	// count_tokens 与 messages 打同一批账号，放过它等于给身份泄漏留后门。
+	shouldMimicClaudeCode := account.IsOAuth()
 
 	if shouldMimicClaudeCode {
 		// count_tokens 是严格 schema，出现 max_tokens/temperature 会被 400
@@ -530,12 +531,18 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	}
 
 	// 白名单透传 headers（恢复真实 wire casing）
-	for key, values := range clientHeaders {
-		lowerKey := strings.ToLower(key)
-		if allowedHeaders[lowerKey] {
-			wireKey := resolveWireCasing(key)
-			for _, v := range values {
-				addHeaderRaw(req.Header, wireKey, v)
+	//
+	// 与 buildUpstreamRequest 同一道守卫：OAuth 伪装路径下不透传任何客户端 header。
+	// 否则 accept-language / sec-fetch-mode / x-client-request-id / x-stainless-* 会带着
+	// 每个下游客户各自的值落到同一个上游账号上，与我们注入的统一身份自相矛盾。
+	if tokenType != "oauth" || !mimicClaudeCode {
+		for key, values := range clientHeaders {
+			lowerKey := strings.ToLower(key)
+			if allowedHeaders[lowerKey] {
+				wireKey := resolveWireCasing(key)
+				for _, v := range values {
+					addHeaderRaw(req.Header, wireKey, v)
+				}
 			}
 		}
 	}

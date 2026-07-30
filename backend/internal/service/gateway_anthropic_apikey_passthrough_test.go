@@ -935,7 +935,16 @@ func TestGatewayService_AnthropicOAuthMimic_RewritesSystemWithBillingBlock(t *te
 	}
 }
 
-func TestGatewayService_AnthropicOAuthRealClaudeCodeHaiku_PreservesClientHeadersAndBody(t *testing.T) {
+// 真实 Claude Code 客户端**同样**走统一伪装：它的 UA / beta / 平台头一律换成账号的
+// 统一身份，system 前置我们的身份块。
+//
+// 这与旧行为相反。旧实现认为真 CC 自带完整身份、无需代理插手，于是原样透传——但一个
+// 上游账号服务多个下游客户，透传等于把每个客户各自的身份都打到同一个号上（生产抓包：
+// 单账号 3 种 cc_entrypoint、4 种 beta 集合大小），这正是中转的典型特征。
+//
+// 代价：客户端原有的 prompt cache 前缀会因为前置了我们的块而失效一次，之后按账号
+// 统一前缀重新建立。messages 与客户端指令内容不受影响。
+func TestGatewayService_AnthropicOAuthRealClaudeCode_UsesUnifiedIdentity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	metadataUserID := FormatMetadataUserID(
@@ -983,15 +992,24 @@ func TestGatewayService_AnthropicOAuthRealClaudeCodeHaiku_PreservesClientHeaders
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, upstream.lastReq)
-	require.Equal(t, c.Request.Header.Get("User-Agent"), getHeaderRaw(upstream.lastReq.Header, "User-Agent"))
-	require.Equal(t, "real-client-package", getHeaderRaw(upstream.lastReq.Header, "X-Stainless-Package-Version"))
-	require.Equal(t, clientBeta, getHeaderRaw(upstream.lastReq.Header, "anthropic-beta"))
-	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "x-client-request-id"), "真实 CC 不应被强制写入 mimic request id")
-	require.Equal(t, gjson.GetBytes(body, "system").Raw, gjson.GetBytes(upstream.lastBody, "system").Raw)
-	require.Equal(t, gjson.GetBytes(body, "messages").Raw, gjson.GetBytes(upstream.lastBody, "messages").Raw)
-	require.Equal(t, metadataUserID, gjson.GetBytes(upstream.lastBody, "metadata.user_id").String())
+	// 身份维度：一律换成账号的统一身份，与客户端自报的无关
+	require.Equal(t, claude.DefaultHeaders["User-Agent"], getHeaderRaw(upstream.lastReq.Header, "User-Agent"))
+	require.NotEqual(t, "real-client-package", getHeaderRaw(upstream.lastReq.Header, "X-Stainless-Package-Version"),
+		"客户端自报的包版本是机器特征，不得外泄")
+	require.Equal(t, strings.Join(claude.FullClaudeCodeMimicryBetas(), ","),
+		getHeaderRaw(upstream.lastReq.Header, "anthropic-beta"),
+		"beta 集合固定，不随客户端变化")
+	require.NotEmpty(t, getHeaderRaw(upstream.lastReq.Header, "x-client-request-id"),
+		"request id 由我们生成，不沿用客户端的")
+
+	// 内容维度：客户端的指令与对话必须完好
+	require.Equal(t, gjson.GetBytes(body, "messages").Raw, gjson.GetBytes(upstream.lastBody, "messages").Raw,
+		"messages 不得改写")
+	require.Contains(t, string(upstream.lastBody), "Client-owned Claude Code system",
+		"客户端 system 内容必须保留（作为尾块）")
 	require.True(t, gjson.GetBytes(upstream.lastBody, "context_management").Exists())
-	require.NotContains(t, string(upstream.lastBody), "x-anthropic-billing-header:")
+	require.Contains(t, string(upstream.lastBody), "x-anthropic-billing-header:",
+		"改为统一伪装后应注入我们的 billing block")
 }
 
 func TestGatewayService_AnthropicOAuth_SystemPromptInjectionCanBeDisabled(t *testing.T) {

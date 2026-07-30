@@ -232,22 +232,23 @@ func TestComputeFinalCountTokensAnthropicBeta_OAuthMimic_AlwaysIncludesContextMa
 		"count_tokens 路径必须含 token-counting beta")
 }
 
-// 重构等价性回归：
-// 原 main buildCountTokensRequest 在 count_tokens mimic 分支上不跳过白名单透传
-// （与 messages mimic 不同），incomingBeta 取自客户端透传。重构后必须从 clientHeaders
-// 拿同一个值并 merge，否则会丢失客户端 beta。
-func TestComputeFinalCountTokensAnthropicBeta_OAuthMimic_PreservesClientBeta(t *testing.T) {
+// count_tokens mimic 现在与 messages mimic 对齐：只发固定集合 + 白名单内的功能 beta。
+//
+// 旧行为是把客户端 beta 整个并进来（当时 count_tokens 的表头透传循环也没有 mimic 守卫，
+// 两者是配套的）。但 beta 集合的成分与大小本身就是客户端指纹——生产抓包实测单个账号出现
+// 过 4 种集合大小，等于把"一个账号多个客户端"写进请求里。守卫补齐后此处同步收窄。
+func TestComputeFinalCountTokensAnthropicBeta_OAuthMimic_DropsClientIdentityBeta(t *testing.T) {
 	s := newTestGatewayServiceForBeta(false)
 	hdr := http.Header{}
 	hdr.Set("anthropic-beta", "custom-experimental-beta,context-1m-2025-08-07")
 	final, ok := s.computeFinalCountTokensAnthropicBeta("oauth", true, "claude-haiku-4-5", hdr, []byte(`{}`), nil)
 	require.True(t, ok)
-	require.True(t, anthropicBetaTokensContains(final, "custom-experimental-beta"),
-		"count_tokens mimic 不同于 messages mimic：原代码会保留客户端透传的 beta")
+	require.False(t, anthropicBetaTokensContains(final, "custom-experimental-beta"),
+		"白名单外的客户端 beta 必须丢弃，否则集合大小仍随下游变化")
 	require.True(t, anthropicBetaTokensContains(final, "context-1m-2025-08-07"),
-		"客户端透传的其他 beta token 同样需要保留")
+		"白名单内的功能 beta 保留：1M 上下文丢了会让长请求直接超限")
 	require.True(t, anthropicBetaTokensContains(final, claude.BetaContextManagement),
-		"同时 FullClaudeCodeMimicryBetas 不打折扣")
+		"固定身份集合不打折扣")
 	require.True(t, anthropicBetaTokensContains(final, claude.BetaTokenCounting),
 		"同时补齐 token-counting beta")
 }

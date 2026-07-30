@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -583,6 +584,30 @@ func hasClaudeCodePrefix(text string) bool {
 	return false
 }
 
+// clientBillingAttributionLineRE 匹配客户端自带的 billing attribution 行（整行）。
+//
+// 该行是客户端身份声明：cc_version 是它的 CLI 版本、cc_entrypoint 是它的入口
+// （cli / sdk-ts / local-agent…），还可能带 cc_workload / cc_is_subagent。
+var clientBillingAttributionLineRE = regexp.MustCompile(`(?im)^[ \t]*x-anthropic-billing-header:.*$`)
+
+// stripClientBillingAttributionLines 去掉客户端 system 里自带的 billing attribution 行。
+//
+// 伪装路径会在 system[0] 注入我们自己的 billing block；客户端原有的那份会随它的 system
+// 一起被收进尾块，于是同一个请求里出现两份互相矛盾的身份声明——我们说 2.1.220/cli，
+// 尾块却写着 2.1.100/sdk-ts。生产抓包中单个账号出现的三种 cc_entrypoint 就来自这里。
+//
+// 按行整体删除而非只改字段：cc_workload / cc_is_subagent 这类我们从不生成的字段，
+// 留着同样是客户端特征。
+func stripClientBillingAttributionLines(text string) string {
+	if !strings.Contains(strings.ToLower(text), billingHeaderPrefix) {
+		return text
+	}
+	cleaned := clientBillingAttributionLineRE.ReplaceAllString(text, "")
+	// 删行后可能留下连续空行，压成一个段落分隔，避免影响下面按 "\n\n" 剥身份句的逻辑。
+	cleaned = regexp.MustCompile(`\n{3,}`).ReplaceAllString(cleaned, "\n\n")
+	return strings.TrimSpace(cleaned)
+}
+
 // matchedClaudeCodePrefix 返回文本命中的最长 Claude Code 身份前缀，未命中返回空串。
 // 取最长匹配是为了正确处理 Agent SDK 变体（它以标准前缀开头但更长）。
 func matchedClaudeCodePrefix(text string) string {
@@ -602,7 +627,7 @@ func matchedClaudeCodePrefix(text string) string {
 // 一份属于重复，且身份句出现在 user 消息中并不符合真实 CLI 形态。但身份句之后的自定义指令
 // 必须保留——丢弃它们会让客户端指令静默失效。
 func stripClaudeCodeIdentityPrefix(text string) string {
-	trimmed := strings.TrimSpace(text)
+	trimmed := stripClientBillingAttributionLines(strings.TrimSpace(text))
 	prefix := matchedClaudeCodePrefix(trimmed)
 	if prefix == "" {
 		return trimmed

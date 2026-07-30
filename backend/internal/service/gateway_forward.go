@@ -181,7 +181,17 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		isClaudeCode = systemHasBillingAttributionBlock(body)
 	}
 
-	shouldMimicClaudeCode := account.IsOAuth() && !isClaudeCode
+	// OAuth 账号一律走统一伪装，**不再因为下游"看起来像 Claude Code"就透传它的身份**。
+	//
+	// 一个上游订阅账号会同时服务多个下游客户。旧的 `&& !isClaudeCode` 让真 CC 客户端
+	// 走透传，于是每个客户各自的 UA / beta 集合 / x-stainless-* / accept-language /
+	// cc_entrypoint / session 都原样打到同一个号上——生产抓包实测：单个账号 7 分钟内
+	// 出现 3 种 cc_entrypoint（cli / local-agent / sdk-ts）、4 种 beta 集合大小。
+	// 对上游而言那就是"一个账号被一堆不同客户端在用"，正是中转的典型特征。
+	//
+	// 越是真 CC 客户端泄漏得越彻底，判定条件与目的正好相反，故取消。
+	// isClaudeCode 本身仍保留：group.claude_code_only 路由门槛与客户端版本闸还在用它。
+	shouldMimicClaudeCode := account.IsOAuth()
 
 	if shouldMimicClaudeCode {
 		// 与 Parrot 对齐：OAuth 账号无条件重写 system（即使客户端已发了 Claude Code
