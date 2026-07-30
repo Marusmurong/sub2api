@@ -895,7 +895,9 @@ func TestGatewayService_AnthropicOAuthMimic_RewritesSystemWithBillingBlock(t *te
 			require.True(t, system.Exists())
 			require.True(t, system.IsArray(), "system should be an array")
 			arr := system.Array()
-			require.Len(t, arr, 4, "system array should have billing + cc prompt + expansion + 客户端 system 尾块")
+			// 恒为 3 块：真实 CLI 形态是 [billing, 身份块, ...调用方 system]。
+			// 扩充段只在调用方没有 system 时才作为填充出现，两者不并存。
+			require.Len(t, arr, 3, "system array should be billing + cc prompt + 调用方 system")
 
 			billingText := arr[0].Get("text").String()
 			require.Contains(t, billingText, "x-anthropic-billing-header:")
@@ -908,11 +910,8 @@ func TestGatewayService_AnthropicOAuthMimic_RewritesSystemWithBillingBlock(t *te
 			require.Equal(t, claudeCodeSystemPrompt, arr[1].Get("text").String())
 			require.False(t, arr[1].Get("cache_control").Exists(), "身份前缀 block 不应带 cache_control")
 
-			require.Equal(t, claudeCodeSystemPromptExpansion, arr[2].Get("text").String())
-			require.Equal(t, "ephemeral", arr[2].Get("cache_control.type").String())
-
-			// 原始 system prompt 作为 system 尾块保留（不再迁移至 messages）。
-			tail := arr[3]
+			// 原始 system prompt 直接落在 [2]（不再被扩充段挤到 [3]），且不迁移至 messages。
+			tail := arr[2]
 			require.Contains(t, tail.Get("text").String(), tt.wantOriginalSystem)
 			if tt.wantOriginalSystemCacheTTL != "" {
 				require.Equal(t, "ephemeral", tail.Get("cache_control.type").String())

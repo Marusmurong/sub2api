@@ -869,7 +869,26 @@ func defaultClaudeOAuthSystemPromptBlockConfig() []claudeOAuthSystemPromptBlockC
 	}
 }
 
-func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string, blocksConfig string) ([][]byte, error) {
+// expansionPromptTemplateToken 是扩充段在 block 配置里的模板标识。
+const expansionPromptTemplateToken = "{claude_code_expansion_prompt}"
+
+// isClaudeOAuthExpansionBlock 判断某个 system block 是不是"扩充段"。
+//
+// 两种写法都要认：配置里保留模板名的（rawText 命中 token），以及 admin 在后台保存后
+// 写回展开文本的（expandedText 等于当前生效的扩充段）。只认前者会让后台改过配置的
+// 部署静默退回 4 块形态。
+//
+// 判断只用于"调用方自带 system 时省掉扩充段"，误判的代价是少发一块中性文本，
+// 不会丢客户端内容——客户端 system 是单独追加的。
+func isClaudeOAuthExpansionBlock(rawText, expandedText, expansionPrompt string) bool {
+	if strings.TrimSpace(rawText) == expansionPromptTemplateToken {
+		return true
+	}
+	expansionPrompt = strings.TrimSpace(expansionPrompt)
+	return expansionPrompt != "" && strings.TrimSpace(expandedText) == expansionPrompt
+}
+
+func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string, blocksConfig string, skipExpansion bool) ([][]byte, error) {
 	blocks, err := parseClaudeOAuthSystemPromptBlocksConfig(blocksConfig)
 	if err != nil {
 		return nil, err
@@ -895,6 +914,13 @@ func buildClaudeOAuthSystemPromptBlocksJSON(body []byte, expansionPrompt string,
 			return nil, err
 		}
 		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		// 扩充段的识别放在模板展开**之后**：admin 在后台保存 block 配置时，写回的是
+		// 展开后的字面文本而不是 {claude_code_expansion_prompt} 模板名。只按模板名匹配
+		// 会漏掉后台改过的配置，于是"调用方自带 system 时不注入扩充段"这条规则失效，
+		// 4 块形态悄悄回来。两种写法都要能命中。
+		if skipExpansion && isClaudeOAuthExpansionBlock(block.Text, text, expansionPrompt) {
 			continue
 		}
 		cacheControl, err := decodeClaudeOAuthSystemPromptCacheControl(block.CacheControl)
@@ -970,22 +996,31 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 	// 1. 提取原始 system prompt 文本及其缓存断点
 	originalSystemText, originalSystemCacheControl := extractSystemTextAndCacheControl(system)
 
-	// 2. 构造 system 数组，对齐真实 Claude Code CLI 的 3-block 形态：
+	// 2. 构造 system 数组，对齐真实 Claude Code CLI 的形态：
 	//    [0] billing attribution block（cc_version={cliVer}.{fp}; cc_entrypoint=cli;）
 	//    [1] "You are Claude Code..." 身份前缀 block（默认不带 cache_control）
-	//    [2] 工具无关的通用提示词扩充 block（带 cache_control 作为稳定缓存断点）
+	//    [2..] 调用方 system
 	//
-	//    真实 CC 的 system 在身份前缀之后还有大段提示词，仅有 2 块会在块数/体量上明显
-	//    区别于真实 CLI。这里注入 claudeCodeSystemPromptExpansion（中性段落）把形态做到
-	//    接近真实，同时不注入会污染被代理用户行为的工具专属指令。
+	//    真实形态见 docs/CC_2.1.220_EGRESS_SPEC.md §7：只有 billing 与身份两个固定块，
+	//    第三块起**直接就是调用方的 system**。
+	//
+	//    扩充段（claudeCodeSystemPromptExpansion）只在调用方没有 system 时才注入：
+	//    那种情况下仅两块会在块数/体量上明显区别于真实 CLI，补一段中性文本让形态接近。
+	//    但调用方自带 system 时再插一段，就会多出一块真实 CLI 从不发送的固定文本——
+	//    生产抓包实测 42/71 组请求是这个 4 块形态。这段文本本身还与真 CC 客户端自己的
+	//    提示词开头高度相似，等于给每个请求盖了一个"非官方客户端"的印。
 	//
 	//    缺失 billing block 的系统 payload 是 Anthropic 判定第三方的关键信号之一
-	//    （真实 CLI 每个请求都带）。新版 CLI 已取消 cch=... 签名字段，故 block 不再注入
-	//    cch（见 buildBillingAttributionText）。
-	systemBlocks, blockErr := buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, blocksConfig)
+	//    （真实 CLI 每个请求都带）。
+	//
+	//    注意：instructionText 必须在建块之前算出来——它决定要不要注入扩充段。
+	instructionText := stripClaudeCodeIdentityPrefix(originalSystemText)
+	skipExpansion := instructionText != ""
+
+	systemBlocks, blockErr := buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, blocksConfig, skipExpansion)
 	if blockErr != nil {
 		logger.LegacyPrintf("service.gateway", "Warning: failed to build configured Claude OAuth system blocks: %v", blockErr)
-		systemBlocks, blockErr = buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, "")
+		systemBlocks, blockErr = buildClaudeOAuthSystemPromptBlocksJSON(body, expansionPrompt, "", skipExpansion)
 	}
 	if blockErr != nil {
 		logger.LegacyPrintf("service.gateway", "Warning: failed to build default Claude OAuth system blocks: %v", blockErr)
@@ -1007,7 +1042,8 @@ func rewriteSystemForNonClaudeCodeWithPromptBlocks(body []byte, system any, expa
 	//    身份句，留两份既冗余也不合真实形态。只剥身份句本身——其后的自定义指令必须
 	//    保留，否则客户端指令会静默失效。原 system 的 cache_control 断点（含客户端
 	//    自选 TTL）一并保留。
-	instructionText := stripClaudeCodeIdentityPrefix(originalSystemText)
+	//
+	//    instructionText 已在第 2 步算出（它决定了要不要注入扩充段），此处直接复用。
 	if instructionText != "" {
 		raw, err := marshalAnthropicSystemTextBlockWithCacheControl(instructionText, originalSystemCacheControl)
 		if err != nil {

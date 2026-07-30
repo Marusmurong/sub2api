@@ -339,7 +339,7 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			system:            "You are a personal assistant running inside OpenClaw.",
 			wantSystemText:    claudeCodeSystemPrompt,
 			wantMessagesLen:   1,
-			wantSystemBlocks:  4,
+			wantSystemBlocks:  3,
 			wantTailBlockText: "You are a personal assistant running inside OpenClaw.",
 		},
 		{
@@ -359,7 +359,7 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			},
 			wantSystemText:    claudeCodeSystemPrompt,
 			wantMessagesLen:   1,
-			wantSystemBlocks:  4,
+			wantSystemBlocks:  3,
 			wantTailBlockText: "First instruction\n\nSecond instruction",
 		},
 		{
@@ -376,7 +376,7 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			system:            json.RawMessage(`"Custom prompt"`),
 			wantSystemText:    claudeCodeSystemPrompt,
 			wantMessagesLen:   1,
-			wantSystemBlocks:  4,
+			wantSystemBlocks:  3,
 			wantTailBlockText: "Custom prompt",
 		},
 		{
@@ -393,7 +393,7 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			system:            "Be helpful",
 			wantSystemText:    claudeCodeSystemPrompt,
 			wantMessagesLen:   3, // 原始 3 条，不再注入
-			wantSystemBlocks:  4,
+			wantSystemBlocks:  3,
 			wantTailBlockText: "Be helpful",
 		},
 	}
@@ -409,8 +409,10 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			// system 应为 array 格式，对齐真实 Claude Code CLI 的形态：
 			//   [0] billing attribution block (x-anthropic-billing-header: cc_version=...;)
 			//   [1] Claude Code 身份前缀 block (不带 cache_control)
-			//   [2] 工具无关的通用提示词扩充 block (带 cache_control，作为缓存断点)
-			//   [3] 客户端原 system（存在时），对应真实 CLI 的 "...调用方 system"
+			//   [2] 调用方 system；调用方没有 system 时，此处才填通用提示词扩充段
+			//
+			// 恒为 3 块：真实 CLI 的形态是 [billing, 身份块, ...调用方 system]，
+			// 扩充段只是"调用方无 system"时的填充物，两者不并存。
 			systemArr, ok := parsed["system"].([]any)
 			require.True(t, ok, "system should be an array, got %T", parsed["system"])
 			require.Len(t, systemArr, tt.wantSystemBlocks)
@@ -434,20 +436,21 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 			_, hasCC := systemBlock["cache_control"]
 			require.False(t, hasCC, "身份前缀 block 不应带 cache_control（断点落在扩充块）")
 
-			expansionBlock, ok := systemArr[2].(map[string]any)
+			// [2] 是调用方 system；调用方没有 system 时才由扩充段填充。
+			// 两者不并存——真实 CLI 的形态是 [billing, 身份块, ...调用方 system]。
+			thirdBlock, ok := systemArr[2].(map[string]any)
 			require.True(t, ok)
-			require.Equal(t, "text", expansionBlock["type"])
-			require.Equal(t, claudeCodeSystemPromptExpansion, expansionBlock["text"])
-			cc, ok := expansionBlock["cache_control"].(map[string]any)
-			require.True(t, ok, "expansion block should have cache_control")
-			require.Equal(t, "ephemeral", cc["type"])
-
-			// 客户端 system 作为尾块保留
+			require.Equal(t, "text", thirdBlock["type"])
 			if tt.wantTailBlockText != "" {
-				tailBlock, ok := systemArr[len(systemArr)-1].(map[string]any)
-				require.True(t, ok)
-				require.Equal(t, "text", tailBlock["type"])
-				require.Equal(t, tt.wantTailBlockText, tailBlock["text"])
+				require.Equal(t, tt.wantTailBlockText, thirdBlock["text"],
+					"调用方自带 system 时，第 3 块应直接是它，中间不得夹入扩充段")
+				require.NotEqual(t, claudeCodeSystemPromptExpansion, thirdBlock["text"])
+			} else {
+				require.Equal(t, claudeCodeSystemPromptExpansion, thirdBlock["text"],
+					"调用方无 system 时补扩充段，避免仅两块在体量上异于真实 CLI")
+				cc, ok := thirdBlock["cache_control"].(map[string]any)
+				require.True(t, ok, "expansion block should have cache_control")
+				require.Equal(t, "ephemeral", cc["type"])
 			}
 
 			// messages 必须原封不动——不再注入伪造的 user/assistant 对。
@@ -465,21 +468,23 @@ func TestRewriteSystemForNonClaudeCode(t *testing.T) {
 }
 
 func TestRewriteSystemForNonClaudeCodeWithPrompt_UsesCustomExpansionPrompt(t *testing.T) {
-	body := []byte(`{"model":"claude-3","system":"Project instructions","messages":[{"role":"user","content":"hello"}]}`)
+	// 扩充段只在调用方没有 system 时注入，所以这里必须用无 system 的场景，
+	// 否则测的是一个根本不会发生的组合。
+	body := []byte(`{"model":"claude-3","messages":[{"role":"user","content":"hello"}]}`)
 	customPrompt := "Custom Claude OAuth expansion prompt"
 
-	result := rewriteSystemForNonClaudeCodeWithPrompt(body, "Project instructions", customPrompt)
+	result := rewriteSystemForNonClaudeCodeWithPrompt(body, nil, customPrompt)
 
 	system := gjson.GetBytes(result, "system")
 	require.True(t, system.IsArray())
-	// [billing, 身份块, 自定义扩充块, 客户端 system 尾块]
-	require.Len(t, system.Array(), 4)
+	// [billing, 身份块, 自定义扩充块]
+	require.Len(t, system.Array(), 3)
 	require.Equal(t, customPrompt, system.Array()[2].Get("text").String())
 	require.Equal(t, "ephemeral", system.Array()[2].Get("cache_control.type").String())
-	require.Equal(t, "Project instructions", system.Array()[3].Get("text").String())
 }
 
-// 客户端 system 上的 cache_control 断点（含其自选 TTL）在搬进 system 尾块时必须保留。
+// 客户端 system 上的 cache_control 断点（含其自选 TTL）在进入 system 数组时必须保留。
+// 它现在直接落在 [2]（真实 CLI 形态），不再被扩充段挤到 [3]。
 func TestRewriteSystemForNonClaudeCode_PreservesCacheControlOnTailBlock(t *testing.T) {
 	body := []byte(`{"model":"claude-3","system":[{"type":"text","text":"Stable project instructions","cache_control":{"type":"ephemeral","ttl":"1h"}}],"messages":[{"role":"user","content":"hello"}]}`)
 	system := []any{
@@ -492,7 +497,7 @@ func TestRewriteSystemForNonClaudeCode_PreservesCacheControlOnTailBlock(t *testi
 
 	result := rewriteSystemForNonClaudeCode(body, system)
 
-	tail := gjson.GetBytes(result, "system.3")
+	tail := gjson.GetBytes(result, "system.2")
 	require.Equal(t, "Stable project instructions", tail.Get("text").String())
 	require.Equal(t, "ephemeral", tail.Get("cache_control.type").String())
 	require.Equal(t, "1h", tail.Get("cache_control.ttl").String())
@@ -506,8 +511,8 @@ func TestRewriteSystemForNonClaudeCode_LeavesTailBlockUncachedWithoutSystemBreak
 
 	result := rewriteSystemForNonClaudeCode(body, system)
 
-	require.Equal(t, "Project instructions", gjson.GetBytes(result, "system.3.text").String())
-	require.False(t, gjson.GetBytes(result, "system.3.cache_control").Exists())
+	require.Equal(t, "Project instructions", gjson.GetBytes(result, "system.2.text").String())
+	require.False(t, gjson.GetBytes(result, "system.2.cache_control").Exists())
 }
 
 func TestRewriteSystemForNonClaudeCodeWithPromptBlocks_UsesConfiguredBlocks(t *testing.T) {
@@ -586,19 +591,19 @@ func TestRewriteSystemPreservesInstructionsAfterCCPrefix(t *testing.T) {
 		{
 			name:             "身份句+自定义_同段",
 			system:           "You are Claude Code, Anthropic's official CLI for Claude. Answer in French.",
-			wantSystemBlocks: 4,
+			wantSystemBlocks: 3,
 			wantInstruction:  "Answer in French.",
 		},
 		{
 			name:             "身份句+自定义_分段",
 			system:           "You are Claude Code, Anthropic's official CLI for Claude.\n\nAnswer in French.",
-			wantSystemBlocks: 4,
+			wantSystemBlocks: 3,
 			wantInstruction:  "Answer in French.",
 		},
 		{
 			name:             "AgentSDK变体+自定义",
 			system:           "You are Claude Code, Anthropic's official CLI for Claude, running within the Claude Agent SDK.\n\nAnswer in French.",
-			wantSystemBlocks: 4,
+			wantSystemBlocks: 3,
 			wantInstruction:  "Answer in French.",
 		},
 		{
@@ -607,7 +612,7 @@ func TestRewriteSystemPreservesInstructionsAfterCCPrefix(t *testing.T) {
 				map[string]any{"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude."},
 				map[string]any{"type": "text", "text": "Answer in French."},
 			},
-			wantSystemBlocks: 4,
+			wantSystemBlocks: 3,
 			wantInstruction:  "Answer in French.",
 		},
 		{
@@ -616,7 +621,7 @@ func TestRewriteSystemPreservesInstructionsAfterCCPrefix(t *testing.T) {
 				map[string]any{"type": "text", "text": "Answer in French."},
 				map[string]any{"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude."},
 			},
-			wantSystemBlocks: 4,
+			wantSystemBlocks: 3,
 			wantInstruction:  "Answer in French.\n\nYou are Claude Code, Anthropic's official CLI for Claude.",
 		},
 	}

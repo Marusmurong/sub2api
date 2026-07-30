@@ -353,10 +353,11 @@ func TestApplyClaudeCodeOAuthMimicryToBody_HaikuRewritesSystem(t *testing.T) {
 	// 真实形态是 [billing, 身份块…, 调用方 system]：调用方 system 留在 system 数组
 	// 尾部，不搬进 messages。详见 252fdbb83。
 	system := gjson.GetBytes(out, "system").Array()
-	require.Len(t, system, 4)
+	require.Len(t, system, 3, "恒为 3 块：[billing, 身份块, 调用方 system]")
 	require.Contains(t, system[0].Get("text").String(), "x-anthropic-billing-header:")
 	require.Equal(t, claudeCodeSystemPrompt, system[1].Get("text").String())
-	require.Equal(t, "Pi project instructions", system[3].Get("text").String())
+	require.Equal(t, "Pi project instructions", system[2].Get("text").String(),
+		"调用方自带 system 时直接落在 [2]，不再被扩充段挤到 [3]")
 
 	// messages 必须原样保留 —— 伪造的 user/assistant 指令对是真实 CLI 从不产生的特征
 	require.Len(t, gjson.GetBytes(out, "messages").Array(), 1)
