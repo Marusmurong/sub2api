@@ -72,6 +72,11 @@ const (
 	openAIImageRateLimitReason          = "openai_image_rate_limited"
 )
 
+// anthropicRevokedTokenMarker 匹配 Anthropic 撤销授权时 401 的报文
+// （"OAuth access token has been revoked."）。取子串而非全等，避免上游微调
+// 措辞或加标点后失配。比对前先 ToLower。
+const anthropicRevokedTokenMarker = "has been revoked"
+
 var openAIImageTryAgainPattern = regexp.MustCompile(`(?i)try again in\s+([0-9]+(?:\.[0-9]+)?)\s*(ms|s|sec|secs|second|seconds|m|min|mins|minute|minutes)`)
 
 const (
@@ -274,6 +279,20 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			msg := "Unauthorized (401): account authentication failed permanently"
 			if upstreamMsg != "" {
 				msg = "Unauthorized (401): " + upstreamMsg
+			}
+			s.handleAuthError(ctx, authAccount, msg)
+			shouldDisable = true
+			break
+		}
+		// Anthropic: "OAuth access token has been revoked." 表示授权被撤销，与 OpenAI 的
+		// token_revoked 同义。撤销后 refresh_token 一并失效（表现为后台刷新拿到 400
+		// non-retryable），所以下面那条"临时不可调度等刷新自愈"的路径救不回来——只会让废号
+		// 在冷却与重试之间空转，并持续把已撤销的凭据暴露给上游。这里与 OpenAI 分支对称，
+		// 直接永久禁用。
+		if authAccount.Platform == PlatformAnthropic && strings.Contains(strings.ToLower(upstreamMsg), anthropicRevokedTokenMarker) {
+			msg := "Token revoked (401): account authorization has been revoked"
+			if upstreamMsg != "" {
+				msg = "Token revoked (401): " + upstreamMsg
 			}
 			s.handleAuthError(ctx, authAccount, msg)
 			shouldDisable = true
