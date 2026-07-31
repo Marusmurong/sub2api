@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"net/http"
 	"strings"
@@ -28,6 +29,9 @@ func SetClaudeCodeClientContext(c *gin.Context, body []byte, parsedReq *service.
 	ua := c.GetHeader("User-Agent")
 	// Fast path：非 Claude CLI UA 直接判定 false，避免热路径二次 JSON 反序列化。
 	if !claudeCodeValidator.ValidateUserAgent(ua) {
+		// 这条快路径承载了绝大多数非 CC 流量，诊断必须也覆盖它，
+		// 否则统计出来的只有 claude-cli 那一小半，算不出影响面。
+		logClaudeCodeGate(c, ua, false)
 		ctx := service.SetClaudeCodeClient(c.Request.Context(), false)
 		c.Request = c.Request.WithContext(ctx)
 		return
@@ -45,6 +49,14 @@ func SetClaudeCodeClientContext(c *gin.Context, body []byte, parsedReq *service.
 		}
 		isClaudeCode = claudeCodeValidator.Validate(c.Request, bodyMap)
 	}
+
+	// 诊断：记录 claude_code_only 闸门会怎么判这个请求，以及卡在哪一步。
+	//
+	// 开启 group.claude_code_only 之前必须先知道它会拒掉多少、拒掉谁。生产上
+	// key 83（自建 Go 中转）同时转发真 Claude Code 与各类第三方 SDK 的流量，
+	// 若该中转没有透传 X-App / anthropic-beta / anthropic-version，真 CC 的那部分
+	// 也会一起被拒——那就不是拒掉 78% 而是 100%。只记布尔判定，不记任何内容。
+	logClaudeCodeGate(c, ua, isClaudeCode)
 
 	// 更新 request context
 	ctx := service.SetClaudeCodeClient(c.Request.Context(), isClaudeCode)
@@ -443,4 +455,24 @@ func nextBackoff(current time.Duration) time.Duration {
 		return maxBackoff
 	}
 	return jittered
+}
+
+// logClaudeCodeGate 输出 claude_code_only 闸门的判定明细，供开启开关前评估影响面。
+//
+// 只输出布尔与长度，不输出 system prompt 内容或任何对话文本。
+func logClaudeCodeGate(c *gin.Context, ua string, isClaudeCode bool) {
+	if c == nil || c.Request == nil {
+		return
+	}
+	if !strings.Contains(c.Request.URL.Path, "messages") {
+		return
+	}
+	slog.Info("cc_gate",
+		"result", isClaudeCode,
+		"ua_claude_cli", claudeCodeValidator.ValidateUserAgent(ua),
+		"has_x_app", c.GetHeader("X-App") != "",
+		"has_beta", c.GetHeader("anthropic-beta") != "",
+		"has_version", c.GetHeader("anthropic-version") != "",
+		"path", c.Request.URL.Path,
+	)
 }

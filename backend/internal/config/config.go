@@ -1003,6 +1003,15 @@ type GatewayConfig struct {
 	// 判定极窄：单条 user 消息 + 无 tools + 无实质 system + 内容为纯问候。
 	InterceptGreeting bool `mapstructure:"intercept_greeting"`
 
+	// RejectNonClaudeCodeClients: 就地拒绝非 Claude Code 客户端（默认关闭）。
+	//
+	// 判定只看 User-Agent 是否为 claude-cli/*，不走 ClaudeCodeValidator 的全套逻辑
+	// ——后者会把 Claude Code 自己的子请求形态误判为第三方（实测 854/6945）。
+	//
+	// 开启后这类请求在账号选择之前被拒：不发上游、不占账号并发槽、不消耗配额。
+	// 默认关闭：这是会拒掉大量既有流量的策略开关，必须由运维显式打开。
+	RejectNonClaudeCodeClients bool `mapstructure:"reject_non_claude_code_clients"`
+
 	// 账户切换最大次数（遇到上游错误时切换到其他账户的次数上限）
 	MaxAccountSwitches int `mapstructure:"max_account_switches"`
 	// Gemini 账户切换最大次数（Gemini 平台单独配置，因 API 限制更严格）
@@ -2235,6 +2244,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.intercept_warmup", true)
 	viper.SetDefault("gateway.intercept_probe_tools", true)
 	viper.SetDefault("gateway.intercept_greeting", true)
+	viper.SetDefault("gateway.reject_non_claude_code_clients", false)
 	viper.SetDefault("gateway.max_account_switches", 10)
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
 	viper.SetDefault("gateway.force_codex_cli", false)
