@@ -363,6 +363,17 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		return nil, &MalformedToolBlockError{Message: problem}
 	}
 
+	// 服务端工具带 input_schema 会被上游拒（该字段的 schema 由服务端定义）。
+	// 摘掉是无损的，摘完请求就能正常完成——与上面的工具块校验不同，那里缺失的是
+	// 无法凭空补出的 id。详见 stripServerToolInputSchema。
+	if stripped, changed := stripServerToolInputSchema(body); changed {
+		if err := replaceBody(stripped); err != nil {
+			return nil, err
+		}
+		logger.LegacyPrintf("service.gateway",
+			"Account %d: stripped input_schema from server tool(s) (upstream rejects it)", account.ID)
+	}
+
 	// 诊断基线：在任何改写之前取一次 thinking 块指纹，出口再取一次做对比。
 	// 目的是把"客户端本来就发了坏签名"和"我们在转发链上改坏了它"分开——
 	// 2026-07-31 连续两次归因失败都源于没有先确认这一点。详见

@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 )
 
 // 转发前的工具块结构校验。
@@ -90,3 +91,63 @@ type MalformedToolBlockError struct {
 }
 
 func (e *MalformedToolBlockError) Error() string { return e.Message }
+
+// stripServerToolInputSchema 摘掉服务端工具上的 input_schema。
+//
+// Anthropic 的服务端工具（web_search_20250305 / text_editor_* / computer_* 等）
+// schema 由服务端定义，请求里带 input_schema 会被拒：
+//
+//	400 tools.0.web_search_20250305.input_schema: Extra inputs are not permitted
+//
+// 生产实测（2026-07-31）：来自与 tool_use.id 同一个下游 key（自建 Go 中转，背后是
+// 各类第三方 SDK）。我们自己从不给服务端工具加这个字段。
+//
+// 这里「摘掉」而不是像 tool_use.id 那样「拒绝」，区别是能不能无损修正：
+//   - tool_use.id 缺失 —— 无法凭空编出正确的 id，编了就是伪造数据，只能拒绝
+//   - 服务端工具的 input_schema —— 字段本身无意义（schema 由服务端定义）且被上游
+//     拒收，摘掉不改变任何语义，摘完请求就能正常完成
+//
+// 判定「服务端工具」用的是 type 非空且不是 custom/function。自定义工具的两种写法
+// （裸 {name, input_schema} 与 {type:"custom", ...}）都不会被误伤。
+func stripServerToolInputSchema(body []byte) ([]byte, bool) {
+	tools := gjson.GetBytes(body, "tools")
+	if !tools.Exists() || !tools.IsArray() {
+		return body, false
+	}
+
+	out := body
+	changed := false
+	arr := tools.Array()
+	// 倒序处理：sjson 删除的是对象字段而不是数组元素，下标不会移动；
+	// 倒序只是与本文件其余删除逻辑保持一致的写法。
+	for i := len(arr) - 1; i >= 0; i-- {
+		t := arr[i]
+		if !t.IsObject() || !isAnthropicServerToolType(t.Get("type").String()) {
+			continue
+		}
+		if !t.Get("input_schema").Exists() {
+			continue
+		}
+		next, err := sjson.DeleteBytes(out, "tools."+strconv.Itoa(i)+".input_schema")
+		if err != nil {
+			continue
+		}
+		out = next
+		changed = true
+	}
+	return out, changed
+}
+
+// isAnthropicServerToolType 判断 tool.type 是否为服务端工具。
+//
+// 用「非空且不是 custom/function」而不是枚举已知的服务端工具名：Anthropic 会不断
+// 新增带版本号的服务端工具（web_fetch_20250910、code_execution_* …），枚举一份清单
+// 就得跟着上游改，漏一个这个错误就会重新出现。
+func isAnthropicServerToolType(toolType string) bool {
+	switch toolType {
+	case "", "custom", "function":
+		return false
+	default:
+		return true
+	}
+}
