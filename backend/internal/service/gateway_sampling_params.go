@@ -19,7 +19,7 @@ import (
 //  2. 互斥（仍支持采样的老模型）：
 //     - 上游不允许同一次请求同时指定 temperature 与 top_p
 //     - 生产实测 400；固定保留 temperature、删除 top_p（见
-//       stripMutuallyExclusiveSamplingParams）
+//     stripMutuallyExclusiveSamplingParams）
 //
 // 因此按模型判定：白名单内的老模型只做互斥处理，其余（含未来新模型）剥离全部。
 // 判定见 claude.SupportsSamplingParams。

@@ -25,6 +25,8 @@ import (
 	gocache "github.com/patrickmn/go-cache"
 	"github.com/tidwall/gjson"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/Wei-Shaw/sub2api/internal/domain"
 )
 
 const (
@@ -826,7 +828,33 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 		)
 	}
 
-	// 2. 提取带 cache_control: {type: "ephemeral"} 的内容
+	// 2. 无 metadata.user_id 时，用**对话前缀**而不是全量内容。
+	//
+	// 对话是追加式增长的：system 与头一条消息在整个对话生命周期里不变，而
+	// 「全部消息内容」和「带 cache_control 的消息」都会每轮改变——后者是因为
+	// Claude Code 每轮把缓存断点往后挪。
+	//
+	// 生产实测（2026-07-31）：88% 的下游请求不带 metadata.user_id，会话哈希因此
+	// 每轮都变，粘性未命中率 70%，同一对话每轮落到不同账号上。后果有两个：
+	//
+	//   1. 客户端回传的 thinking 签名属于上一个账号，必然被拒
+	//      400 messages.N.content.M: Invalid `signature` in `thinking` block
+	//   2. 上游看到的是碎片化的会话，与「一个号 = 一个客户端」直接冲突
+	//
+	// 代价：同一客户端用完全相同的开场白起两个对话会共用一个账号。只是共用调度，
+	// 不共用任何数据；相比每轮换号，这个代价可以接受。
+	if prefix := s.buildStableSessionPrefix(parsed); prefix != "" {
+		hash := s.hashContent(prefix)
+		slog.Info("sticky.hash_source",
+			"source", "stable_prefix",
+			"hash", hash,
+		)
+		return hash
+	}
+
+	// 3. 前缀取不到时（responses 协议只有 input，没有 messages）保留原有的
+	// cache_control 锚点路径：那条路径依赖的是 system 里的稳定锚点，本身不随对话
+	// 增长而变，上面的问题不成立。
 	cacheableContent := s.extractCacheableContent(parsed)
 	if cacheableContent != "" {
 		hash := s.hashContent(cacheableContent)
@@ -837,7 +865,7 @@ func (s *GatewayService) GenerateSessionHash(parsed *ParsedRequest) string {
 		return hash
 	}
 
-	// 3. 最后 fallback: 使用 session上下文 + system + 所有消息的完整摘要串
+	// 4. 最后 fallback: 使用 session上下文 + system + 所有消息的完整摘要串。
 	var combined strings.Builder
 	// 混入请求上下文区分因子，避免不同用户相同消息产生相同 hash
 	if parsed.SessionContext != nil {
@@ -935,6 +963,81 @@ func (s *GatewayService) SaveAnthropicSession(_ context.Context, groupID int64, 
 	}
 	s.digestStore.Save(groupID, prefixHash, digestChain, uuid, accountID, oldDigestChain)
 	return nil
+}
+
+// buildStableSessionPrefix 构造一个在对话增长过程中保持不变的会话标识来源：
+//
+//	客户端上下文（IP / 归一化 UA / api key） + system 文本 + 头一条消息文本
+//
+// 三段都是必要的：
+//   - 客户端上下文：不同客户发同样的开场白不该共用账号
+//   - system：同一客户端的不同工具（CLI / IDE / 自建）system 不同，应分开
+//   - 头一条消息：同一客户端的不同对话靠它区分
+//
+// 返回 "" 表示前缀取不到（例如 responses 协议只有 input），由调用方退回全量摘要。
+func (s *GatewayService) buildStableSessionPrefix(parsed *ParsedRequest) string {
+	if parsed == nil {
+		return ""
+	}
+	// Gemini 不走这条路：它有自己的会话机制（digest chain + FindGeminiSession），
+	// 且多轮**有意**不粘性。把前缀稳定化套到它头上会改掉一个既定设计，
+	// 而这里要解决的 thinking 签名问题是 anthropic 独有的。
+	if parsed.protocol == domain.PlatformGemini {
+		return ""
+	}
+	var b strings.Builder
+	if parsed.SessionContext != nil {
+		_, _ = b.WriteString(parsed.SessionContext.ClientIP)
+		_, _ = b.WriteString(":")
+		_, _ = b.WriteString(NormalizeSessionUserAgent(parsed.SessionContext.UserAgent))
+		_, _ = b.WriteString(":")
+		_, _ = b.WriteString(strconv.FormatInt(parsed.SessionContext.APIKeyID, 10))
+		_, _ = b.WriteString("|")
+	}
+	if systemText := extractTextFromSystemRaw(parsed.SystemRaw()); systemText != "" {
+		_, _ = b.WriteString(systemText)
+		_, _ = b.WriteString("|")
+	}
+
+	anchor := b.Len()
+	appendFirstMessageTextFromRaw(&b, parsed.MessagesRaw())
+	if b.Len() == anchor {
+		// 一条消息文本都取不到：此时前缀退化为「上下文 + system」，那是同一客户端
+		// 所有对话共有的，用它当会话身份会把全部流量挤到一个账号上。宁可交给
+		// 调用方走全量摘要。
+		return ""
+	}
+	return b.String()
+}
+
+// appendFirstMessageTextFromRaw 只取 messages[0] 的文本——对话增长时它不变。
+//
+// 注意上下文压缩（compaction）会重写头一条消息，届时会话身份随之改变、换一次账号。
+// 这是可接受的：一次压缩换一次号，远好过每轮换一次。
+func appendFirstMessageTextFromRaw(builder *strings.Builder, raw []byte) {
+	if builder == nil || len(raw) == 0 {
+		return
+	}
+	messages := parseRawJSONView(raw)
+	if !messages.IsArray() {
+		return
+	}
+	first := messages.Get("0")
+	if !first.Exists() {
+		return
+	}
+	if content := first.Get("content"); content.Exists() {
+		_, _ = builder.WriteString(extractTextFromContentRaw(content))
+		return
+	}
+	if parts := first.Get("parts"); parts.IsArray() {
+		parts.ForEach(func(_, part gjson.Result) bool {
+			if text := part.Get("text").String(); text != "" {
+				_, _ = builder.WriteString(text)
+			}
+			return true
+		})
+	}
 }
 
 func (s *GatewayService) extractCacheableContent(parsed *ParsedRequest) string {

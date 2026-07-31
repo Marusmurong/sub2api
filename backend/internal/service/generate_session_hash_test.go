@@ -196,7 +196,20 @@ func TestGenerateSessionHash_NilSessionContextBackwardCompatible(t *testing.T) {
 	require.Equal(t, h1, h2, "nil SessionContext should produce same hash as no SessionContext")
 }
 
-func TestGenerateSessionHash_ContinuousConversation_HashChangesWithMessages(t *testing.T) {
+// 需求在 2026-07-31 反转了：本用例原先断言「每一轮应当产生不同的哈希」，
+// 而那正是生产故障的成因。
+//
+// 粘性会话的用途是把同一个对话钉在同一个账号上。哈希每轮都变，等于每轮都换号：
+//
+//	88% 的下游请求不带 metadata.user_id → 哈希退化为内容推导 → 每轮都变
+//	→ 粘性未命中 70% → 每轮换账号
+//	→ 客户端回传的 thinking 签名属于上一个账号，必然被上游拒绝
+//	   400 messages.N.content.M: Invalid `signature` in `thinking` block
+//	→ 且上游看到的是碎片化会话，与「一个号 = 一个客户端」直接冲突
+//
+// 同文件里 responses 路径的用例（"Responses input growth should preserve the hash
+// when the conversation prefix is stable"）早已是这个语义，messages 路径只是一直没跟上。
+func TestGenerateSessionHash_ContinuousConversation_HashStableAcrossRounds(t *testing.T) {
 	svc := &GatewayService{}
 	ctx := &SessionContext{ClientIP: "1.2.3.4", UserAgent: "test", APIKeyID: 1}
 	round1 := mustParseSessionHashRequest(t, anthropicSessionBody("You are a helpful assistant.", []any{msg("user", "hello")}, ""), ctx)
@@ -207,11 +220,12 @@ func TestGenerateSessionHash_ContinuousConversation_HashChangesWithMessages(t *t
 	h2 := svc.GenerateSessionHash(round2)
 	h3 := svc.GenerateSessionHash(round3)
 	require.NotEmpty(t, h1)
-	require.NotEmpty(t, h2)
-	require.NotEmpty(t, h3)
-	require.NotEqual(t, h1, h2, "different conversation rounds should produce different hashes")
-	require.NotEqual(t, h2, h3, "each new round should produce a different hash")
-	require.NotEqual(t, h1, h3, "round 1 and round 3 should differ")
+	require.Equal(t, h1, h2, "对话追加一轮不应改变会话身份")
+	require.Equal(t, h2, h3, "对话继续增长仍不应改变会话身份")
+
+	// 反向保护：不同的对话（开场白不同）必须仍然分得开，否则所有流量会挤到一个账号。
+	other := mustParseSessionHashRequest(t, anthropicSessionBody("You are a helpful assistant.", []any{msg("user", "completely different opening")}, ""), ctx)
+	require.NotEqual(t, h1, svc.GenerateSessionHash(other), "不同对话必须分得开")
 }
 
 func TestGenerateSessionHash_ContinuousConversation_SameRoundSameHash(t *testing.T) {
@@ -279,6 +293,11 @@ func TestGenerateSessionHash_ResponsesInputDoesNotOverrideHigherPrioritySources(
 	})
 }
 
+// 重发/回滚同一个对话的最后一条消息，仍是同一个对话，应当留在同一个账号上。
+//
+// 本用例原先断言"改了最后一条消息就该换哈希"。那等于每次编辑重发都换号，
+// 而客户端回传的 thinking 签名属于旧账号，必然被拒。会话身份由对话前缀决定，
+// 与最后一条消息无关。
 func TestGenerateSessionHash_MessageRollback(t *testing.T) {
 	svc := &GatewayService{}
 	ctx := &SessionContext{ClientIP: "1.2.3.4", UserAgent: "test", APIKeyID: 1}
@@ -287,7 +306,7 @@ func TestGenerateSessionHash_MessageRollback(t *testing.T) {
 
 	hOrig := svc.GenerateSessionHash(original)
 	hRollback := svc.GenerateSessionHash(rollback)
-	require.NotEqual(t, hOrig, hRollback, "rollback with different last message should produce different hash")
+	require.Equal(t, hOrig, hRollback, "回滚重发仍是同一个对话，必须留在同一个账号")
 }
 
 func TestGenerateSessionHash_MessageRollbackSameContent(t *testing.T) {
@@ -396,6 +415,9 @@ func TestGenerateSessionHash_MultipleUsersSameFirstMessage(t *testing.T) {
 	require.Len(t, hashes, 5, "5 different users should produce 5 unique hashes")
 }
 
+// 对话逐轮增长时会话身份必须不变——这正是粘性会话存在的意义。
+// 原用例断言"每一轮都该换哈希"，见 TestGenerateSessionHash_ContinuousConversation_HashStableAcrossRounds
+// 的说明：那是 2026-07-31 生产故障（签名错误率 35%）的直接成因。
 func TestGenerateSessionHash_SameUserGrowingConversation(t *testing.T) {
 	svc := &GatewayService{}
 	ctx := &SessionContext{ClientIP: "1.2.3.4", UserAgent: "browser", APIKeyID: 42}
@@ -410,7 +432,7 @@ func TestGenerateSessionHash_SameUserGrowingConversation(t *testing.T) {
 		h := svc.GenerateSessionHash(parsed)
 		require.NotEmpty(t, h, "round %d hash should not be empty", round)
 		if prevHash != "" {
-			require.NotEqual(t, prevHash, h, "round %d hash should differ from previous round", round)
+			require.Equal(t, prevHash, h, "round %d 与上一轮必须是同一个会话身份", round)
 		}
 		prevHash = h
 		h2 := svc.GenerateSessionHash(parsed)
@@ -418,6 +440,9 @@ func TestGenerateSessionHash_SameUserGrowingConversation(t *testing.T) {
 	}
 }
 
+// 改动对话中段的某条消息不改变会话身份：会话由前缀（system + 头一条消息）决定。
+// 原用例断言"改任何一条消息都该换哈希"，那会让上下文压缩、消息编辑、重试等
+// 常见操作全都触发换号。
 func TestGenerateSessionHash_MultipleUserMessages(t *testing.T) {
 	svc := &GatewayService{}
 	ctx := &SessionContext{ClientIP: "1.2.3.4", UserAgent: "test", APIKeyID: 1}
@@ -427,7 +452,11 @@ func TestGenerateSessionHash_MultipleUserMessages(t *testing.T) {
 
 	parsed2 := mustParseSessionHashRequest(t, anthropicSessionBody(nil, []any{msg("user", "first"), msg("user", "CHANGED"), msg("user", "third"), msg("user", "fourth"), msg("user", "fifth")}, ""), ctx)
 	h2 := svc.GenerateSessionHash(parsed2)
-	require.NotEqual(t, h, h2, "changing any message should change the hash")
+	require.Equal(t, h, h2, "中段消息变化不改变会话身份")
+
+	// 反向保护：头一条消息不同就是不同的对话，必须分得开。
+	parsed3 := mustParseSessionHashRequest(t, anthropicSessionBody(nil, []any{msg("user", "DIFFERENT OPENING"), msg("user", "second")}, ""), ctx)
+	require.NotEqual(t, h, svc.GenerateSessionHash(parsed3), "开场白不同即不同对话")
 }
 
 func TestGenerateSessionHash_MessageOrderMatters(t *testing.T) {
@@ -461,7 +490,16 @@ func TestGenerateSessionHash_ArraySystemPrompt(t *testing.T) {
 	require.NotEmpty(t, h, "array system prompt should produce a hash")
 }
 
-func TestGenerateSessionHash_CacheControlOverridesSessionContext(t *testing.T) {
+// 有 messages 时，会话身份必须把客户端上下文算进去。
+//
+// 原用例断言"cache_control 优先级更高，SessionContext 不该影响结果"——那意味着
+// 两个**不同的下游客户**（不同 IP、不同 api key）只要 system 相同就共用一个会话，
+// 进而共用一个上游账号。这与「一个号 = 一个客户端」直接冲突：上游会看到同一个
+// 账号被两个客户端同时使用，而这正是最快招致封号的模式。
+//
+// cache_control 锚点路径仍然保留，但只用于没有 messages 的 responses 协议
+// （见 TestGenerateSessionHash_ResponsesInputDoesNotOverrideHigherPrioritySources）。
+func TestGenerateSessionHash_CacheControlDoesNotMergeDistinctClients(t *testing.T) {
 	svc := &GatewayService{}
 	system := []any{map[string]any{"type": "text", "text": "You are a tool-specific assistant.", "cache_control": map[string]any{"type": "ephemeral"}}}
 	body := anthropicSessionBody(system, []any{msg("user", "hello")}, "")
@@ -470,7 +508,7 @@ func TestGenerateSessionHash_CacheControlOverridesSessionContext(t *testing.T) {
 
 	h1 := svc.GenerateSessionHash(parsed1)
 	h2 := svc.GenerateSessionHash(parsed2)
-	require.Equal(t, h1, h2, "cache_control ephemeral has higher priority, SessionContext should not affect result")
+	require.NotEqual(t, h1, h2, "不同下游客户不得共用会话身份，否则一个上游账号会被多客户端同时使用")
 }
 
 func TestGenerateSessionHash_EmptyMessages(t *testing.T) {
@@ -500,6 +538,7 @@ func TestGenerateSessionHash_SessionContextWithEmptyFields(t *testing.T) {
 	require.NotEqual(t, h1, h2, "empty-field SessionContext should still differ from nil SessionContext")
 }
 
+// 长对话继续追加消息，会话身份不变。
 func TestGenerateSessionHash_LongConversation(t *testing.T) {
 	svc := &GatewayService{}
 	ctx := &SessionContext{ClientIP: "1.2.3.4", UserAgent: "test", APIKeyID: 1}
@@ -516,7 +555,7 @@ func TestGenerateSessionHash_LongConversation(t *testing.T) {
 	moreMessages := append(append([]any{}, messages...), msg("user", "one more"), msg("assistant", "ok"))
 	parsed2 := mustParseSessionHashRequest(t, anthropicSessionBody("System prompt", moreMessages, ""), ctx)
 	h2 := svc.GenerateSessionHash(parsed2)
-	require.NotEqual(t, h, h2, "adding more messages to long conversation should change hash")
+	require.Equal(t, h, h2, "长对话追加消息不改变会话身份")
 }
 
 func TestGenerateSessionHash_GeminiContentsProducesHash(t *testing.T) {

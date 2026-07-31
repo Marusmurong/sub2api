@@ -352,6 +352,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	// 调试日志：记录即将转发的账号信息
 	logger.LegacyPrintf("service.gateway", "[Forward] Using account: ID=%d Name=%s Platform=%s Type=%s TLSFingerprint=%v Proxy=%s",
 		account.ID, account.Name, account.Platform, account.Type, tlsProfile, proxyURL)
+	// 诊断基线：在任何改写之前取一次 thinking 块指纹，出口再取一次做对比。
+	// 目的是把"客户端本来就发了坏签名"和"我们在转发链上改坏了它"分开——
+	// 2026-07-31 连续两次归因失败都源于没有先确认这一点。详见
+	// gateway_thinking_signature_probe.go。
+	thinkingPrintsBefore := thinkingBlockPrints(body)
+
 	// Pre-filter: strip empty text blocks (including nested in tool_result) to prevent upstream 400.
 	if err := replaceBody(StripEmptyTextBlocks(body)); err != nil {
 		return nil, err
@@ -420,6 +426,12 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if err != nil {
 			return nil, err
 		}
+		// 只在 thinking 块确实发生变化时记一行；绝大多数请求应当完全没有输出。
+		if diff := diffThinkingBlockPrints(thinkingPrintsBefore, thinkingBlockPrints(wireBody)); diff != "" {
+			logger.LegacyPrintf("service.gateway",
+				"[sigprobe] account=%d attempt=%d %s", account.ID, attempt, diff)
+		}
+
 		// 记录本次实际发送的 wire body；只有请求成功后才写回 ParsedRequest，避免 400 retry 基于已签名 CCH 再改写。
 		lastWireBody = wireBody
 
