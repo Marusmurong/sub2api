@@ -462,6 +462,10 @@ type GatewayCache interface {
 	// DeleteSessionAccountID 删除粘性会话绑定，用于账号不可用时主动清理
 	// Delete sticky session binding, used to proactively clean up when account becomes unavailable
 	DeleteSessionAccountID(ctx context.Context, groupID int64, sessionHash string) error
+	// GetSignatureOwnerAccountID 获取该会话历史 thinking 签名的签发账号（无记录返回 0）。
+	// 它比粘性绑定活得久，专用于在换号时**发出前**剥离跨账号签名，
+	// 见 resolveSignatureOwnerAccountID。
+	GetSignatureOwnerAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error)
 }
 
 // derefGroupID safely dereferences *int64 to int64, returning 0 if nil
@@ -884,6 +888,18 @@ func (s *GatewayService) GetCachedSessionAccountID(ctx context.Context, groupID 
 		return 0, err
 	}
 	return accountID, nil
+}
+
+// GetSignatureOwnerAccountID 返回该会话历史 thinking 签名的签发账号，无记录时返回 0。
+//
+// 与 GetCachedSessionAccountID 的区别只在生命周期：粘性绑定在账号不可用时被立刻删除，
+// 这条记录则保留（见 repository.DeleteSessionAccountID 的说明），因为签名是否有效
+// 与账号当下能不能调度无关。
+func (s *GatewayService) GetSignatureOwnerAccountID(ctx context.Context, groupID *int64, sessionHash string) (int64, error) {
+	if sessionHash == "" || s.cache == nil {
+		return 0, nil
+	}
+	return s.cache.GetSignatureOwnerAccountID(ctx, derefGroupID(groupID), sessionHash)
 }
 
 // FindGeminiSession 查找 Gemini 会话（基于内容摘要链的 Fallback 匹配）

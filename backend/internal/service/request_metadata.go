@@ -16,6 +16,7 @@ type RequestMetadata struct {
 	ThinkingEnabled            *bool
 	PrefetchedStickyAccountID  *int64
 	PrefetchedStickyGroupID    *int64
+	SignatureOwnerAccountID    *int64
 	SingleAccountRetry         *bool
 	AccountSwitchCount         *int
 }
@@ -95,6 +96,19 @@ func WithPrefetchedStickySession(ctx context.Context, accountID, groupID int64, 
 	}, func(base context.Context) context.Context {
 		bridged := context.WithValue(base, ctxkey.PrefetchedStickyAccountID, accountID)
 		return context.WithValue(bridged, ctxkey.PrefetchedStickyGroupID, groupID)
+	})
+}
+
+// WithSignatureOwnerAccount 记录该会话历史 thinking 签名的签发账号。
+//
+// 仅在粘性绑定已不存在时由 handler 写入——绑定还在时它本身就是更准的答案。
+// 这个值**不参与调度**，只喂给 resolveSignatureOwnerAccountID 做剥离判定。
+func WithSignatureOwnerAccount(ctx context.Context, accountID int64, bridgeOldKeys bool) context.Context {
+	return updateRequestMetadata(ctx, bridgeOldKeys, func(md *RequestMetadata) {
+		account := accountID
+		md.SignatureOwnerAccountID = &account
+	}, func(base context.Context) context.Context {
+		return context.WithValue(base, ctxkey.SignatureOwnerAccountID, accountID)
 	})
 }
 
@@ -180,6 +194,23 @@ func PrefetchedStickyAccountIDFromContext(ctx context.Context) (int64, bool) {
 		return int64(t), true
 	}
 	return 0, false
+}
+
+// SignatureOwnerAccountIDFromContext 读取签名归属账号；无记录时返回 0。
+func SignatureOwnerAccountIDFromContext(ctx context.Context) int64 {
+	if md := metadataFromContext(ctx); md != nil && md.SignatureOwnerAccountID != nil {
+		return *md.SignatureOwnerAccountID
+	}
+	if ctx == nil {
+		return 0
+	}
+	switch t := ctx.Value(ctxkey.SignatureOwnerAccountID).(type) {
+	case int64:
+		return t
+	case int:
+		return int64(t)
+	}
+	return 0
 }
 
 func SingleAccountRetryFromContext(ctx context.Context) (bool, bool) {

@@ -94,6 +94,12 @@ type StubGatewayCache struct{}
 func (c StubGatewayCache) GetSessionAccountID(_ context.Context, _ int64, _ string) (int64, error) {
 	return 0, nil
 }
+
+// GetSignatureOwnerAccountID 在这些用例里不参与断言：签名归属只影响
+// 转发前的 thinking 剥离判定，返回 0 表示无记录。
+func (c StubGatewayCache) GetSignatureOwnerAccountID(context.Context, int64, string) (int64, error) {
+	return 0, nil
+}
 func (c StubGatewayCache) SetSessionAccountID(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) error {
 	return nil
 }

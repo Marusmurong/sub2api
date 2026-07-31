@@ -498,6 +498,12 @@ func (c *stubGatewayCache) GetSessionAccountID(ctx context.Context, groupID int6
 	return 0, errors.New("not found")
 }
 
+// GetSignatureOwnerAccountID 在这些用例里不参与断言：签名归属只影响
+// 转发前的 thinking 剥离判定，返回 0 表示无记录。
+func (c *stubGatewayCache) GetSignatureOwnerAccountID(context.Context, int64, string) (int64, error) {
+	return 0, nil
+}
+
 func (c *stubGatewayCache) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
 	if c.sessionBindings == nil {
 		c.sessionBindings = make(map[string]int64)

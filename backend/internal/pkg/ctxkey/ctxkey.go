@@ -73,6 +73,13 @@ const (
 	// Service 层仅在分组匹配时复用 PrefetchedStickyAccountID，避免分组切换重试误用旧 sticky。
 	PrefetchedStickyGroupID Key = "ctx_prefetched_sticky_group_id"
 
+	// SignatureOwnerAccountID 标识该会话历史 thinking 签名的签发账号。
+	//
+	// 与 PrefetchedStickyAccountID 严格区分：那个值参与**调度**（决定请求送去哪个账号），
+	// 这个值只参与**剥离判定**（决定要不要在发出前摘掉跨账号签名）。混用会让一个已被
+	// 驱逐的账号仅凭历史记录重新把流量吸回去。
+	SignatureOwnerAccountID Key = "ctx_signature_owner_account_id"
+
 	// ClaudeCodeVersion stores the extracted Claude Code version from User-Agent (e.g. "2.1.22")
 	ClaudeCodeVersion Key = "ctx_claude_code_version"
 )

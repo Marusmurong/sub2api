@@ -49,3 +49,29 @@ func stripThinkingForAccountSwitch(body []byte, mappedModel string, boundAccount
 func isCrossAccountSessionReuse(boundAccountID, selectedAccountID int64) bool {
 	return boundAccountID > 0 && selectedAccountID > 0 && boundAccountID != selectedAccountID
 }
+
+// resolveSignatureOwnerAccountID 回答"本轮请求里的历史 thinking 签名是谁签发的"。
+//
+// 有两个来源，粘性绑定优先：
+//
+//	sticky   —— 仍然活着的粘性绑定，是当前事实
+//	recorded —— 签名归属记录（sig_owner），绑定被清理后仍然保留
+//
+// 为什么必须有第二个来源：粘性绑定恰恰是在账号 429、被驱逐、变为不可调度时由
+// shouldClearStickySession → DeleteSessionAccountID 删掉的，而这正是下一轮必然换号、
+// 也就是最需要知道"上一轮是谁签的"的时刻。只看粘性绑定，等于在唯一用得上它的场景里
+// 把这条信息扔了。
+//
+// 生产数据（2026-07-31 单日）：前置剥离命中 166 次，另有 175 次仍然发到上游才拿到
+// 400，其中 16 次连重试都没救回来直接漏给客户端——那 175 次只可能是绑定已不存在。
+//
+// 两个来源都不采信负值：它们来自 Redis，解析异常时不应被当作账号 ID 参与剥离判定。
+func resolveSignatureOwnerAccountID(sticky, recorded int64) int64 {
+	if sticky > 0 {
+		return sticky
+	}
+	if recorded > 0 {
+		return recorded
+	}
+	return 0
+}

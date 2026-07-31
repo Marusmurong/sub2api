@@ -381,7 +381,13 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	// 与上面的 FilterThinkingBlocks 互补——那个处理"签名字段缺失"，这里处理
 	// "签名有效但属于另一个账号"。详见 stripThinkingForAccountSwitch 的说明：
 	// 换账号时 prompt 缓存本就是冷的，剥离零损失；同账号路径完全不动。
-	if boundAccountID := prefetchedStickyAccountIDFromContext(ctx, parsed.GroupID); boundAccountID > 0 {
+	//
+	// 签名归属有两个来源：还活着的粘性绑定，以及绑定被清理后仍保留的 sig_owner 记录。
+	// 后者不可省——绑定恰恰是在账号 429/被驱逐时删掉的，而那正是下一轮必然换号的时刻。
+	if boundAccountID := resolveSignatureOwnerAccountID(
+		prefetchedStickyAccountIDFromContext(ctx, parsed.GroupID),
+		SignatureOwnerAccountIDFromContext(ctx),
+	); boundAccountID > 0 {
 		if filtered, applied := stripThinkingForAccountSwitch(body, reqModel, boundAccountID, account.ID); applied {
 			if err := replaceBody(filtered); err != nil {
 				return nil, err

@@ -36,7 +36,14 @@ func (c *gatewayCache) GetSessionAccountID(ctx context.Context, groupID int64, s
 
 func (c *gatewayCache) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
 	key := buildSessionKey(groupID, sessionHash)
-	return c.rdb.Set(ctx, key, accountID, ttl).Err()
+	if err := c.rdb.Set(ctx, key, accountID, ttl).Err(); err != nil {
+		return err
+	}
+	// 同步记录签名归属。写在这里而不是各个调用点，是因为"会话现在由哪个账号服务"
+	// 与"历史 thinking 签名由谁签发"在写入时刻是同一件事，分开写迟早会有调用点漏掉。
+	// 失败不影响绑定本身：归属记录只是让剥离提前发生，缺了仍有 400 重试兜底。
+	_ = c.setSignatureOwnerAccountID(ctx, groupID, sessionHash, accountID)
+	return nil
 }
 
 func (c *gatewayCache) RefreshSessionTTL(ctx context.Context, groupID int64, sessionHash string, ttl time.Duration) error {
@@ -51,9 +58,45 @@ func (c *gatewayCache) RefreshSessionTTL(ctx context.Context, groupID int64, ses
 // DeleteSessionAccountID removes the sticky session binding for the given session.
 // Called when the bound account becomes unavailable (e.g., error status, disabled,
 // or unschedulable), allowing subsequent requests to select a new available account.
+//
+// 只删路由绑定，**不删** sig_owner。这个区别是有意的：本方法被调用的时刻，正是下一轮
+// 必然换号、因而历史 thinking 签名必然失效的时刻。若把签名归属一并删掉，下一轮就只能
+// 盲发一个已知会被上游拒绝的请求（生产实测每天 175 次，其中 16 次连重试都没救回来）。
 func (c *gatewayCache) DeleteSessionAccountID(ctx context.Context, groupID int64, sessionHash string) error {
 	key := buildSessionKey(groupID, sessionHash)
 	return c.rdb.Del(ctx, key).Err()
+}
+
+// signatureOwnerPrefix 记录"某会话的历史 thinking 签名由哪个账号签发"。
+// 格式: sig_owner:{groupID}:{sessionHash}
+//
+// 它与 sticky_session 是**故意分开**的两条记录，因为生命周期不同：
+//
+//	sticky_session —— 路由事实。账号 429、被驱逐、不可调度时必须立刻删除，
+//	                  否则会把请求继续送去一个用不了的账号。
+//	sig_owner      —— 历史事实。客户端手里那份 thinking 签名不会因为账号被驱逐
+//	                  就变得有效，删掉它只会让我们在下一轮盲发一个必然被拒的请求。
+//
+// 所以 DeleteSessionAccountID 不碰这个 key（见该方法的说明）。
+const signatureOwnerPrefix = "sig_owner:"
+
+// signatureOwnerTTL 取 24h：thinking 签名本身不会过期，但隔夜之后再接着聊的会话
+// 极少，而 key 需要有界。超出这个窗口仍有 400 重试路径兜底。
+const signatureOwnerTTL = 24 * time.Hour
+
+func buildSignatureOwnerKey(groupID int64, sessionHash string) string {
+	return fmt.Sprintf("%s%d:%s", signatureOwnerPrefix, groupID, sessionHash)
+}
+
+func (c *gatewayCache) setSignatureOwnerAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64) error {
+	key := buildSignatureOwnerKey(groupID, sessionHash)
+	return c.rdb.Set(ctx, key, accountID, signatureOwnerTTL).Err()
+}
+
+// GetSignatureOwnerAccountID 返回该会话历史 thinking 签名的签发账号；无记录时返回 0。
+func (c *gatewayCache) GetSignatureOwnerAccountID(ctx context.Context, groupID int64, sessionHash string) (int64, error) {
+	key := buildSignatureOwnerKey(groupID, sessionHash)
+	return c.rdb.Get(ctx, key).Int64()
 }
 
 // prevRequestIDPrefix 是 cc_prev_req parent-link 的 key 前缀。

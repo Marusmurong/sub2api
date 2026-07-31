@@ -53,6 +53,12 @@ func (f *fakeModelNotFoundCache) MarkModelNotFound(_ context.Context, platform, 
 func (f *fakeModelNotFoundCache) GetSessionAccountID(context.Context, int64, string) (int64, error) {
 	return 0, nil
 }
+
+// GetSignatureOwnerAccountID 在这些用例里不参与断言：签名归属只影响
+// 转发前的 thinking 剥离判定，返回 0 表示无记录。
+func (f *fakeModelNotFoundCache) GetSignatureOwnerAccountID(context.Context, int64, string) (int64, error) {
+	return 0, nil
+}
 func (f *fakeModelNotFoundCache) SetSessionAccountID(context.Context, int64, string, int64, time.Duration) error {
 	return nil
 }

@@ -124,6 +124,12 @@ var _ CyberSessionBlockStore = (*comboCacheAndStore)(nil)
 func (c *comboCacheAndStore) GetSessionAccountID(_ context.Context, _ int64, _ string) (int64, error) {
 	return 0, errors.New("stub")
 }
+
+// GetSignatureOwnerAccountID 在这些用例里不参与断言：签名归属只影响
+// 转发前的 thinking 剥离判定，返回 0 表示无记录。
+func (c *comboCacheAndStore) GetSignatureOwnerAccountID(context.Context, int64, string) (int64, error) {
+	return 0, nil
+}
 func (c *comboCacheAndStore) SetSessionAccountID(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) error {
 	return nil
 }

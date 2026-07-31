@@ -173,6 +173,12 @@ func (c *openAIWSStateStoreTimeoutProbeCache) GetSessionAccountID(ctx context.Co
 	return 123, nil
 }
 
+// GetSignatureOwnerAccountID 在这些用例里不参与断言：签名归属只影响
+// 转发前的 thinking 剥离判定，返回 0 表示无记录。
+func (c *openAIWSStateStoreTimeoutProbeCache) GetSignatureOwnerAccountID(context.Context, int64, string) (int64, error) {
+	return 0, nil
+}
+
 func (c *openAIWSStateStoreTimeoutProbeCache) SetSessionAccountID(ctx context.Context, _ int64, _ string, _ int64, _ time.Duration) error {
 	if deadline, ok := ctx.Deadline(); ok {
 		c.setHasDeadline = true

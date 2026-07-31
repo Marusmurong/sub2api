@@ -132,6 +132,12 @@ func (s *stickyGatewayCacheHotpathStub) GetSessionAccountID(ctx context.Context,
 	return 0, errors.New("not found")
 }
 
+// GetSignatureOwnerAccountID 在这些用例里不参与断言：签名归属只影响
+// 转发前的 thinking 剥离判定，返回 0 表示无记录。
+func (s *stickyGatewayCacheHotpathStub) GetSignatureOwnerAccountID(context.Context, int64, string) (int64, error) {
+	return 0, nil
+}
+
 func (s *stickyGatewayCacheHotpathStub) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
 	return nil
 }

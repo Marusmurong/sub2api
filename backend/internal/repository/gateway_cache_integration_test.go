@@ -104,6 +104,50 @@ func (s *GatewayCacheSuite) TestGetSessionAccountID_CorruptedValue() {
 	require.False(s.T(), errors.Is(err, redis.Nil), "expected parsing error, not redis.Nil")
 }
 
+// 签名归属记录必须比粘性绑定活得久。
+//
+// DeleteSessionAccountID 被调用的时刻正是账号 429/被驱逐、下一轮必然换号的时刻；
+// 若归属记录跟着一起没了，下一轮就只能盲发一个带着旧账号签名、必然被上游 400 拒绝
+// 的请求（生产实测每天 175 次，其中 16 次重试预算耗尽后直接漏给客户端）。
+func (s *GatewayCacheSuite) TestSignatureOwner_SurvivesSessionDelete() {
+	const sessionID = "sig-owner-survives"
+	const groupID = int64(7)
+
+	require.NoError(s.T(), s.cache.SetSessionAccountID(s.ctx, groupID, sessionID, 42, 1*time.Minute))
+
+	owner, err := s.cache.GetSignatureOwnerAccountID(s.ctx, groupID, sessionID)
+	require.NoError(s.T(), err, "绑定时应同步写入签名归属")
+	require.Equal(s.T(), int64(42), owner)
+
+	require.NoError(s.T(), s.cache.DeleteSessionAccountID(s.ctx, groupID, sessionID))
+
+	_, err = s.cache.GetSessionAccountID(s.ctx, groupID, sessionID)
+	require.True(s.T(), errors.Is(err, redis.Nil), "路由绑定应已删除")
+
+	owner, err = s.cache.GetSignatureOwnerAccountID(s.ctx, groupID, sessionID)
+	require.NoError(s.T(), err, "签名归属不得被一并删除")
+	require.Equal(s.T(), int64(42), owner, "删绑定后仍须知道上一轮是哪个账号签的名")
+}
+
+// 归属记录跟随最新绑定更新：会话换到新账号后，历史签名的归属也随之变成新账号。
+func (s *GatewayCacheSuite) TestSignatureOwner_FollowsLatestBinding() {
+	const sessionID = "sig-owner-rebind"
+	const groupID = int64(7)
+
+	require.NoError(s.T(), s.cache.SetSessionAccountID(s.ctx, groupID, sessionID, 42, 1*time.Minute))
+	require.NoError(s.T(), s.cache.SetSessionAccountID(s.ctx, groupID, sessionID, 43, 1*time.Minute))
+
+	owner, err := s.cache.GetSignatureOwnerAccountID(s.ctx, groupID, sessionID)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), int64(43), owner)
+}
+
+// 无记录时返回 redis.Nil，由上层判定为"无归属"。
+func (s *GatewayCacheSuite) TestSignatureOwner_Missing() {
+	_, err := s.cache.GetSignatureOwnerAccountID(s.ctx, 7, "never-bound")
+	require.True(s.T(), errors.Is(err, redis.Nil))
+}
+
 func TestGatewayCacheSuite(t *testing.T) {
 	suite.Run(t, new(GatewayCacheSuite))
 }
