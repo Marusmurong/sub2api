@@ -125,3 +125,53 @@ func TestEnsureNonEmptyMessageContent_StringContentUntouched(t *testing.T) {
 	require.Equal(t, "hi", gjson.GetBytes(out, "messages.0.content").String())
 	require.Equal(t, "(assistant content removed)", gjson.GetBytes(out, "messages.1.content.0.text").String())
 }
+
+// ===== 纯空白文本块 =====
+//
+// 上游对纯空白的 text 块同样拒绝：
+//   400 messages: text content blocks must contain non-whitespace text
+// 只按字面空串判断时，这类块会在**快路径**就被放行，根本进不了清理逻辑——
+// 所以内层判空与快路径必须同时按 TrimSpace 口径。
+
+func TestStripEmptyTextBlocks_RemovesWhitespaceOnlyBlocks(t *testing.T) {
+	for name, blank := range map[string]string{
+		"空格":   `   `,
+		"制表符":  `\t`,
+		"换行":   `\n`,
+		"混合空白": ` \n\t `,
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := []byte(`{"model":"m","messages":[{"role":"user","content":[` +
+				`{"type":"text","text":"` + blank + `"},` +
+				`{"type":"text","text":"真实内容"}]}]}`)
+
+			out := StripEmptyTextBlocks(body)
+
+			content := gjson.GetBytes(out, "messages.0.content").Array()
+			require.Len(t, content, 1, "纯空白块必须被删除")
+			require.Equal(t, "真实内容", content[0].Get("text").String())
+		})
+	}
+}
+
+// 整条消息只有空白块时，仍要走占位符兜底而不是变成空数组。
+func TestStripEmptyTextBlocks_WhitespaceOnlyMessageGetsPlaceholder(t *testing.T) {
+	body := []byte(`{"model":"m","messages":[{"role":"user","content":[{"type":"text","text":"  "}]}]}`)
+
+	out := StripEmptyTextBlocks(body)
+
+	content := gjson.GetBytes(out, "messages.0.content").Array()
+	require.Len(t, content, 1)
+	require.Equal(t, "(content removed)", content[0].Get("text").String())
+}
+
+// 快路径回归：body 里没有任何字面空串、只有空白块时也必须进入清理。
+func TestStripEmptyTextBlocks_FastPathDetectsWhitespaceOnly(t *testing.T) {
+	body := []byte(`{"model":"m","messages":[{"role":"user","content":[` +
+		`{"type":"text","text":" "},{"type":"text","text":"x"}]}]}`)
+	require.NotContains(t, string(body), `"text":""`, "前提：body 里没有字面空串")
+
+	out := StripEmptyTextBlocks(body)
+	require.Len(t, gjson.GetBytes(out, "messages.0.content").Array(), 1,
+		"快路径必须能识别纯空白块，否则内层判空改了也不生效")
+}

@@ -39,6 +39,16 @@ var (
 	patternEmptyTextSp1    = []byte(`"text" : ""`)
 	patternEmptyTextSp2    = []byte(`"text" :""`)
 
+	// blankTextBlockRE 覆盖上面四个字面量抓不到的一类:纯空白的 text 块
+	// ("text":"   " / "text":"\n")。上游对它们同样拒绝
+	//   400 messages: text content blocks must contain non-whitespace text
+	// 只按字面空串做快路径判断,这类块会在快路径就被放行、根本进不了清理逻辑,
+	// 于是内层怎么改都没用。
+	//
+	// 代价是没有空白块的请求(绝大多数)要多付一次正则扫描;Go 的 regexp 对
+	// `"text"` 这样的字面前缀有优化,MB 级 body 的开销与既有的四次 Contains 同量级。
+	blankTextBlockRE = regexp.MustCompile(`"text"\s*:\s*"(?:[ \t]|\\[nrt])*"`)
+
 	sessionUserAgentProductPattern = regexp.MustCompile(`([A-Za-z0-9._-]+)/[A-Za-z0-9._-]+`)
 	sessionUserAgentVersionPattern = regexp.MustCompile(`\bv?\d+(?:\.\d+){1,3}\b`)
 )
@@ -463,9 +473,13 @@ func stripEmptyTextBlocksFromSlice(blocks []any) ([]any, bool) {
 		}
 		blockType, _ := blockMap["type"].(string)
 
-		// Strip empty text blocks
+		// Strip empty text blocks.
+		//
+		// 判空用 TrimSpace 而不是 == "":上游对纯空白的 text 块同样拒绝
+		//   400 messages: text content blocks must contain non-whitespace text
+		// 只删严格空串会把 "   " 这类原样送上去,换来另一个 400——正是这个函数要避免的。
 		if blockType == "text" {
-			if txt, _ := blockMap["text"].(string); txt == "" {
+			if txt, _ := blockMap["text"].(string); strings.TrimSpace(txt) == "" {
 				if result == nil {
 					result = make([]any, 0, len(blocks))
 					result = append(result, blocks[:i]...)
@@ -588,7 +602,8 @@ func StripEmptyTextBlocks(body []byte) []byte {
 	hasEmptyTextBlock := bytes.Contains(body, patternEmptyText) ||
 		bytes.Contains(body, patternEmptyTextSpaced) ||
 		bytes.Contains(body, patternEmptyTextSp1) ||
-		bytes.Contains(body, patternEmptyTextSp2)
+		bytes.Contains(body, patternEmptyTextSp2) ||
+		blankTextBlockRE.Match(body)
 	if !hasEmptyTextBlock {
 		return body
 	}
@@ -704,7 +719,8 @@ func FilterThinkingBlocksForRetry(body []byte, mappedModel string) []byte {
 	hasEmptyTextBlock := bytes.Contains(body, patternEmptyText) ||
 		bytes.Contains(body, patternEmptyTextSpaced) ||
 		bytes.Contains(body, patternEmptyTextSp1) ||
-		bytes.Contains(body, patternEmptyTextSp2)
+		bytes.Contains(body, patternEmptyTextSp2) ||
+		blankTextBlockRE.Match(body)
 
 	// Fast path: nothing to process
 	if !hasThinkingContent && !hasEmptyContent && !hasEmptyTextBlock {
@@ -787,9 +803,10 @@ func FilterThinkingBlocksForRetry(body []byte, mappedModel string) []byte {
 			blockType, _ := blockMap["type"].(string)
 
 			// Strip empty text blocks: {"type":"text","text":""}
-			// Upstream rejects these with 400: "text content blocks must be non-empty"
+			// Upstream rejects these with 400: "text content blocks must be non-empty",
+			// 纯空白同样被拒("must contain non-whitespace text"),故按 TrimSpace 判空。
 			if blockType == "text" {
-				if txt, _ := blockMap["text"].(string); txt == "" {
+				if txt, _ := blockMap["text"].(string); strings.TrimSpace(txt) == "" {
 					modifiedThisMsg = true
 					ensureNewContent(bi)
 					continue
