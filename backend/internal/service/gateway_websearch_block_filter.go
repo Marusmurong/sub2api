@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"unsafe"
 
@@ -56,65 +57,57 @@ func FilterWebSearchHistoryBlocks(body []byte, mappedModel string) []byte {
 		return body
 	}
 
-	var messages []any
-	if err := json.Unmarshal(sliceRawFromBody(body, msgsRes), &messages); err != nil {
-		return body
-	}
-
-	modified := false
-	for _, msg := range messages {
-		msgMap, ok := msg.(map[string]any)
-		if !ok {
-			continue
+	// 只删该删的块，其余字节一律不碰。
+	//
+	// 早先这里把 messages 整个 json.Unmarshal 到 []any 再 Marshal 回去，会重排 key 并
+	// 把字符串里的 < > & 转义成 \u003c \u0026 \u003e。语义没变，但同一请求里的
+	// thinking 块因此不再是原样字节，其 signature 校验随即失败——报错还会指向我们
+	// 根本没打算删的那个块。详见 filterThinkingBlocksInternal 的说明。
+	out := body
+	msgsRes.ForEach(func(msgIdx, msg gjson.Result) bool {
+		content := msg.Get("content")
+		if !content.Exists() || !content.IsArray() {
+			return true
 		}
-		content, ok := msgMap["content"].([]any)
-		if !ok {
-			continue
-		}
+		blocks := content.Array()
+		base := "messages." + msgIdx.String() + ".content."
 
-		// 延迟分配：只有命中需剥离的块才构建新 slice。
-		var newContent []any
-		for i, block := range content {
-			blockMap, isMap := block.(map[string]any)
-			if isMap && shouldStripWebSearchBlock(blockMap, stripAll) {
-				if newContent == nil {
-					newContent = make([]any, 0, len(content))
-					newContent = append(newContent, content[:i]...)
-				}
+		// 倒序删除：正序删会让后面的下标整体前移。
+		removed := 0
+		for i := len(blocks) - 1; i >= 0; i-- {
+			if !blocks[i].IsObject() || !shouldStripWebSearchBlockJSON(blocks[i], stripAll) {
 				continue
 			}
-			if newContent != nil {
-				newContent = append(newContent, block)
+			if next, err := sjson.DeleteBytes(out, base+strconv.Itoa(i)); err == nil {
+				out = next
+				removed++
 			}
 		}
-		if newContent == nil {
-			continue
+		if removed == 0 || removed < len(blocks) {
+			return true
 		}
-		modified = true
-		if len(newContent) == 0 {
-			role, _ := msgMap["role"].(string)
-			placeholder := "(content removed)"
-			if role == "assistant" {
-				placeholder = "(assistant content removed)"
-			}
-			newContent = []any{map[string]any{"type": "text", "text": placeholder}}
+
+		// 整条被删空：留下 content: [] 会换来另一个 400，补占位块。
+		placeholder, err := json.Marshal(emptyContentPlaceholder(msg.Get("role").String()))
+		if err != nil {
+			return true
 		}
-		msgMap["content"] = newContent
-	}
-
-	if !modified {
-		return body
-	}
-
-	msgsBytes, err := json.Marshal(messages)
-	if err != nil {
-		return body
-	}
-	out, err := sjson.SetRawBytes(body, "messages", msgsBytes)
-	if err != nil {
-		return body
-	}
+		if next, err := sjson.SetRawBytes(out, "messages."+msgIdx.String()+".content", placeholder); err == nil {
+			out = next
+		}
+		return true
+	})
 	return out
+}
+
+// shouldStripWebSearchBlockJSON 是 shouldStripWebSearchBlock 的 gjson 版本，
+// 判定规则完全一致——保留两份是为了让既有的 map 版单测继续有效。
+func shouldStripWebSearchBlockJSON(block gjson.Result, stripAll bool) bool {
+	m, ok := block.Value().(map[string]any)
+	if !ok {
+		return false
+	}
+	return shouldStripWebSearchBlock(m, stripAll)
 }
 
 func shouldStripWebSearchBlock(block map[string]any, stripAll bool) bool {

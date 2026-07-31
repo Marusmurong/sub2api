@@ -1247,99 +1247,84 @@ func FilterSignatureSensitiveBlocksForRetry(body []byte, mappedModel string) []b
 //   - 当 thinking.type 是 "enabled"/"adaptive"：仅移除缺失/无效 signature 的 thinking 块
 func filterThinkingBlocksInternal(body []byte, _ bool) []byte {
 	// Fast path: if body doesn't contain "thinking", skip parsing
-	if !bytes.Contains(body, []byte(`"type":"thinking"`)) &&
-		!bytes.Contains(body, []byte(`"type": "thinking"`)) &&
-		!bytes.Contains(body, []byte(`"type":"redacted_thinking"`)) &&
-		!bytes.Contains(body, []byte(`"type": "redacted_thinking"`)) &&
-		!bytes.Contains(body, []byte(`"thinking":`)) &&
-		!bytes.Contains(body, []byte(`"thinking" :`)) {
+	if !bytes.Contains(body, patternTypeThinking) &&
+		!bytes.Contains(body, patternTypeThinkingSpaced) &&
+		!bytes.Contains(body, patternTypeRedactedThinking) &&
+		!bytes.Contains(body, patternTypeRedactedSpaced) &&
+		!bytes.Contains(body, patternThinkingField) &&
+		!bytes.Contains(body, patternThinkingFieldSpaced) {
 		return body
 	}
 
-	var req map[string]any
-	if err := json.Unmarshal(body, &req); err != nil {
+	root := gjson.ParseBytes(body)
+	thinkingType := root.Get("thinking.type").String()
+	thinkingEnabled := thinkingType == "enabled" || thinkingType == "adaptive"
+
+	msgs := root.Get("messages")
+	if !msgs.Exists() || !msgs.IsArray() {
 		return body
 	}
 
-	// Check if thinking is enabled
-	thinkingEnabled := false
-	if thinking, ok := req["thinking"].(map[string]any); ok {
-		if thinkType, ok := thinking["type"].(string); ok && (thinkType == "enabled" || thinkType == "adaptive") {
-			thinkingEnabled = true
+	// 只删该删的块，其余字节一律不碰。
+	//
+	// 早先这里把整个请求 json.Unmarshal 到 map[string]any 再 Marshal 回去，副作用是
+	// map 的 key 被按字母序重排、字符串里的 < > & 被转义成 \u003c \u0026 \u003e。
+	// 语义没变，但块不再是客户端发来的原样字节。thinking 块的 signature 校验以
+	// 「原样回传」为前提，于是一个签名缺失的坏块触发本函数后，往返会把**同一请求里
+	// 所有本来有效的 thinking 块**一并改写，换来
+	//
+	//	400 messages.N.content.M: Invalid `signature` in `thinking` block
+	//
+	// 且 M 指向的是我们没打算删的那个块——生产上表现为 content.11 / content.58 这类
+	// 报在深处的错误。本函数每个带 thinking 的 anthropic 请求都会跑，量级远大于
+	// StripEmptyTextBlocks，是签名错误率的主要来源（2026-07-31 实测 29%）。
+	out := body
+	msgs.ForEach(func(msgIdx, msg gjson.Result) bool {
+		role := msg.Get("role").String()
+		content := msg.Get("content")
+		if !content.Exists() || !content.IsArray() {
+			return true
 		}
-	}
+		blocks := content.Array()
+		base := "messages." + msgIdx.String() + ".content."
 
-	messages, ok := req["messages"].([]any)
-	if !ok {
-		return body
-	}
-
-	filtered := false
-	for _, msg := range messages {
-		msgMap, ok := msg.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		role, _ := msgMap["role"].(string)
-		content, ok := msgMap["content"].([]any)
-		if !ok {
-			continue
-		}
-
-		newContent := make([]any, 0, len(content))
-		filteredThisMessage := false
-
-		for _, block := range content {
-			blockMap, ok := block.(map[string]any)
-			if !ok {
-				newContent = append(newContent, block)
+		// 倒序删除：正序删会让后面的下标整体前移。
+		for i := len(blocks) - 1; i >= 0; i-- {
+			if !shouldDropThinkingBlock(blocks[i], role, thinkingEnabled) {
 				continue
 			}
-
-			blockType, _ := blockMap["type"].(string)
-
-			if blockType == "thinking" || blockType == "redacted_thinking" {
-				// When thinking is enabled and this is an assistant message,
-				// only keep thinking blocks with valid signatures
-				if thinkingEnabled && role == "assistant" {
-					signature, _ := blockMap["signature"].(string)
-					if signature != "" && signature != antigravity.DummyThoughtSignature {
-						newContent = append(newContent, block)
-						continue
-					}
-				}
-				filtered = true
-				filteredThisMessage = true
-				continue
+			if next, err := sjson.DeleteBytes(out, base+strconv.Itoa(i)); err == nil {
+				out = next
 			}
+		}
+		return true
+	})
+	return out
+}
 
-			// Handle blocks without type discriminator but with "thinking" key
-			if blockType == "" {
-				if _, hasThinking := blockMap["thinking"]; hasThinking {
-					filtered = true
-					filteredThisMessage = true
-					continue
-				}
+// shouldDropThinkingBlock 判定一个 content 块是否应被 FilterThinkingBlocks 删除。
+//
+// 保留条件（与既有行为一致）：thinking 已启用、消息是 assistant、且签名非空且不是
+// antigravity 的占位签名。其余 thinking / redacted_thinking 一律删除；另有一类没有
+// type 判别字段但带 thinking 键的块同样删除。
+func shouldDropThinkingBlock(block gjson.Result, role string, thinkingEnabled bool) bool {
+	if !block.IsObject() {
+		return false
+	}
+	switch block.Get("type").String() {
+	case "thinking", "redacted_thinking":
+		if thinkingEnabled && role == "assistant" {
+			sig := block.Get("signature").String()
+			if sig != "" && sig != antigravity.DummyThoughtSignature {
+				return false
 			}
-
-			newContent = append(newContent, block)
 		}
-
-		if filteredThisMessage {
-			msgMap["content"] = newContent
-		}
+		return true
+	case "":
+		return block.Get("thinking").Exists()
+	default:
+		return false
 	}
-
-	if !filtered {
-		return body
-	}
-
-	newBody, err := json.Marshal(req)
-	if err != nil {
-		return body
-	}
-	return newBody
 }
 
 // NormalizeClaudeOutputEffort normalizes Claude's output_config.effort value.
