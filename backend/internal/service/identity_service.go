@@ -280,12 +280,22 @@ func (s *IdentityService) RewriteUserID(body []byte, accountID int64, accountUUI
 	}
 
 	// 解析 user_id（兼容旧拼接格式和新 JSON 格式）
-	parsed := ParseMetadataUserID(userID)
-	if parsed == nil {
-		return body, nil
+	//
+	// 解析不出来时**不能原样放行**。生产抓包实测（2026-07-31，10 分钟窗口 78 个上游
+	// 请求）：其中 7 个把客户端原样的 {"frame_id":..., "session_id":...} 送到了上游。
+	// frame_id 是 Claude Code 从不发送的字段，对上游而言是明确的第三方特征；而这 7 条
+	// 的伪装开关全是开的、metadata 透传开关是关的——放行完全是这条分支造成的。
+	//
+	// 旧行为的逻辑与目标正好相反：客户端越不像 Claude Code（越解析不出 CC 形状），
+	// 我们越不动它。改为一律替换成我方身份。
+	sessionTail := ""
+	if parsed := ParseMetadataUserID(userID); parsed != nil {
+		sessionTail = parsed.SessionID // 原始 session UUID，保持会话连续性
+	} else {
+		// 拿不到会话标识时，用客户端原值本身做种子：同一个客户端会话仍然映射到同一个
+		// session_id（下面还会混入 accountID），既不泄漏原值，也不会每轮换身份。
+		sessionTail = hashSessionSeed(userID)
 	}
-
-	sessionTail := parsed.SessionID // 原始session UUID
 
 	// 生成新的session hash: SHA256(accountID::sessionTail) -> UUID格式
 	seed := fmt.Sprintf("%d::%s", accountID, sessionTail)
@@ -416,6 +426,17 @@ func generateClientID() string {
 }
 
 // generateUUIDFromSeed 从种子生成确定性UUID v4格式字符串
+// hashSessionSeed 把一段无法解析的客户端标识压成稳定的十六进制摘要，
+// 供 RewriteUserID 在解析失败时派生 session_id 使用。
+//
+// 用摘要而不是原值：原值可能带着客户端自己的语义字段（生产上见过 frame_id），
+// 直接拿去拼种子虽然不会上行，但留在日志/调试里没有必要。摘要同样保证
+// 「同一个客户端会话 → 同一个 session_id」。
+func hashSessionSeed(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])[:32]
+}
+
 func generateUUIDFromSeed(seed string) string {
 	hash := sha256.Sum256([]byte(seed))
 	bytes := hash[:16]
