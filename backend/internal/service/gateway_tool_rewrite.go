@@ -281,6 +281,22 @@ func applyToolsLastCacheBreakpoint(body []byte) []byte {
 		return body
 	}
 
+	// 上游要求 cache_control 的 TTL 沿 tools -> system -> messages 单调不减:
+	//
+	//   400 system.N.cache_control.ttl: a ttl='1h' cache_control block must not
+	//       come after a ttl='5m' cache_control block
+	//
+	// 我们在最前面的 tools 上插 5m,而客户端自己的 system 可能用 1h(真实 CLI 按
+	// querySource 决定),于是这一插就把一个本来合法的请求变成非法。生产实测:
+	// 客户端进来时 tools 无 cache_control、出口有 5m,15/39 组请求如此,其中 2 组
+	// 后面跟着 1h。
+	//
+	// 有更长的 TTL 在后面时干脆不打这个断点——与下面"全都延迟加载时不打断点"
+	// 同一取舍:宁可少一个缓存断点,也不要整个请求被拒。
+	if bodyHasLongerCacheTTLAfterTools(body) {
+		return body
+	}
+
 	existingCC := arr[lastIdx].Get("cache_control")
 
 	if existingCC.Exists() && existingCC.Get("ttl").String() != "" {
@@ -357,4 +373,41 @@ func reverseToolNamesIfPresent(c interface {
 		return chunk
 	}
 	return restoreToolNamesInBytes(chunk, rw)
+}
+
+// bodyHasLongerCacheTTLAfterTools 报告 system 或 messages 里是否存在比我们要插入的
+// 默认 TTL 更长的 cache_control。
+//
+// 只需判断"更长",不必实现完整的 TTL 排序:上游当前只有 5m 与 1h 两档,而我们插入的
+// 恒为 DefaultCacheControlTTL(5m)。将来若新增档位,这里会漏判——但漏判的后果是退回
+// 到今天的行为(可能被拒),不会产生新的错误类型。
+func bodyHasLongerCacheTTLAfterTools(body []byte) bool {
+	const longerTTL = "1h"
+	if claude.DefaultCacheControlTTL == longerTTL {
+		return false
+	}
+	found := false
+	scan := func(container string) {
+		if found {
+			return
+		}
+		gjson.GetBytes(body, container).ForEach(func(_, item gjson.Result) bool {
+			if item.Get("cache_control.ttl").String() == longerTTL {
+				found = true
+				return false
+			}
+			// messages 的 cache_control 挂在 content 块上
+			item.Get("content").ForEach(func(_, blk gjson.Result) bool {
+				if blk.Get("cache_control.ttl").String() == longerTTL {
+					found = true
+					return false
+				}
+				return true
+			})
+			return !found
+		})
+	}
+	scan("system")
+	scan("messages")
+	return found
 }

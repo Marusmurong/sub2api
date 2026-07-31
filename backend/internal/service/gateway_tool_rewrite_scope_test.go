@@ -81,3 +81,46 @@ func TestApplyToolsLastCacheBreakpoint_RespectsExistingTTL(t *testing.T) {
 
 	require.Equal(t, "1h", gjson.GetBytes(out, "tools.0.cache_control.ttl").String())
 }
+
+// ===== TTL 单调性 =====
+//
+// 上游要求 cache_control 的 TTL 沿 tools -> system -> messages 单调不减。我们在最前面
+// 的 tools 上插 5m，而客户端 system 可能用 1h，这一插就把合法请求变成非法：
+//   400 system.N.cache_control.ttl: a ttl='1h' block must not come after a ttl='5m' block
+// 生产实测 15/39 组请求的 5m 是我们加的，其中 2 组后面跟着 1h。
+
+func TestApplyToolsLastCacheBreakpoint_SkipsWhenSystemUsesLongerTTL(t *testing.T) {
+	body := []byte(`{"model":"m","tools":` + toolsJSON("Bash", "Read") +
+		`,"system":[{"type":"text","text":"s","cache_control":{"type":"ephemeral","ttl":"1h"}}]}`)
+
+	out := applyToolsLastCacheBreakpoint(body)
+
+	require.False(t, gjson.GetBytes(out, "tools.1.cache_control").Exists(),
+		"system 用 1h 时不得在 tools 上插 5m —— 宁可少一个缓存断点，也不要整个请求被拒")
+}
+
+func TestApplyToolsLastCacheBreakpoint_SkipsWhenMessagesUseLongerTTL(t *testing.T) {
+	body := []byte(`{"model":"m","tools":` + toolsJSON("Bash", "Read") +
+		`,"messages":[{"role":"user","content":[{"type":"text","text":"x",` +
+		`"cache_control":{"type":"ephemeral","ttl":"1h"}}]}]}`)
+
+	out := applyToolsLastCacheBreakpoint(body)
+
+	require.False(t, gjson.GetBytes(out, "tools.1.cache_control").Exists(),
+		"messages 里的 1h 同样在 tools 之后，规则一致")
+}
+
+// 只有 5m 或完全没有 cache_control 时，断点照常打——不能因为这条守卫把既有行为废掉。
+func TestApplyToolsLastCacheBreakpoint_StillAppliesWithoutLongerTTL(t *testing.T) {
+	for name, extra := range map[string]string{
+		"无 cache_control": ``,
+		"system 用 5m":     `,"system":[{"type":"text","text":"s","cache_control":{"type":"ephemeral","ttl":"5m"}}]`,
+		"system 无 ttl":    `,"system":[{"type":"text","text":"s","cache_control":{"type":"ephemeral"}}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := []byte(`{"model":"m","tools":` + toolsJSON("Bash", "Read") + extra + `}`)
+			out := applyToolsLastCacheBreakpoint(body)
+			require.Equal(t, "5m", gjson.GetBytes(out, "tools.1.cache_control.ttl").String())
+		})
+	}
+}
