@@ -214,7 +214,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	// 在账号选完之后才生效（还要手动 ReleaseFunc），对"打满并发槽"型的流量无效。
 	// 第三方客户端就地拒绝，位置在账号选择之前——与探针拦截同层，同样不占账号槽。
 	// 见 reject_non_claude_code.go：伪装这类客户端做不到位，继续送上游的代价是账号被吊销。
-	if h.rejectNonClaudeCodeClient(c, reqLog) {
+	if groupPlatform := func() string {
+		if apiKey.Group != nil {
+			return apiKey.Group.Platform
+		}
+		return ""
+	}(); h.rejectNonClaudeCodeClient(c, groupPlatform, reqLog) {
 		return
 	}
 

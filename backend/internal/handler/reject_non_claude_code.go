@@ -3,6 +3,9 @@ package handler
 import (
 	"net/http"
 
+	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/service"
+
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -43,11 +46,16 @@ func isNonClaudeCodeUserAgent(ua string) bool {
 //
 // 响应用 Anthropic 的错误信封 + 403，而不是伪造一个 200：客户端的 SDK 会把
 // message 原样呈现给使用者，让对方知道该换 Claude Code，而不是拿到一句看不懂的正文。
-func (h *GatewayHandler) rejectNonClaudeCodeClient(c *gin.Context, reqLog *zap.Logger) bool {
+func (h *GatewayHandler) rejectNonClaudeCodeClient(c *gin.Context, apiKeyGroupPlatform string, reqLog *zap.Logger) bool {
 	if h.cfg == nil || !h.cfg.Gateway.RejectNonClaudeCodeClients {
 		return false
 	}
 	if c == nil || c.Request == nil {
+		return false
+	}
+	// 只对 Anthropic 生效。平台在本函数之后才被主流程解析，所以这里自行解析一次——
+	// 拦截位置不能后移：后移就会先占用户并发槽与账号槽，失去"不消耗资源"的意义。
+	if !rejectAppliesToPlatform(resolveRequestPlatform(c, apiKeyGroupPlatform)) {
 		return false
 	}
 	ua := c.Request.UserAgent()
@@ -76,3 +84,26 @@ func (h *GatewayHandler) rejectNonClaudeCodeClient(c *gin.Context, reqLog *zap.L
 const nonClaudeCodeRejectMessage = "This endpoint only serves the Claude Code client. " +
 	"Requests from third-party SDKs and tools are not accepted. " +
 	"Please use Claude Code (claude.ai/code). This is not a quota issue; retrying will not help."
+
+// rejectAppliesToPlatform 限定拦截只作用于 Anthropic。
+//
+// 生产事故（2026-07-31）：启用后 Grok 客户端（grok-shell）被一起拦掉、吞吐归零。
+// Claude Code 伪装与 Anthropic 账号吊销的因果链只存在于 Anthropic OAuth 上，
+// 其余平台的客户端本来就不该带 claude-cli 的 UA。
+//
+// 平台为空（解析不出）时不拦：宁可放过，也不要在判据不足时拒绝付费流量。
+func rejectAppliesToPlatform(platform string) bool {
+	return platform == service.PlatformAnthropic
+}
+
+// resolveRequestPlatform 复刻主流程的平台判定顺序，供拦截层提前使用。
+// 顺序与 gateway_handler.go 中的解析保持一致：强制平台 → composite 解析结果 → 分组平台。
+func resolveRequestPlatform(c *gin.Context, apiKeyGroupPlatform string) string {
+	if forced, ok := middleware2.GetForcePlatformFromContext(c); ok {
+		return forced
+	}
+	if resolved, ok := service.ResolvedTargetPlatformFromContext(c.Request.Context()); ok {
+		return resolved
+	}
+	return apiKeyGroupPlatform
+}

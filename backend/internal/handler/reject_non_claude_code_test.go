@@ -51,3 +51,33 @@ func TestIsNonClaudeCodeUserAgent(t *testing.T) {
 		})
 	}
 }
+
+// 拦截只对 Anthropic 生效。
+//
+// 生产事故（2026-07-31 19:31 启用后立刻发现）：key 82 是 Grok 客户端
+// （grok-pager/0.2.117 grok-shell/0.2.117），它的 UA 当然不是 claude-cli，
+// 于是被一起拦掉、吞吐直接归零。
+//
+// 整套理由——Claude Code 伪装做不到位、Anthropic 吊销订阅账号——只对 Anthropic
+// OAuth 成立。Grok / OpenAI / Gemini 的客户端本来就不该有 claude-cli 的 UA，
+// 拿这把尺子去量它们是纯粹的误伤。
+func TestShouldRejectForPlatform(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform string
+		want     bool
+	}{
+		{name: "anthropic 生效", platform: "anthropic", want: true},
+		{name: "grok 不生效", platform: "grok", want: false},
+		{name: "openai 不生效", platform: "openai", want: false},
+		{name: "gemini 不生效", platform: "gemini", want: false},
+		{name: "平台未知时不生效", platform: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := rejectAppliesToPlatform(tt.platform); got != tt.want {
+				t.Errorf("rejectAppliesToPlatform(%q) = %v, want %v", tt.platform, got, tt.want)
+			}
+		})
+	}
+}
