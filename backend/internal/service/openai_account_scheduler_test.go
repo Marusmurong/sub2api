@@ -164,6 +164,15 @@ func (c *schedulerTestGatewayCache) GetSignatureOwnerAccountID(context.Context, 
 	return 0, nil
 }
 
+// 签名污染标记在这些用例里不参与断言。
+func (c *schedulerTestGatewayCache) MarkSignatureTainted(context.Context, int64, string) error {
+	return nil
+}
+
+func (c *schedulerTestGatewayCache) IsSignatureTainted(context.Context, int64, string) bool {
+	return false
+}
+
 func (c *schedulerTestGatewayCache) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
 	if c.sessionBindings == nil {
 		c.sessionBindings = make(map[string]int64)

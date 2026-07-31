@@ -138,6 +138,15 @@ func (s *stickyGatewayCacheHotpathStub) GetSignatureOwnerAccountID(context.Conte
 	return 0, nil
 }
 
+// 签名污染标记在这些用例里不参与断言。
+func (s *stickyGatewayCacheHotpathStub) MarkSignatureTainted(context.Context, int64, string) error {
+	return nil
+}
+
+func (s *stickyGatewayCacheHotpathStub) IsSignatureTainted(context.Context, int64, string) bool {
+	return false
+}
+
 func (s *stickyGatewayCacheHotpathStub) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
 	return nil
 }

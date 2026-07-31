@@ -504,6 +504,11 @@ func (c *stubGatewayCache) GetSignatureOwnerAccountID(context.Context, int64, st
 	return 0, nil
 }
 
+// 签名污染标记在这些用例里不参与断言。
+func (c *stubGatewayCache) MarkSignatureTainted(context.Context, int64, string) error { return nil }
+
+func (c *stubGatewayCache) IsSignatureTainted(context.Context, int64, string) bool { return false }
+
 func (c *stubGatewayCache) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
 	if c.sessionBindings == nil {
 		c.sessionBindings = make(map[string]int64)

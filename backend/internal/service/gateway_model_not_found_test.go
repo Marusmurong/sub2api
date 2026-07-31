@@ -59,6 +59,15 @@ func (f *fakeModelNotFoundCache) GetSessionAccountID(context.Context, int64, str
 func (f *fakeModelNotFoundCache) GetSignatureOwnerAccountID(context.Context, int64, string) (int64, error) {
 	return 0, nil
 }
+
+// 签名污染标记在这些用例里不参与断言。
+func (f *fakeModelNotFoundCache) MarkSignatureTainted(context.Context, int64, string) error {
+	return nil
+}
+
+func (f *fakeModelNotFoundCache) IsSignatureTainted(context.Context, int64, string) bool {
+	return false
+}
 func (f *fakeModelNotFoundCache) SetSessionAccountID(context.Context, int64, string, int64, time.Duration) error {
 	return nil
 }

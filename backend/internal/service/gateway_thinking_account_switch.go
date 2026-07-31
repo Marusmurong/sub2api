@@ -31,10 +31,17 @@ import "bytes"
 //
 // 返回 (body, applied)：applied 为 false 时 body 原样返回。
 func stripThinkingForAccountSwitch(body []byte, mappedModel string, boundAccountID, selectedAccountID int64) ([]byte, bool) {
-	if len(body) == 0 {
+	if !isCrossAccountSessionReuse(boundAccountID, selectedAccountID) {
 		return body, false
 	}
-	if !isCrossAccountSessionReuse(boundAccountID, selectedAccountID) {
+	return stripThinkingBlocksBeforeForward(body, mappedModel)
+}
+
+// stripThinkingBlocksBeforeForward 执行剥离本身，不做任何条件判断。
+// 变换复用 FilterThinkingBlocksForRetry（400 重试路径用的同一套），其内部按
+// ShouldApplyRetryFilters 把关：passback-required 上游不会被剥离。
+func stripThinkingBlocksBeforeForward(body []byte, mappedModel string) ([]byte, bool) {
+	if len(body) == 0 {
 		return body, false
 	}
 	filtered := FilterThinkingBlocksForRetry(body, mappedModel)
@@ -42,6 +49,30 @@ func stripThinkingForAccountSwitch(body []byte, mappedModel string, boundAccount
 		return body, false
 	}
 	return filtered, true
+}
+
+// shouldPreStripThinking 判定本轮是否应当在**发出前**剥离历史 thinking 块。
+//
+// 两个触发条件，任一成立即剥离：
+//
+//	换账号   —— 本轮就在换号，历史签名必然被拒
+//	已污染   —— 这个会话以前换过号
+//
+// 「已污染」这一位是必需的，因为上游校验历史里的**每一个** thinking 块，而不只是
+// 最近一轮（生产实测错误落在 content.16 / content.58 / content.101 这类深处下标）。
+// 一个对话只要换过一次账号，历史里就永久混有别的账号签发的签名——之后即使一直待在
+// 同一个账号上，每一轮仍会被拒。
+//
+// 签名归属（sig_owner）解决不了这个：它只记最近一次绑定，而历史里可能混着好几个账号。
+//
+// 代价与收益：现状是「发出 → 400 → 剥离重试 → 成功」（重试成功率 95%），剥离本身
+// 无论如何都会发生。提前做不会额外降低质量，但省掉一轮上游往返，也不再每轮在账号上
+// 留下一个已知非法的请求——在关联封禁的语境下后者才是主要代价。
+func shouldPreStripThinking(signatureOwnerAccountID, selectedAccountID int64, sessionTainted bool) bool {
+	if sessionTainted {
+		return true
+	}
+	return isCrossAccountSessionReuse(signatureOwnerAccountID, selectedAccountID)
 }
 
 // isCrossAccountSessionReuse 判断本轮是否把一个已绑定账号的会话调度到了别的账号。

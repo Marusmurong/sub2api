@@ -130,6 +130,11 @@ func (c *comboCacheAndStore) GetSessionAccountID(_ context.Context, _ int64, _ s
 func (c *comboCacheAndStore) GetSignatureOwnerAccountID(context.Context, int64, string) (int64, error) {
 	return 0, nil
 }
+
+// 签名污染标记在这些用例里不参与断言。
+func (c *comboCacheAndStore) MarkSignatureTainted(context.Context, int64, string) error { return nil }
+
+func (c *comboCacheAndStore) IsSignatureTainted(context.Context, int64, string) bool { return false }
 func (c *comboCacheAndStore) SetSessionAccountID(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) error {
 	return nil
 }

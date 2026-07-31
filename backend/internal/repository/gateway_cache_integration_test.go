@@ -148,6 +148,35 @@ func (s *GatewayCacheSuite) TestSignatureOwner_Missing() {
 	require.True(s.T(), errors.Is(err, redis.Nil))
 }
 
+// 「签名已污染」标记：一旦置位就保持，且不受粘性绑定删除影响。
+// 上游校验历史里的每一个 thinking 块，一个换过账号的对话即使回到同一个账号，
+// 历史深处仍混着别的账号的签名——这一位就是记住这个不可逆事实。
+func (s *GatewayCacheSuite) TestSignatureTainted_PersistsAcrossSessionDelete() {
+	const sessionID = "tainted-persists"
+	const groupID = int64(9)
+
+	require.False(s.T(), s.cache.IsSignatureTainted(s.ctx, groupID, sessionID), "初始应为未污染")
+
+	require.NoError(s.T(), s.cache.SetSessionAccountID(s.ctx, groupID, sessionID, 42, 1*time.Minute))
+	require.NoError(s.T(), s.cache.MarkSignatureTainted(s.ctx, groupID, sessionID))
+	require.True(s.T(), s.cache.IsSignatureTainted(s.ctx, groupID, sessionID))
+
+	require.NoError(s.T(), s.cache.DeleteSessionAccountID(s.ctx, groupID, sessionID))
+	require.True(s.T(), s.cache.IsSignatureTainted(s.ctx, groupID, sessionID), "删除路由绑定不得清除污染标记")
+
+	// 重新绑定到新账号同样不得清除：历史里的旧签名不会因为换绑就消失。
+	require.NoError(s.T(), s.cache.SetSessionAccountID(s.ctx, groupID, sessionID, 43, 1*time.Minute))
+	require.True(s.T(), s.cache.IsSignatureTainted(s.ctx, groupID, sessionID), "换绑不得清除污染标记")
+}
+
+// 重复置位是幂等的。
+func (s *GatewayCacheSuite) TestSignatureTainted_Idempotent() {
+	const sessionID = "tainted-idem"
+	require.NoError(s.T(), s.cache.MarkSignatureTainted(s.ctx, 9, sessionID))
+	require.NoError(s.T(), s.cache.MarkSignatureTainted(s.ctx, 9, sessionID))
+	require.True(s.T(), s.cache.IsSignatureTainted(s.ctx, 9, sessionID))
+}
+
 func TestGatewayCacheSuite(t *testing.T) {
 	suite.Run(t, new(GatewayCacheSuite))
 }

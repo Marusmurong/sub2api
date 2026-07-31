@@ -303,15 +303,20 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 			ctx := service.WithPrefetchedStickySession(c.Request.Context(), sessionBoundAccountID, prefetchedGroupID, h.metadataBridgeEnabled())
 			c.Request = c.Request.WithContext(ctx)
-		} else if ownerID, err := h.gatewayService.GetSignatureOwnerAccountID(c.Request.Context(), apiKey.GroupID, sessionKey); err == nil && ownerID > 0 {
-			// 粘性绑定没了（账号 429/被驱逐/TTL 到期），但客户端手里那份 thinking 签名
-			// 仍然是旧账号签的。带上归属账号，好让转发前就把跨账号签名摘掉，而不是发出去
-			// 吃一个 400 再重试——长对话下重试预算（10s）常常已经耗尽，错误会直接漏给客户端。
-			//
-			// 只放进 SignatureOwnerAccountID，绝不复用粘性字段：那个值参与调度，
-			// 会把流量重新吸回一个刚被驱逐的账号。
-			ctx := service.WithSignatureOwnerAccount(c.Request.Context(), ownerID, h.metadataBridgeEnabled())
-			c.Request = c.Request.WithContext(ctx)
+		}
+		// 会话标识透传给转发层：检测到换号或签名 400 时用它给会话打「签名已污染」标记。
+		h.gatewayService.SetStickySessionKeyForRequest(c, apiKey.GroupID, sessionKey)
+		if sessionBoundAccountID <= 0 {
+			if ownerID, err := h.gatewayService.GetSignatureOwnerAccountID(c.Request.Context(), apiKey.GroupID, sessionKey); err == nil && ownerID > 0 {
+				// 粘性绑定没了（账号 429/被驱逐/TTL 到期），但客户端手里那份 thinking 签名
+				// 仍然是旧账号签的。带上归属账号，好让转发前就把跨账号签名摘掉，而不是发出去
+				// 吃一个 400 再重试——长对话下重试预算（10s）常常已经耗尽，错误会直接漏给客户端。
+				//
+				// 只放进 SignatureOwnerAccountID，绝不复用粘性字段：那个值参与调度，
+				// 会把流量重新吸回一个刚被驱逐的账号。
+				ctx := service.WithSignatureOwnerAccount(c.Request.Context(), ownerID, h.metadataBridgeEnabled())
+				c.Request = c.Request.WithContext(ctx)
+			}
 		}
 	} else {
 		reqLog.Info("sticky.no_session_key", zap.String("session_hash", sessionHash))

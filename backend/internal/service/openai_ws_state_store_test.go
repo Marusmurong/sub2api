@@ -179,6 +179,15 @@ func (c *openAIWSStateStoreTimeoutProbeCache) GetSignatureOwnerAccountID(context
 	return 0, nil
 }
 
+// 签名污染标记在这些用例里不参与断言。
+func (c *openAIWSStateStoreTimeoutProbeCache) MarkSignatureTainted(context.Context, int64, string) error {
+	return nil
+}
+
+func (c *openAIWSStateStoreTimeoutProbeCache) IsSignatureTainted(context.Context, int64, string) bool {
+	return false
+}
+
 func (c *openAIWSStateStoreTimeoutProbeCache) SetSessionAccountID(ctx context.Context, _ int64, _ string, _ int64, _ time.Duration) error {
 	if deadline, ok := ctx.Deadline(); ok {
 		c.setHasDeadline = true

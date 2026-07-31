@@ -259,6 +259,15 @@ func (m *mockGatewayCacheForPlatform) GetSignatureOwnerAccountID(context.Context
 	return 0, nil
 }
 
+// 签名污染标记在这些用例里不参与断言。
+func (m *mockGatewayCacheForPlatform) MarkSignatureTainted(context.Context, int64, string) error {
+	return nil
+}
+
+func (m *mockGatewayCacheForPlatform) IsSignatureTainted(context.Context, int64, string) bool {
+	return false
+}
+
 func (m *mockGatewayCacheForPlatform) SetSessionAccountID(ctx context.Context, groupID int64, sessionHash string, accountID int64, ttl time.Duration) error {
 	if m.sessionBindings == nil {
 		m.sessionBindings = make(map[string]int64)

@@ -99,6 +99,33 @@ func (c *gatewayCache) GetSignatureOwnerAccountID(ctx context.Context, groupID i
 	return c.rdb.Get(ctx, key).Int64()
 }
 
+// signatureTaintedPrefix 标记「这个会话的历史里混有别的账号签发的 thinking 签名」。
+// 格式: sig_tainted:{groupID}:{sessionHash}
+//
+// 为什么 sig_owner 不够：上游校验历史里的**每一个** thinking 块，不只是最近一轮
+// （生产实测错误落在 content.16 / content.58 / content.101 这类深处下标）。
+// sig_owner 只记最近一次绑定，而一个换过账号的长对话，历史里可能混着好几个账号
+// 的签名——即使之后一直待在同一个账号上，每一轮仍会被拒。
+//
+// 这一位一旦置位就保持到 TTL 结束：污染是不可逆的，客户端不会把历史里的旧签名换掉。
+const signatureTaintedPrefix = "sig_tainted:"
+
+func buildSignatureTaintedKey(groupID int64, sessionHash string) string {
+	return fmt.Sprintf("%s%d:%s", signatureTaintedPrefix, groupID, sessionHash)
+}
+
+// MarkSignatureTainted 置位并续期。重复调用是幂等的。
+func (c *gatewayCache) MarkSignatureTainted(ctx context.Context, groupID int64, sessionHash string) error {
+	return c.rdb.Set(ctx, buildSignatureTaintedKey(groupID, sessionHash), 1, signatureOwnerTTL).Err()
+}
+
+// IsSignatureTainted 无记录时返回 false，不返回错误——拿不到这一位时按未污染处理，
+// 退回既有的「发出 → 400 → 剥离重试」路径，不影响正确性。
+func (c *gatewayCache) IsSignatureTainted(ctx context.Context, groupID int64, sessionHash string) bool {
+	n, err := c.rdb.Exists(ctx, buildSignatureTaintedKey(groupID, sessionHash)).Result()
+	return err == nil && n > 0
+}
+
 // prevRequestIDPrefix 是 cc_prev_req parent-link 的 key 前缀。
 // 格式: cc_prev_req:{accountID}:{sessionID}
 //

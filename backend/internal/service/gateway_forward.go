@@ -390,17 +390,24 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	//
 	// 签名归属有两个来源：还活着的粘性绑定，以及绑定被清理后仍保留的 sig_owner 记录。
 	// 后者不可省——绑定恰恰是在账号 429/被驱逐时删掉的，而那正是下一轮必然换号的时刻。
-	if boundAccountID := resolveSignatureOwnerAccountID(
+	signatureOwner := resolveSignatureOwnerAccountID(
 		prefetchedStickyAccountIDFromContext(ctx, parsed.GroupID),
 		SignatureOwnerAccountIDFromContext(ctx),
-	); boundAccountID > 0 {
-		if filtered, applied := stripThinkingForAccountSwitch(body, reqModel, boundAccountID, account.ID); applied {
+	)
+	sessionTainted := s.isSessionSignatureTainted(ctx, c)
+	if shouldPreStripThinking(signatureOwner, account.ID, sessionTainted) {
+		// 本轮换了账号：这个对话的历史从此永久混有别的账号的签名，打上标记，
+		// 之后即使一直待在同一个账号上也要继续剥离。
+		if !sessionTainted {
+			s.markSessionSignatureTainted(ctx, c)
+		}
+		if filtered, applied := stripThinkingBlocksBeforeForward(body, reqModel); applied {
 			if err := replaceBody(filtered); err != nil {
 				return nil, err
 			}
 			logger.LegacyPrintf("service.gateway",
-				"Account %d: session was bound to account %d, pre-stripped thinking blocks (cross-account signatures are always rejected)",
-				account.ID, boundAccountID)
+				"Account %d: pre-stripped thinking blocks (owner=%d tainted=%v)",
+				account.ID, signatureOwner, sessionTainted)
 		}
 	}
 	// Chinese LLM thinking.type 协议差异补正（如 MiniMax 只接受 adaptive；Anthropic-SDK
@@ -506,6 +513,9 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						resp.Body = io.NopCloser(bytes.NewReader(respBody))
 						break
 					}
+					// 上游确认签名无效：这个会话的历史已被污染，标记之，
+					// 后续每一轮都在发出前剥离，不再重复送出必然被拒的请求。
+					s.markSessionSignatureTainted(ctx, c)
 					logger.LegacyPrintf("service.gateway", "[warn] Account %d: thinking blocks have invalid signature, retrying with filtered blocks", account.ID)
 
 					// Conservative two-stage fallback:

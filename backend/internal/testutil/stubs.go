@@ -100,6 +100,11 @@ func (c StubGatewayCache) GetSessionAccountID(_ context.Context, _ int64, _ stri
 func (c StubGatewayCache) GetSignatureOwnerAccountID(context.Context, int64, string) (int64, error) {
 	return 0, nil
 }
+
+// 签名污染标记在这些用例里不参与断言。
+func (c StubGatewayCache) MarkSignatureTainted(context.Context, int64, string) error { return nil }
+
+func (c StubGatewayCache) IsSignatureTainted(context.Context, int64, string) bool { return false }
 func (c StubGatewayCache) SetSessionAccountID(_ context.Context, _ int64, _ string, _ int64, _ time.Duration) error {
 	return nil
 }

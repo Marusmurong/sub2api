@@ -22,6 +22,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/cespare/xxhash/v2"
+	"github.com/gin-gonic/gin"
 	gocache "github.com/patrickmn/go-cache"
 	"github.com/tidwall/gjson"
 	"golang.org/x/sync/singleflight"
@@ -464,6 +465,10 @@ type GatewayCache interface {
 	// DeleteSessionAccountID 删除粘性会话绑定，用于账号不可用时主动清理
 	// Delete sticky session binding, used to proactively clean up when account becomes unavailable
 	DeleteSessionAccountID(ctx context.Context, groupID int64, sessionHash string) error
+	// MarkSignatureTainted 标记该会话历史里混有别的账号签发的 thinking 签名。
+	MarkSignatureTainted(ctx context.Context, groupID int64, sessionHash string) error
+	// IsSignatureTainted 查询上述标记；拿不到时返回 false（退回 400 重试路径）。
+	IsSignatureTainted(ctx context.Context, groupID int64, sessionHash string) bool
 	// GetSignatureOwnerAccountID 获取该会话历史 thinking 签名的签发账号（无记录返回 0）。
 	// 它比粘性绑定活得久，专用于在换号时**发出前**剥离跨账号签名，
 	// 见 resolveSignatureOwnerAccountID。
@@ -928,6 +933,58 @@ func (s *GatewayService) GetSignatureOwnerAccountID(ctx context.Context, groupID
 		return 0, nil
 	}
 	return s.cache.GetSignatureOwnerAccountID(ctx, derefGroupID(groupID), sessionHash)
+}
+
+// stickySessionRefKey 是转发层用来给会话打「签名已污染」标记所需的会话标识。
+// 走 gin.Context 而不是 request context：与 ccPrevReqSessionIDKey 同样的理由——
+// 转发层在选定账号之后才知道要不要置位，那时只剩 gin.Context 可用。
+const stickySessionRefKey = "sticky_session_ref"
+
+type stickySessionRef struct {
+	groupID     int64
+	sessionHash string
+}
+
+// SetStickySessionKeyForRequest 由 handler 在解析出会话标识后调用。
+func (s *GatewayService) SetStickySessionKeyForRequest(c *gin.Context, groupID *int64, sessionHash string) {
+	if c == nil || sessionHash == "" {
+		return
+	}
+	c.Set(stickySessionRefKey, stickySessionRef{groupID: derefGroupID(groupID), sessionHash: sessionHash})
+}
+
+func stickySessionRefFrom(c *gin.Context) (stickySessionRef, bool) {
+	if c == nil {
+		return stickySessionRef{}, false
+	}
+	v, ok := c.Get(stickySessionRefKey)
+	if !ok {
+		return stickySessionRef{}, false
+	}
+	ref, ok := v.(stickySessionRef)
+	return ref, ok && ref.sessionHash != ""
+}
+
+// isSessionSignatureTainted 查询本会话历史里是否混有别的账号签发的 thinking 签名。
+func (s *GatewayService) isSessionSignatureTainted(ctx context.Context, c *gin.Context) bool {
+	ref, ok := stickySessionRefFrom(c)
+	if !ok || s.cache == nil {
+		return false
+	}
+	return s.cache.IsSignatureTainted(ctx, ref.groupID, ref.sessionHash)
+}
+
+// markSessionSignatureTainted 置位「签名已污染」。
+//
+// 调用时机是「本轮确认换了账号」或「上游确认签名无效」——两者都意味着这个对话的
+// 历史里从此永久混有别的账号的签名。置位后每一轮都会在发出前剥离，不再重复送出
+// 必然被拒的请求。失败只降级回既有的 400 重试路径，不影响正确性。
+func (s *GatewayService) markSessionSignatureTainted(ctx context.Context, c *gin.Context) {
+	ref, ok := stickySessionRefFrom(c)
+	if !ok || s.cache == nil {
+		return
+	}
+	_ = s.cache.MarkSignatureTainted(ctx, ref.groupID, ref.sessionHash)
 }
 
 // FindGeminiSession 查找 Gemini 会话（基于内容摘要链的 Fallback 匹配）

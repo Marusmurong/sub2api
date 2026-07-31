@@ -174,3 +174,73 @@ func TestStripThinkingForAccountSwitch_RecordedOwnerSameAccount(t *testing.T) {
 		t.Errorf("未触发时必须原样返回 body")
 	}
 }
+
+// 会话「签名已污染」标记的判定。
+//
+// 生产实测（2026-07-31 09:22 之后）：残留的签名错误全部落在 content.16 / content.58 /
+// content.101 这类深处下标——上游校验历史里的**每一个** thinking 块，不只是最近一轮。
+//
+// 推论：一个对话只要换过一次账号，历史里就永久混有别的账号签发的签名，之后每一轮
+// 都会被拒、每一轮都靠 400 重试救回（重试成功率 95%，但每次都多一轮上游往返，
+// 且每次都在账号上留下一个异常请求）。
+//
+// 签名归属（sig_owner）救不了这个：它只记最近一次绑定，而历史里可能混着好几个账号。
+// 能救的是「这个会话曾经换过账号」这一位状态——一旦置位就一直前置剥离。
+func TestShouldPreStripThinking(t *testing.T) {
+	tests := []struct {
+		name     string
+		owner    int64
+		selected int64
+		tainted  bool
+		want     bool
+		reason   string
+	}{
+		{
+			name: "换账号", owner: 12, selected: 13, tainted: false, want: true,
+			reason: "本轮就在换号,历史签名必然被拒",
+		},
+		{
+			name: "同账号但已污染", owner: 13, selected: 13, tainted: true, want: true,
+			reason: "这个会话以前换过号,历史深处仍混有别的账号的签名",
+		},
+		{
+			name: "同账号且未污染", owner: 13, selected: 13, tainted: false, want: false,
+			reason: "全程同一个账号,签名有效,剥离只会白白打掉缓存前缀",
+		},
+		{
+			name: "无归属但已污染", owner: 0, selected: 13, tainted: true, want: true,
+			reason: "归属记录过期不影响已污染这个事实",
+		},
+		{
+			name: "无归属且未污染", owner: 0, selected: 13, tainted: false, want: false,
+			reason: "首次请求,无历史账号",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldPreStripThinking(tt.owner, tt.selected, tt.tainted); got != tt.want {
+				t.Errorf("shouldPreStripThinking(%d,%d,%v) = %v, want %v (%s)",
+					tt.owner, tt.selected, tt.tainted, got, tt.want, tt.reason)
+			}
+		})
+	}
+}
+
+// 已污染的会话即使本轮没换号也要剥离——这是本次改动的全部意义。
+func TestStripThinkingForAccountSwitch_TaintedSameAccount(t *testing.T) {
+	const body = `{"model":"claude-opus-4-8","messages":[
+		{"role":"assistant","content":[{"type":"thinking","thinking":"r","signature":"sig-from-old-account"}]},
+		{"role":"user","content":"continue"}]}`
+
+	if !shouldPreStripThinking(13, 13, true) {
+		t.Fatal("已污染会话应当剥离")
+	}
+	got, applied := stripThinkingBlocksBeforeForward([]byte(body), "claude-opus-4-8")
+	if !applied {
+		t.Fatal("applied = false, want true")
+	}
+	if strings.Contains(string(got), "sig-from-old-account") {
+		t.Errorf("剥离后不得残留旧账号签名: %s", got)
+	}
+}
