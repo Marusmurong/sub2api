@@ -8,6 +8,7 @@ import (
 	"math"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unsafe"
 
@@ -547,37 +548,25 @@ func ensureNonEmptyMessageContent(body []byte) []byte {
 	if !msgsRes.Exists() || !msgsRes.IsArray() {
 		return body
 	}
-	var messages []any
-	if err := json.Unmarshal(sliceRawFromBody(body, msgsRes), &messages); err != nil {
-		return body
-	}
 
-	modified := false
-	for _, msg := range messages {
-		msgMap, ok := msg.(map[string]any)
-		if !ok {
-			continue
+	// 逐条就地补齐，不做整体 Unmarshal/Marshal 往返：那会重排 key 并转义 < > &，
+	// 把没打算改的 thinking 块一并改写，换来 400 Invalid `signature`。
+	// 详见 stripEmptyTextBlocksAtPath 的说明。
+	out := body
+	msgsRes.ForEach(func(msgIdx, msg gjson.Result) bool {
+		content := msg.Get("content")
+		if !content.Exists() || !content.IsArray() || len(content.Array()) > 0 {
+			return true
 		}
-		content, ok := msgMap["content"].([]any)
-		if !ok || len(content) > 0 {
-			continue
+		placeholder, err := json.Marshal(emptyContentPlaceholder(msg.Get("role").String()))
+		if err != nil {
+			return true
 		}
-		role, _ := msgMap["role"].(string)
-		msgMap["content"] = emptyContentPlaceholder(role)
-		modified = true
-	}
-	if !modified {
-		return body
-	}
-
-	msgsBytes, err := json.Marshal(messages)
-	if err != nil {
-		return body
-	}
-	out, err := sjson.SetRawBytes(body, "messages", msgsBytes)
-	if err != nil {
-		return body
-	}
+		if next, err := sjson.SetRawBytes(out, "messages."+msgIdx.String()+".content", placeholder); err == nil {
+			out = next
+		}
+		return true
+	})
 	return out
 }
 
@@ -614,44 +603,74 @@ func StripEmptyTextBlocks(body []byte) []byte {
 		return body
 	}
 
-	var messages []any
-	if err := json.Unmarshal(sliceRawFromBody(body, msgsRes), &messages); err != nil {
-		return body
-	}
-
-	modified := false
-	for _, msg := range messages {
-		msgMap, ok := msg.(map[string]any)
-		if !ok {
-			continue
-		}
-		content, ok := msgMap["content"].([]any)
-		if !ok {
-			continue
-		}
-		if cleaned, changed := stripEmptyTextBlocksFromSlice(content); changed {
-			modified = true
-			if len(cleaned) == 0 {
-				role, _ := msgMap["role"].(string)
-				cleaned = emptyContentPlaceholder(role)
-			}
-			msgMap["content"] = cleaned
-		}
-	}
-
-	if !modified {
-		return body
-	}
-
-	msgsBytes, err := json.Marshal(messages)
-	if err != nil {
-		return body
-	}
-	out, err := sjson.SetRawBytes(body, "messages", msgsBytes)
-	if err != nil {
-		return body
-	}
+	out := body
+	msgsRes.ForEach(func(msgIdx, msg gjson.Result) bool {
+		out = stripEmptyTextBlocksAtPath(out, "messages."+msgIdx.String(), msg)
+		return true
+	})
 	return out
+}
+
+// stripEmptyTextBlocksAtPath 就地删除一条消息（或一个 tool_result）content 数组里的
+// 空文本块，并在删空时补占位块。
+//
+// 只对要删的块做 sjson.Delete，其余字节一律不碰——这是整个函数存在的理由。
+// 早先的实现把 messages 整个 json.Unmarshal 到 []any 再 Marshal 回去，副作用有两个：
+// map 的 key 被按字母序重排，字符串里的 < > & 被转义成 < & >。
+// 语义没变，但 thinking 块因此不再是客户端发来的原样字节，而 Anthropic 的
+// signature 校验以「原样回传」为前提，于是换来
+//
+//	400 messages.N.content.M: Invalid `signature` in `thinking` block
+//
+// 生产实测（2026-07-31）：把纯空白 text 块纳入清洗范围后这条往返触发频率大增，
+// 签名错误率从 2.3% 一路爬到 16.1%。
+func stripEmptyTextBlocksAtPath(body []byte, contentOwnerPath string, owner gjson.Result) []byte {
+	content := owner.Get("content")
+	if !content.Exists() || !content.IsArray() {
+		return body
+	}
+	blocks := content.Array()
+
+	// 先递归处理嵌套的 tool_result，再删本层——反过来做的话本层删除会让
+	// 嵌套路径的下标失效。
+	for i, b := range blocks {
+		if b.Get("type").String() == "tool_result" {
+			body = stripEmptyTextBlocksAtPath(body,
+				contentOwnerPath+".content."+strconv.Itoa(i), b)
+		}
+	}
+
+	// 倒序删除：正序删会让后面的下标整体前移。
+	removed := 0
+	for i := len(blocks) - 1; i >= 0; i-- {
+		b := blocks[i]
+		if b.Get("type").String() != "text" {
+			continue
+		}
+		if strings.TrimSpace(b.Get("text").String()) != "" {
+			continue
+		}
+		next, err := sjson.DeleteBytes(body, contentOwnerPath+".content."+strconv.Itoa(i))
+		if err != nil {
+			continue
+		}
+		body = next
+		removed++
+	}
+	if removed == 0 || removed < len(blocks) {
+		return body
+	}
+
+	// 整条被删空。留下 content: [] 只会换来另一个 400
+	// （"user messages must have non-empty content"），补占位块。
+	placeholder, err := json.Marshal(emptyContentPlaceholder(owner.Get("role").String()))
+	if err != nil {
+		return body
+	}
+	if next, err := sjson.SetRawBytes(body, contentOwnerPath+".content", placeholder); err == nil {
+		body = next
+	}
+	return body
 }
 
 // FilterThinkingBlocks removes thinking blocks from request body
