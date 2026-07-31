@@ -3,7 +3,13 @@
 package handler
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/gin-gonic/gin"
 )
 
 // 非 Claude Code 客户端就地拦截的 UA 判定。
@@ -79,5 +85,50 @@ func TestShouldRejectForPlatform(t *testing.T) {
 				t.Errorf("rejectAppliesToPlatform(%q) = %v, want %v", tt.platform, got, tt.want)
 			}
 		})
+	}
+}
+
+// 拦截必须打上「本地策略拒绝」标记，否则会以系统错误的形式出现在运维监控页。
+//
+// 这是策略性拒绝，不是故障：把它计进错误率，运维面板上就永远挂着一片红，
+// 真正的上游异常反而被淹没。既有的 BetaBlockedError 与 responses 子路径守卫
+// 都走的是同一个标记。
+func TestRejectMarksOpsBusinessLimited(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Request.Header.Set("User-Agent", "Go-http-client/2.0")
+
+	h := &GatewayHandler{cfg: &config.Config{}}
+	h.cfg.Gateway.RejectNonClaudeCodeClients = true
+
+	if !h.rejectNonClaudeCodeClient(c, service.PlatformAnthropic, nil) {
+		t.Fatal("应当拦截 Go-http-client")
+	}
+	if w.Code != http.StatusForbidden {
+		t.Errorf("状态码 = %d, want 403", w.Code)
+	}
+	if !service.HasOpsClientBusinessLimited(c) {
+		t.Error("必须标记为本地策略拒绝，否则会计进运维监控的错误率")
+	}
+}
+
+// 放行的请求不得留下该标记。
+func TestRejectDoesNotMarkWhenAllowed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Request.Header.Set("User-Agent", "claude-cli/2.1.220 (external, cli)")
+
+	h := &GatewayHandler{cfg: &config.Config{}}
+	h.cfg.Gateway.RejectNonClaudeCodeClients = true
+
+	if h.rejectNonClaudeCodeClient(c, service.PlatformAnthropic, nil) {
+		t.Fatal("真 Claude Code 不应被拦")
+	}
+	if service.HasOpsClientBusinessLimited(c) {
+		t.Error("放行的请求不得留下策略拒绝标记")
 	}
 }

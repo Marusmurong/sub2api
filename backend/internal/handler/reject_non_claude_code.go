@@ -62,6 +62,11 @@ func (h *GatewayHandler) rejectNonClaudeCodeClient(c *gin.Context, apiKeyGroupPl
 	if !isNonClaudeCodeUserAgent(ua) {
 		return false
 	}
+	// 标记为「本地策略拒绝」：这是策略性拒绝而非系统故障，不该计进运维监控的错误率。
+	// 不标记的话面板上会永远挂着一片红，真正的上游异常反而被淹没。
+	// 既有的 BetaBlockedError 与 responses 子路径守卫走的是同一个标记。
+	service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+
 	if reqLog != nil {
 		reqLog.Info("gateway.reject_non_claude_code_client",
 			zap.String("user_agent", ua),
