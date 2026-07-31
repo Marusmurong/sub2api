@@ -19,7 +19,7 @@ export type OrderStatus =
   | 'REFUNDED'
   | 'REFUND_FAILED'
 
-export type PaymentType = 'alipay' | 'wxpay' | 'alipay_direct' | 'wxpay_direct' | 'stripe' | 'easypay' | 'airwallex'
+export type PaymentType = 'alipay' | 'wxpay' | 'alipay_direct' | 'wxpay_direct' | 'stripe' | 'easypay' | 'airwallex' | 'usdt'
 
 export type OrderType = 'balance' | 'subscription'
 
@@ -198,6 +198,25 @@ export interface WechatJSAPIPayload {
   paySign?: string
 }
 
+/**
+ * USDT (TRC20) receiving details for an order.
+ *
+ * The order itself stays priced in CNY; this is the chain-side view of it.
+ * `amount_usdt` must be transferred exactly — its last two decimals are a
+ * per-order tag the backend reconciles deposits against, so a payer who rounds
+ * it will not be credited automatically.
+ */
+export interface USDTPaymentInfo {
+  address: string
+  network: string
+  token_contract: string
+  amount_usdt: string
+  rate: string
+  rate_source: string
+  rate_quoted_at: string
+  expires_at: string
+}
+
 export interface CreateOrderResult {
   order_id: number
   amount: number
@@ -217,6 +236,7 @@ export interface CreateOrderResult {
   payment_mode?: string
   resume_token?: string
   alipay_mobile_precreate_deep_link?: boolean
+  usdt?: USDTPaymentInfo
   oauth?: WechatOAuthInfo
   jsapi?: WechatJSAPIPayload
   jsapi_payload?: WechatJSAPIPayload

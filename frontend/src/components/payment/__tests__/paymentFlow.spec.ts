@@ -4,6 +4,7 @@ import {
   buildCreateOrderPayload,
   decidePaymentLaunch,
   getVisibleMethods,
+  normalizeVisibleMethod,
   readPaymentRecoverySnapshot,
   type PaymentRecoverySnapshot,
 } from '@/components/payment/paymentFlow'
@@ -139,6 +140,49 @@ describe('decidePaymentLaunch', () => {
     expect(decision.paymentState.currency).toBe('CNY')
     expect(decision.paymentState.countryCode).toBe('CN')
     expect(decision.paymentState.paymentEnv).toBe('demo')
+  })
+
+  it('routes USDT orders to the on-chain waiting panel', () => {
+    const decision = decidePaymentLaunch(createOrderResult({
+      out_trade_no: 'sub2_usdt',
+      usdt: {
+        address: 'TJmmqjb1DK9TTZbQXzRQ2AuA94z4gKAPFh',
+        network: 'TRC20',
+        token_contract: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+        amount_usdt: '13.4837',
+        rate: '7.4213',
+        rate_source: 'coingecko',
+        rate_quoted_at: '2026-07-31T10:32:15Z',
+        expires_at: '2026-07-31T11:02:15Z',
+      },
+    }), {
+      visibleMethod: 'usdt',
+      orderType: 'balance',
+      isMobile: false,
+    })
+
+    expect(decision.kind).toBe('usdt_waiting')
+    expect(decision.paymentState.usdt?.amount_usdt).toBe('13.4837')
+    expect(decision.recovery.usdt?.address).toBe('TJmmqjb1DK9TTZbQXzRQ2AuA94z4gKAPFh')
+  })
+
+  // Without receiving details there is nothing payable to show. Falling back to
+  // the generic QR/redirect handling would render a page the customer cannot
+  // act on, so this has to surface as an error instead.
+  it('refuses to show a USDT page with no receiving details', () => {
+    const decision = decidePaymentLaunch(createOrderResult({
+      out_trade_no: 'sub2_usdt_broken',
+    }), {
+      visibleMethod: 'usdt',
+      orderType: 'balance',
+      isMobile: false,
+    })
+
+    expect(decision.kind).toBe('unhandled')
+  })
+
+  it('normalizes usdt as its own visible method', () => {
+    expect(normalizeVisibleMethod('usdt')).toBe('usdt')
   })
 
   it('keeps hosted redirect metadata for recovery flows', () => {

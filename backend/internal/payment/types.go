@@ -19,6 +19,10 @@ const (
 	TypeEasyPay      PaymentType = "easypay"
 	TypeAirwallex    PaymentType = "airwallex"
 
+	// TypeUSDT is the USDT (TRC20) channel. Orders stay denominated in CNY;
+	// the USDT figure the customer transfers lives on the payment intent.
+	TypeUSDT PaymentType = "usdt"
+
 	// TypeCashback 标记由充返插件写入的返现流水，不是真实支付渠道。
 	//
 	// 这类订单让客户能在 /orders 上查到自己的返现记录（支付方式列显示"充值返现"）。

@@ -40,6 +40,7 @@ func RegisterPaymentRoutes(
 			orders.POST("/verify", paymentHandler.VerifyOrder)
 			orders.GET("/my", paymentHandler.GetMyOrders)
 			orders.GET("/:id", paymentHandler.GetOrder)
+			orders.GET("/:id/usdt", paymentHandler.GetOrderUSDTInfo)
 			orders.POST("/:id/cancel", paymentHandler.CancelOrder)
 			orders.POST("/:id/refund-request", paymentHandler.RequestRefund)
 			orders.GET("/refund-eligible-providers", paymentHandler.GetRefundEligibleProviders)
@@ -93,6 +94,18 @@ func RegisterPaymentRoutes(
 			adminOrders.POST("/:id/retry", adminPaymentHandler.RetryFulfillment)
 			adminOrders.POST("/:id/refund", adminPaymentHandler.ProcessRefund)
 			adminOrders.POST("/:id/refund/query", adminPaymentHandler.QueryAndFinalizeRefund)
+			// USDT payouts happen off-platform; this is how an operator records
+			// the transaction that closes the refund.
+			adminOrders.POST("/:id/usdt/refund-settle", adminPaymentHandler.SettleUSDTRefund)
+		}
+
+		// USDT on-chain deposit ledger
+		usdtGroup := adminGroup.Group("/usdt")
+		{
+			usdtGroup.GET("/rate", adminPaymentHandler.PreviewUSDTRate)
+			usdtGroup.GET("/deposits", adminPaymentHandler.ListUSDTDeposits)
+			usdtGroup.POST("/deposits/:id/bind", adminPaymentHandler.BindUSDTDeposit)
+			usdtGroup.POST("/deposits/:id/ignore", adminPaymentHandler.IgnoreUSDTDeposit)
 		}
 
 		// Subscription Plans

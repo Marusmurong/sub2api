@@ -99,6 +99,12 @@ type SubscriptionPlan func(*sql.Selector)
 // TLSFingerprintProfile is the predicate function for tlsfingerprintprofile builders.
 type TLSFingerprintProfile func(*sql.Selector)
 
+// USDTDeposit is the predicate function for usdtdeposit builders.
+type USDTDeposit func(*sql.Selector)
+
+// USDTPaymentIntent is the predicate function for usdtpaymentintent builders.
+type USDTPaymentIntent func(*sql.Selector)
+
 // UsageCleanupTask is the predicate function for usagecleanuptask builders.
 type UsageCleanupTask func(*sql.Selector)
 

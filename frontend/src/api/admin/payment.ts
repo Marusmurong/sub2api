@@ -193,3 +193,73 @@ export const adminPaymentAPI = {
 }
 
 export default adminPaymentAPI
+
+/** One confirmed on-chain USDT transfer to a receiving address. */
+export interface USDTDeposit {
+  id: number
+  tx_hash: string
+  address: string
+  from_address: string
+  amount_usdt: string
+  block_timestamp: string
+  status: 'UNMATCHED' | 'MATCHED' | 'IGNORED'
+  matched_order_id?: number
+  notes?: string
+  created_at: string
+}
+
+export interface USDTDepositListResult {
+  items: USDTDeposit[]
+  total: number
+  network: string
+}
+
+export interface USDTRatePreview {
+  rate: string
+  base_rate: string
+  premium_percent: string
+  source: string
+  quoted_at: string
+  stale: boolean
+}
+
+export const adminUSDTAPI = {
+  /** List the on-chain deposit ledger. */
+  listDeposits(params: { status?: string; page?: number; page_size?: number } = {}) {
+    return apiClient.get<USDTDepositListResult>('/admin/payment/usdt/deposits', { params })
+  },
+
+  /**
+   * Settle an unmatched deposit against an order by hand.
+   *
+   * `force` overrides the amount check. It exists for real situations — a
+   * customer who sent a slightly wrong amount, or paid after the window — but
+   * it has to be a deliberate choice, so it is never defaulted on.
+   */
+  bindDeposit(depositId: number, orderId: number, force = false) {
+    return apiClient.post(`/admin/payment/usdt/deposits/${depositId}/bind`, { order_id: orderId, force })
+  },
+
+  /** Mark a deposit as reviewed and needing no action. */
+  ignoreDeposit(depositId: number, notes: string) {
+    return apiClient.post(`/admin/payment/usdt/deposits/${depositId}/ignore`, { notes })
+  },
+
+  /**
+   * Quote the current rate for a channel.
+   *
+   * Used to calibrate the premium: CoinGecko tracks the official USD/CNY
+   * reference, which runs a few percent under the real OTC cost of USDT.
+   */
+  previewRate(instanceId: number) {
+    return apiClient.get<USDTRatePreview>('/admin/payment/usdt/rate', { params: { instance_id: instanceId } })
+  },
+
+  /** Close a USDT refund after paying the customer back on-chain. */
+  settleRefund(orderId: number, txHash: string, amountUSDT: string) {
+    return apiClient.post(`/admin/payment/orders/${orderId}/usdt/refund-settle`, {
+      tx_hash: txHash,
+      amount_usdt: amountUSDT,
+    })
+  },
+}

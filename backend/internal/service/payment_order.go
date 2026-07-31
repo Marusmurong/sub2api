@@ -111,6 +111,15 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 			Save(ctx)
 		return nil, err
 	}
+	// USDT orders need a receiving amount with a unique tag, which requires a
+	// database round-trip and so cannot happen inside the provider. No-op for
+	// every other channel. See payment_usdt_intent.go.
+	if err := s.attachUSDTPaymentIntent(ctx, order, resp, sel); err != nil {
+		_, _ = s.entClient.PaymentOrder.UpdateOneID(order.ID).
+			SetStatus(OrderStatusFailed).
+			Save(ctx)
+		return nil, err
+	}
 	return resp, nil
 }
 

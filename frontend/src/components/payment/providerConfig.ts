@@ -42,13 +42,14 @@ export const PROVIDER_SUPPORTED_TYPES: Record<string, string[]> = {
   wxpay: ['wxpay'],
   stripe: ['card', 'alipay', 'wxpay', 'link'],
   airwallex: ['airwallex'],
+  usdt: ['usdt'],
 }
 
 /** Available payment modes for EasyPay providers. */
 export const EASYPAY_PAYMENT_MODES = ['qrcode', 'popup'] as const
 
 /** Fixed display order for user-facing payment methods */
-export const METHOD_ORDER = ['alipay', 'alipay_direct', 'wxpay', 'wxpay_direct', 'stripe', 'airwallex'] as const
+export const METHOD_ORDER = ['alipay', 'alipay_direct', 'wxpay', 'wxpay_direct', 'stripe', 'airwallex', 'usdt'] as const
 
 export function isBuiltInAlipayMethod(type: string): boolean {
   return type === 'alipay' || type === 'alipay_direct'
@@ -81,6 +82,18 @@ export const PAYMENT_CURRENCY_OPTIONS: TypeOption[] = [
   { value: 'NZD', label: 'NZD' },
 ]
 
+/** Official USDT contract on TRON mainnet. */
+export const USDT_TRC20_CONTRACT = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'
+
+export const USDT_NETWORK_OPTIONS: TypeOption[] = [
+  { value: 'TRC20', label: 'TRC20 (TRON)' },
+]
+
+export const USDT_TRON_API_BASE_OPTIONS: TypeOption[] = [
+  { value: 'https://api.trongrid.io', label: 'Mainnet (api.trongrid.io)' },
+  { value: 'https://api.shasta.trongrid.io', label: 'Shasta testnet (api.shasta.trongrid.io)' },
+]
+
 // 与后端当前集成的 stripe-go v85.0.0 的 stripe.APIVersion 保持一致。
 export const STRIPE_SDK_API_VERSION = '2026-03-25.dahlia'
 
@@ -110,6 +123,8 @@ export const WEBHOOK_PATHS: Record<string, string> = {
   wxpay: '/api/v1/payment/webhook/wxpay',
   stripe: '/api/v1/payment/webhook/stripe',
   airwallex: '/api/v1/payment/webhook/airwallex',
+  // usdt: no webhook — settlement comes from polling the chain, so there is no
+  // callback URL an attacker could forge.
 }
 
 export const RETURN_PATH = '/payment/result'
@@ -160,6 +175,19 @@ export const PROVIDER_CONFIG_FIELDS: Record<string, ConfigFieldDef[]> = {
     { key: 'countryCode', label: '', sensitive: false, defaultValue: 'CN' },
     { key: 'currency', label: '', sensitive: false, defaultValue: 'CNY', hintKey: 'admin.settings.payment.field_paymentCurrencyHint', options: PAYMENT_CURRENCY_OPTIONS },
     { key: 'accountId', label: '', sensitive: false, optional: true, clearable: true, hintKey: 'admin.settings.payment.field_accountIdHint' },
+  ],
+  // USDT (TRC20). Every value an operator needs lives here — nothing is read
+  // from environment variables.
+  usdt: [
+    { key: 'walletAddress', label: '', sensitive: false, hintKey: 'admin.settings.payment.field_usdtWalletAddressHint' },
+    { key: 'network', label: '', sensitive: false, defaultValue: 'TRC20', options: USDT_NETWORK_OPTIONS },
+    { key: 'tokenContract', label: '', sensitive: false, defaultValue: USDT_TRC20_CONTRACT, hintKey: 'admin.settings.payment.field_usdtTokenContractHint' },
+    { key: 'tronApiBase', label: '', sensitive: false, defaultValue: 'https://api.trongrid.io', options: USDT_TRON_API_BASE_OPTIONS },
+    { key: 'tronApiKey', label: '', sensitive: true, hintKey: 'admin.settings.payment.field_usdtTronApiKeyHint' },
+    { key: 'coingeckoApiBase', label: '', sensitive: false, defaultValue: 'https://api.coingecko.com/api/v3' },
+    { key: 'coingeckoApiKey', label: '', sensitive: true, optional: true, hintKey: 'admin.settings.payment.field_usdtCoingeckoApiKeyHint' },
+    { key: 'ratePremiumPercent', label: '', sensitive: false, defaultValue: '3', hintKey: 'admin.settings.payment.field_usdtRatePremiumHint' },
+    { key: 'rateMaxStalenessSec', label: '', sensitive: false, defaultValue: '1800', hintKey: 'admin.settings.payment.field_usdtRateStalenessHint' },
   ],
 }
 

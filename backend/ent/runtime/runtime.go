@@ -39,6 +39,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
+	"github.com/Wei-Shaw/sub2api/ent/usdtdeposit"
+	"github.com/Wei-Shaw/sub2api/ent/usdtpaymentintent"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
@@ -1887,6 +1889,108 @@ func init() {
 	tlsfingerprintprofileDescEnableGrease := tlsfingerprintprofileFields[2].Descriptor()
 	// tlsfingerprintprofile.DefaultEnableGrease holds the default value on creation for the enable_grease field.
 	tlsfingerprintprofile.DefaultEnableGrease = tlsfingerprintprofileDescEnableGrease.Default.(bool)
+	usdtdepositFields := schema.USDTDeposit{}.Fields()
+	_ = usdtdepositFields
+	// usdtdepositDescTxHash is the schema descriptor for tx_hash field.
+	usdtdepositDescTxHash := usdtdepositFields[0].Descriptor()
+	// usdtdeposit.TxHashValidator is a validator for the "tx_hash" field. It is called by the builders before save.
+	usdtdeposit.TxHashValidator = usdtdepositDescTxHash.Validators[0].(func(string) error)
+	// usdtdepositDescAddress is the schema descriptor for address field.
+	usdtdepositDescAddress := usdtdepositFields[1].Descriptor()
+	// usdtdeposit.AddressValidator is a validator for the "address" field. It is called by the builders before save.
+	usdtdeposit.AddressValidator = usdtdepositDescAddress.Validators[0].(func(string) error)
+	// usdtdepositDescFromAddress is the schema descriptor for from_address field.
+	usdtdepositDescFromAddress := usdtdepositFields[2].Descriptor()
+	// usdtdeposit.FromAddressValidator is a validator for the "from_address" field. It is called by the builders before save.
+	usdtdeposit.FromAddressValidator = usdtdepositDescFromAddress.Validators[0].(func(string) error)
+	// usdtdepositDescTokenContract is the schema descriptor for token_contract field.
+	usdtdepositDescTokenContract := usdtdepositFields[3].Descriptor()
+	// usdtdeposit.TokenContractValidator is a validator for the "token_contract" field. It is called by the builders before save.
+	usdtdeposit.TokenContractValidator = usdtdepositDescTokenContract.Validators[0].(func(string) error)
+	// usdtdepositDescAmountUsdt is the schema descriptor for amount_usdt field.
+	usdtdepositDescAmountUsdt := usdtdepositFields[4].Descriptor()
+	// usdtdeposit.AmountUsdtValidator is a validator for the "amount_usdt" field. It is called by the builders before save.
+	usdtdeposit.AmountUsdtValidator = usdtdepositDescAmountUsdt.Validators[0].(func(string) error)
+	// usdtdepositDescStatus is the schema descriptor for status field.
+	usdtdepositDescStatus := usdtdepositFields[6].Descriptor()
+	// usdtdeposit.DefaultStatus holds the default value on creation for the status field.
+	usdtdeposit.DefaultStatus = usdtdepositDescStatus.Default.(string)
+	// usdtdeposit.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	usdtdeposit.StatusValidator = usdtdepositDescStatus.Validators[0].(func(string) error)
+	// usdtdepositDescCreatedAt is the schema descriptor for created_at field.
+	usdtdepositDescCreatedAt := usdtdepositFields[9].Descriptor()
+	// usdtdeposit.DefaultCreatedAt holds the default value on creation for the created_at field.
+	usdtdeposit.DefaultCreatedAt = usdtdepositDescCreatedAt.Default.(func() time.Time)
+	// usdtdepositDescUpdatedAt is the schema descriptor for updated_at field.
+	usdtdepositDescUpdatedAt := usdtdepositFields[10].Descriptor()
+	// usdtdeposit.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	usdtdeposit.DefaultUpdatedAt = usdtdepositDescUpdatedAt.Default.(func() time.Time)
+	// usdtdeposit.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	usdtdeposit.UpdateDefaultUpdatedAt = usdtdepositDescUpdatedAt.UpdateDefault.(func() time.Time)
+	usdtpaymentintentFields := schema.USDTPaymentIntent{}.Fields()
+	_ = usdtpaymentintentFields
+	// usdtpaymentintentDescOutTradeNo is the schema descriptor for out_trade_no field.
+	usdtpaymentintentDescOutTradeNo := usdtpaymentintentFields[1].Descriptor()
+	// usdtpaymentintent.OutTradeNoValidator is a validator for the "out_trade_no" field. It is called by the builders before save.
+	usdtpaymentintent.OutTradeNoValidator = usdtpaymentintentDescOutTradeNo.Validators[0].(func(string) error)
+	// usdtpaymentintentDescProviderInstanceID is the schema descriptor for provider_instance_id field.
+	usdtpaymentintentDescProviderInstanceID := usdtpaymentintentFields[2].Descriptor()
+	// usdtpaymentintent.ProviderInstanceIDValidator is a validator for the "provider_instance_id" field. It is called by the builders before save.
+	usdtpaymentintent.ProviderInstanceIDValidator = usdtpaymentintentDescProviderInstanceID.Validators[0].(func(string) error)
+	// usdtpaymentintentDescAddress is the schema descriptor for address field.
+	usdtpaymentintentDescAddress := usdtpaymentintentFields[3].Descriptor()
+	// usdtpaymentintent.AddressValidator is a validator for the "address" field. It is called by the builders before save.
+	usdtpaymentintent.AddressValidator = usdtpaymentintentDescAddress.Validators[0].(func(string) error)
+	// usdtpaymentintentDescNetwork is the schema descriptor for network field.
+	usdtpaymentintentDescNetwork := usdtpaymentintentFields[4].Descriptor()
+	// usdtpaymentintent.DefaultNetwork holds the default value on creation for the network field.
+	usdtpaymentintent.DefaultNetwork = usdtpaymentintentDescNetwork.Default.(string)
+	// usdtpaymentintent.NetworkValidator is a validator for the "network" field. It is called by the builders before save.
+	usdtpaymentintent.NetworkValidator = usdtpaymentintentDescNetwork.Validators[0].(func(string) error)
+	// usdtpaymentintentDescTokenContract is the schema descriptor for token_contract field.
+	usdtpaymentintentDescTokenContract := usdtpaymentintentFields[5].Descriptor()
+	// usdtpaymentintent.TokenContractValidator is a validator for the "token_contract" field. It is called by the builders before save.
+	usdtpaymentintent.TokenContractValidator = usdtpaymentintentDescTokenContract.Validators[0].(func(string) error)
+	// usdtpaymentintentDescAmountUsdt is the schema descriptor for amount_usdt field.
+	usdtpaymentintentDescAmountUsdt := usdtpaymentintentFields[6].Descriptor()
+	// usdtpaymentintent.AmountUsdtValidator is a validator for the "amount_usdt" field. It is called by the builders before save.
+	usdtpaymentintent.AmountUsdtValidator = usdtpaymentintentDescAmountUsdt.Validators[0].(func(string) error)
+	// usdtpaymentintentDescRate is the schema descriptor for rate field.
+	usdtpaymentintentDescRate := usdtpaymentintentFields[7].Descriptor()
+	// usdtpaymentintent.RateValidator is a validator for the "rate" field. It is called by the builders before save.
+	usdtpaymentintent.RateValidator = usdtpaymentintentDescRate.Validators[0].(func(string) error)
+	// usdtpaymentintentDescBaseRate is the schema descriptor for base_rate field.
+	usdtpaymentintentDescBaseRate := usdtpaymentintentFields[8].Descriptor()
+	// usdtpaymentintent.BaseRateValidator is a validator for the "base_rate" field. It is called by the builders before save.
+	usdtpaymentintent.BaseRateValidator = usdtpaymentintentDescBaseRate.Validators[0].(func(string) error)
+	// usdtpaymentintentDescPremiumPercent is the schema descriptor for premium_percent field.
+	usdtpaymentintentDescPremiumPercent := usdtpaymentintentFields[9].Descriptor()
+	// usdtpaymentintent.PremiumPercentValidator is a validator for the "premium_percent" field. It is called by the builders before save.
+	usdtpaymentintent.PremiumPercentValidator = usdtpaymentintentDescPremiumPercent.Validators[0].(func(string) error)
+	// usdtpaymentintentDescRateSource is the schema descriptor for rate_source field.
+	usdtpaymentintentDescRateSource := usdtpaymentintentFields[10].Descriptor()
+	// usdtpaymentintent.RateSourceValidator is a validator for the "rate_source" field. It is called by the builders before save.
+	usdtpaymentintent.RateSourceValidator = usdtpaymentintentDescRateSource.Validators[0].(func(string) error)
+	// usdtpaymentintentDescStatus is the schema descriptor for status field.
+	usdtpaymentintentDescStatus := usdtpaymentintentFields[12].Descriptor()
+	// usdtpaymentintent.DefaultStatus holds the default value on creation for the status field.
+	usdtpaymentintent.DefaultStatus = usdtpaymentintentDescStatus.Default.(string)
+	// usdtpaymentintent.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	usdtpaymentintent.StatusValidator = usdtpaymentintentDescStatus.Validators[0].(func(string) error)
+	// usdtpaymentintentDescMatchedTxHash is the schema descriptor for matched_tx_hash field.
+	usdtpaymentintentDescMatchedTxHash := usdtpaymentintentFields[13].Descriptor()
+	// usdtpaymentintent.MatchedTxHashValidator is a validator for the "matched_tx_hash" field. It is called by the builders before save.
+	usdtpaymentintent.MatchedTxHashValidator = usdtpaymentintentDescMatchedTxHash.Validators[0].(func(string) error)
+	// usdtpaymentintentDescCreatedAt is the schema descriptor for created_at field.
+	usdtpaymentintentDescCreatedAt := usdtpaymentintentFields[15].Descriptor()
+	// usdtpaymentintent.DefaultCreatedAt holds the default value on creation for the created_at field.
+	usdtpaymentintent.DefaultCreatedAt = usdtpaymentintentDescCreatedAt.Default.(func() time.Time)
+	// usdtpaymentintentDescUpdatedAt is the schema descriptor for updated_at field.
+	usdtpaymentintentDescUpdatedAt := usdtpaymentintentFields[16].Descriptor()
+	// usdtpaymentintent.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	usdtpaymentintent.DefaultUpdatedAt = usdtpaymentintentDescUpdatedAt.Default.(func() time.Time)
+	// usdtpaymentintent.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	usdtpaymentintent.UpdateDefaultUpdatedAt = usdtpaymentintentDescUpdatedAt.UpdateDefault.(func() time.Time)
 	usagecleanuptaskMixin := schema.UsageCleanupTask{}.Mixin()
 	usagecleanuptaskMixinFields0 := usagecleanuptaskMixin[0].Fields()
 	_ = usagecleanuptaskMixinFields0

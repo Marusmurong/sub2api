@@ -14,7 +14,23 @@
         </div>
         <!-- Payment in progress (shared by recharge and subscription) -->
         <template v-if="paymentPhase === 'paying'">
+          <!-- USDT has no hosted checkout: the customer transfers to our wallet
+               and settlement comes from the chain, so it needs its own panel
+               (address, exact amount, network warnings) rather than the
+               gateway QR/redirect one. -->
+          <USDTPaymentPanel
+            v-if="paymentState.usdt"
+            :order-id="paymentState.orderId"
+            :pay-amount="paymentState.payAmount"
+            :expires-at="paymentState.expiresAt"
+            :usdt="paymentState.usdt"
+            :order-type="paymentState.orderType"
+            @done="onPaymentDone"
+            @success="onPaymentSuccess"
+            @settled="onPaymentSettled"
+          />
           <PaymentStatusPanel
+            v-else
             :order-id="paymentState.orderId"
             :amount="paymentState.amount"
             :pay-amount="paymentState.payAmount"
@@ -286,6 +302,7 @@ import {
 import { platformAccentBarClass, platformBadgeLightClass, platformBadgeClass, platformTextClass, platformLabel } from '@/utils/platformColors'
 import SubscriptionPlanCard from '@/components/payment/SubscriptionPlanCard.vue'
 import PaymentStatusPanel from '@/components/payment/PaymentStatusPanel.vue'
+import USDTPaymentPanel from '@/components/payment/USDTPaymentPanel.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { DEFAULT_PAYMENT_CURRENCY, formatPaymentAmount, normalizePaymentCurrency } from '@/components/payment/currency'
 import { planValiditySuffix as validitySuffixOf } from '@/components/payment/validity'

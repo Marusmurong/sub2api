@@ -1573,6 +1573,101 @@ var (
 		Columns:    TLSFingerprintProfilesColumns,
 		PrimaryKey: []*schema.Column{TLSFingerprintProfilesColumns[0]},
 	}
+	// UsdtDepositsColumns holds the columns for the "usdt_deposits" table.
+	UsdtDepositsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "tx_hash", Type: field.TypeString, Size: 80},
+		{Name: "address", Type: field.TypeString, Size: 64},
+		{Name: "from_address", Type: field.TypeString, Size: 64},
+		{Name: "token_contract", Type: field.TypeString, Size: 64},
+		{Name: "amount_usdt", Type: field.TypeString, Size: 32},
+		{Name: "block_timestamp", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "status", Type: field.TypeString, Size: 20, Default: "UNMATCHED"},
+		{Name: "matched_order_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "notes", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// UsdtDepositsTable holds the schema information for the "usdt_deposits" table.
+	UsdtDepositsTable = &schema.Table{
+		Name:       "usdt_deposits",
+		Columns:    UsdtDepositsColumns,
+		PrimaryKey: []*schema.Column{UsdtDepositsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "usdtdeposit_tx_hash_address_amount_usdt",
+				Unique:  true,
+				Columns: []*schema.Column{UsdtDepositsColumns[1], UsdtDepositsColumns[2], UsdtDepositsColumns[5]},
+			},
+			{
+				Name:    "usdtdeposit_address_amount_usdt_status",
+				Unique:  false,
+				Columns: []*schema.Column{UsdtDepositsColumns[2], UsdtDepositsColumns[5], UsdtDepositsColumns[7]},
+			},
+			{
+				Name:    "usdtdeposit_status_block_timestamp",
+				Unique:  false,
+				Columns: []*schema.Column{UsdtDepositsColumns[7], UsdtDepositsColumns[6]},
+			},
+			{
+				Name:    "usdtdeposit_matched_order_id",
+				Unique:  false,
+				Columns: []*schema.Column{UsdtDepositsColumns[8]},
+			},
+		},
+	}
+	// UsdtPaymentIntentsColumns holds the columns for the "usdt_payment_intents" table.
+	UsdtPaymentIntentsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "order_id", Type: field.TypeInt64},
+		{Name: "out_trade_no", Type: field.TypeString, Size: 64},
+		{Name: "provider_instance_id", Type: field.TypeString, Size: 64},
+		{Name: "address", Type: field.TypeString, Size: 64},
+		{Name: "network", Type: field.TypeString, Size: 16, Default: "TRC20"},
+		{Name: "token_contract", Type: field.TypeString, Size: 64},
+		{Name: "amount_usdt", Type: field.TypeString, Size: 32},
+		{Name: "rate", Type: field.TypeString, Size: 32},
+		{Name: "base_rate", Type: field.TypeString, Size: 32},
+		{Name: "premium_percent", Type: field.TypeString, Size: 16},
+		{Name: "rate_source", Type: field.TypeString, Size: 32},
+		{Name: "rate_quoted_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "status", Type: field.TypeString, Size: 20, Default: "PENDING"},
+		{Name: "matched_tx_hash", Type: field.TypeString, Nullable: true, Size: 80},
+		{Name: "expires_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// UsdtPaymentIntentsTable holds the schema information for the "usdt_payment_intents" table.
+	UsdtPaymentIntentsTable = &schema.Table{
+		Name:       "usdt_payment_intents",
+		Columns:    UsdtPaymentIntentsColumns,
+		PrimaryKey: []*schema.Column{UsdtPaymentIntentsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "usdtpaymentintent_order_id",
+				Unique:  true,
+				Columns: []*schema.Column{UsdtPaymentIntentsColumns[1]},
+			},
+			{
+				Name:    "usdtpaymentintent_address_amount_usdt",
+				Unique:  true,
+				Columns: []*schema.Column{UsdtPaymentIntentsColumns[4], UsdtPaymentIntentsColumns[7]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "status = 'PENDING'",
+				},
+			},
+			{
+				Name:    "usdtpaymentintent_status_expires_at",
+				Unique:  false,
+				Columns: []*schema.Column{UsdtPaymentIntentsColumns[13], UsdtPaymentIntentsColumns[15]},
+			},
+			{
+				Name:    "usdtpaymentintent_out_trade_no",
+				Unique:  false,
+				Columns: []*schema.Column{UsdtPaymentIntentsColumns[2]},
+			},
+		},
+	}
 	// UsageCleanupTasksColumns holds the columns for the "usage_cleanup_tasks" table.
 	UsageCleanupTasksColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -2094,6 +2189,8 @@ var (
 		SettingsTable,
 		SubscriptionPlansTable,
 		TLSFingerprintProfilesTable,
+		UsdtDepositsTable,
+		UsdtPaymentIntentsTable,
 		UsageCleanupTasksTable,
 		UsageLogsTable,
 		UsersTable,
@@ -2221,6 +2318,12 @@ func init() {
 	}
 	TLSFingerprintProfilesTable.Annotation = &entsql.Annotation{
 		Table: "tls_fingerprint_profiles",
+	}
+	UsdtDepositsTable.Annotation = &entsql.Annotation{
+		Table: "usdt_deposits",
+	}
+	UsdtPaymentIntentsTable.Annotation = &entsql.Annotation{
+		Table: "usdt_payment_intents",
 	}
 	UsageCleanupTasksTable.Annotation = &entsql.Annotation{
 		Table: "usage_cleanup_tasks",

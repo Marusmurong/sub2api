@@ -189,6 +189,7 @@ export default {
     paymentDashboard: '支付概览',
     paymentConfig: '支付配置',
     paymentPlans: '订阅套餐',
+    usdtDeposits: 'USDT 到账',
     channelManagement: '渠道管理',
     channelPricing: '渠道定价',
     channelMonitor: '渠道监控',

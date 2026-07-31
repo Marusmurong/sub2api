@@ -97,6 +97,15 @@ func (s *PaymentOrderExpiryService) runOnce() {
 	}
 	defer release()
 
+	// USDT settles from on-chain deposits, so it must run before the expiry
+	// sweep below — otherwise a transfer that confirmed moments ago would lose
+	// its order to a timeout that the very next line could have prevented.
+	usdtCtx, cancel := context.WithTimeout(context.Background(), USDTReconcileTimeout)
+	if err := s.paymentSvc.ReconcileUSDTDeposits(usdtCtx); err != nil {
+		slog.Warn("[PaymentOrderExpiry] failed to reconcile usdt deposits", "error", err)
+	}
+	cancel()
+
 	reconcileCtx, cancel := context.WithTimeout(context.Background(), expiryCheckTimeout)
 	recovered, err := s.paymentSvc.ReconcilePendingWxpayOrders(reconcileCtx)
 	cancel()

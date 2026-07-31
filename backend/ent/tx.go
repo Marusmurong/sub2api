@@ -76,6 +76,10 @@ type Tx struct {
 	SubscriptionPlan *SubscriptionPlanClient
 	// TLSFingerprintProfile is the client for interacting with the TLSFingerprintProfile builders.
 	TLSFingerprintProfile *TLSFingerprintProfileClient
+	// USDTDeposit is the client for interacting with the USDTDeposit builders.
+	USDTDeposit *USDTDepositClient
+	// USDTPaymentIntent is the client for interacting with the USDTPaymentIntent builders.
+	USDTPaymentIntent *USDTPaymentIntentClient
 	// UsageCleanupTask is the client for interacting with the UsageCleanupTask builders.
 	UsageCleanupTask *UsageCleanupTaskClient
 	// UsageLog is the client for interacting with the UsageLog builders.
@@ -254,6 +258,8 @@ func (tx *Tx) init() {
 	tx.Setting = NewSettingClient(tx.config)
 	tx.SubscriptionPlan = NewSubscriptionPlanClient(tx.config)
 	tx.TLSFingerprintProfile = NewTLSFingerprintProfileClient(tx.config)
+	tx.USDTDeposit = NewUSDTDepositClient(tx.config)
+	tx.USDTPaymentIntent = NewUSDTPaymentIntentClient(tx.config)
 	tx.UsageCleanupTask = NewUsageCleanupTaskClient(tx.config)
 	tx.UsageLog = NewUsageLogClient(tx.config)
 	tx.User = NewUserClient(tx.config)

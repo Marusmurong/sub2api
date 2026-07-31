@@ -189,6 +189,7 @@ export default {
     paymentDashboard: 'Payment Dashboard',
     paymentConfig: 'Payment Config',
     paymentPlans: 'Plans',
+    usdtDeposits: 'USDT Deposits',
     channelManagement: 'Channels',
     channelPricing: 'Channel Pricing',
     channelMonitor: 'Channel Monitor',

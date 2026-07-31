@@ -48,6 +48,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
+	"github.com/Wei-Shaw/sub2api/ent/usdtdeposit"
+	"github.com/Wei-Shaw/sub2api/ent/usdtpaymentintent"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
@@ -125,6 +127,10 @@ type Client struct {
 	SubscriptionPlan *SubscriptionPlanClient
 	// TLSFingerprintProfile is the client for interacting with the TLSFingerprintProfile builders.
 	TLSFingerprintProfile *TLSFingerprintProfileClient
+	// USDTDeposit is the client for interacting with the USDTDeposit builders.
+	USDTDeposit *USDTDepositClient
+	// USDTPaymentIntent is the client for interacting with the USDTPaymentIntent builders.
+	USDTPaymentIntent *USDTPaymentIntentClient
 	// UsageCleanupTask is the client for interacting with the UsageCleanupTask builders.
 	UsageCleanupTask *UsageCleanupTaskClient
 	// UsageLog is the client for interacting with the UsageLog builders.
@@ -183,6 +189,8 @@ func (c *Client) init() {
 	c.Setting = NewSettingClient(c.config)
 	c.SubscriptionPlan = NewSubscriptionPlanClient(c.config)
 	c.TLSFingerprintProfile = NewTLSFingerprintProfileClient(c.config)
+	c.USDTDeposit = NewUSDTDepositClient(c.config)
+	c.USDTPaymentIntent = NewUSDTPaymentIntentClient(c.config)
 	c.UsageCleanupTask = NewUsageCleanupTaskClient(c.config)
 	c.UsageLog = NewUsageLogClient(c.config)
 	c.User = NewUserClient(c.config)
@@ -314,6 +322,8 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		Setting:                       NewSettingClient(cfg),
 		SubscriptionPlan:              NewSubscriptionPlanClient(cfg),
 		TLSFingerprintProfile:         NewTLSFingerprintProfileClient(cfg),
+		USDTDeposit:                   NewUSDTDepositClient(cfg),
+		USDTPaymentIntent:             NewUSDTPaymentIntentClient(cfg),
 		UsageCleanupTask:              NewUsageCleanupTaskClient(cfg),
 		UsageLog:                      NewUsageLogClient(cfg),
 		User:                          NewUserClient(cfg),
@@ -372,6 +382,8 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		Setting:                       NewSettingClient(cfg),
 		SubscriptionPlan:              NewSubscriptionPlanClient(cfg),
 		TLSFingerprintProfile:         NewTLSFingerprintProfileClient(cfg),
+		USDTDeposit:                   NewUSDTDepositClient(cfg),
+		USDTPaymentIntent:             NewUSDTPaymentIntentClient(cfg),
 		UsageCleanupTask:              NewUsageCleanupTaskClient(cfg),
 		UsageLog:                      NewUsageLogClient(cfg),
 		User:                          NewUserClient(cfg),
@@ -417,9 +429,10 @@ func (c *Client) Use(hooks ...Hook) {
 		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
 		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
 		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.TLSFingerprintProfile, c.USDTDeposit, c.USDTPaymentIntent,
+		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
+		c.UserAttributeDefinition, c.UserAttributeValue, c.UserPlatformQuota,
+		c.UserSubscription,
 	} {
 		n.Use(hooks...)
 	}
@@ -437,9 +450,10 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.IdentityAdoptionDecision, c.PaymentAuditLog, c.PaymentOrder,
 		c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage,
 		c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting, c.SubscriptionPlan,
-		c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog, c.User,
-		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.TLSFingerprintProfile, c.USDTDeposit, c.USDTPaymentIntent,
+		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
+		c.UserAttributeDefinition, c.UserAttributeValue, c.UserPlatformQuota,
+		c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -510,6 +524,10 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.SubscriptionPlan.mutate(ctx, m)
 	case *TLSFingerprintProfileMutation:
 		return c.TLSFingerprintProfile.mutate(ctx, m)
+	case *USDTDepositMutation:
+		return c.USDTDeposit.mutate(ctx, m)
+	case *USDTPaymentIntentMutation:
+		return c.USDTPaymentIntent.mutate(ctx, m)
 	case *UsageCleanupTaskMutation:
 		return c.UsageCleanupTask.mutate(ctx, m)
 	case *UsageLogMutation:
@@ -5335,6 +5353,272 @@ func (c *TLSFingerprintProfileClient) mutate(ctx context.Context, m *TLSFingerpr
 	}
 }
 
+// USDTDepositClient is a client for the USDTDeposit schema.
+type USDTDepositClient struct {
+	config
+}
+
+// NewUSDTDepositClient returns a client for the USDTDeposit from the given config.
+func NewUSDTDepositClient(c config) *USDTDepositClient {
+	return &USDTDepositClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `usdtdeposit.Hooks(f(g(h())))`.
+func (c *USDTDepositClient) Use(hooks ...Hook) {
+	c.hooks.USDTDeposit = append(c.hooks.USDTDeposit, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `usdtdeposit.Intercept(f(g(h())))`.
+func (c *USDTDepositClient) Intercept(interceptors ...Interceptor) {
+	c.inters.USDTDeposit = append(c.inters.USDTDeposit, interceptors...)
+}
+
+// Create returns a builder for creating a USDTDeposit entity.
+func (c *USDTDepositClient) Create() *USDTDepositCreate {
+	mutation := newUSDTDepositMutation(c.config, OpCreate)
+	return &USDTDepositCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of USDTDeposit entities.
+func (c *USDTDepositClient) CreateBulk(builders ...*USDTDepositCreate) *USDTDepositCreateBulk {
+	return &USDTDepositCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *USDTDepositClient) MapCreateBulk(slice any, setFunc func(*USDTDepositCreate, int)) *USDTDepositCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &USDTDepositCreateBulk{err: fmt.Errorf("calling to USDTDepositClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*USDTDepositCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &USDTDepositCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for USDTDeposit.
+func (c *USDTDepositClient) Update() *USDTDepositUpdate {
+	mutation := newUSDTDepositMutation(c.config, OpUpdate)
+	return &USDTDepositUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *USDTDepositClient) UpdateOne(_m *USDTDeposit) *USDTDepositUpdateOne {
+	mutation := newUSDTDepositMutation(c.config, OpUpdateOne, withUSDTDeposit(_m))
+	return &USDTDepositUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *USDTDepositClient) UpdateOneID(id int64) *USDTDepositUpdateOne {
+	mutation := newUSDTDepositMutation(c.config, OpUpdateOne, withUSDTDepositID(id))
+	return &USDTDepositUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for USDTDeposit.
+func (c *USDTDepositClient) Delete() *USDTDepositDelete {
+	mutation := newUSDTDepositMutation(c.config, OpDelete)
+	return &USDTDepositDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *USDTDepositClient) DeleteOne(_m *USDTDeposit) *USDTDepositDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *USDTDepositClient) DeleteOneID(id int64) *USDTDepositDeleteOne {
+	builder := c.Delete().Where(usdtdeposit.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &USDTDepositDeleteOne{builder}
+}
+
+// Query returns a query builder for USDTDeposit.
+func (c *USDTDepositClient) Query() *USDTDepositQuery {
+	return &USDTDepositQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeUSDTDeposit},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a USDTDeposit entity by its id.
+func (c *USDTDepositClient) Get(ctx context.Context, id int64) (*USDTDeposit, error) {
+	return c.Query().Where(usdtdeposit.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *USDTDepositClient) GetX(ctx context.Context, id int64) *USDTDeposit {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *USDTDepositClient) Hooks() []Hook {
+	return c.hooks.USDTDeposit
+}
+
+// Interceptors returns the client interceptors.
+func (c *USDTDepositClient) Interceptors() []Interceptor {
+	return c.inters.USDTDeposit
+}
+
+func (c *USDTDepositClient) mutate(ctx context.Context, m *USDTDepositMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&USDTDepositCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&USDTDepositUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&USDTDepositUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&USDTDepositDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown USDTDeposit mutation op: %q", m.Op())
+	}
+}
+
+// USDTPaymentIntentClient is a client for the USDTPaymentIntent schema.
+type USDTPaymentIntentClient struct {
+	config
+}
+
+// NewUSDTPaymentIntentClient returns a client for the USDTPaymentIntent from the given config.
+func NewUSDTPaymentIntentClient(c config) *USDTPaymentIntentClient {
+	return &USDTPaymentIntentClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `usdtpaymentintent.Hooks(f(g(h())))`.
+func (c *USDTPaymentIntentClient) Use(hooks ...Hook) {
+	c.hooks.USDTPaymentIntent = append(c.hooks.USDTPaymentIntent, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `usdtpaymentintent.Intercept(f(g(h())))`.
+func (c *USDTPaymentIntentClient) Intercept(interceptors ...Interceptor) {
+	c.inters.USDTPaymentIntent = append(c.inters.USDTPaymentIntent, interceptors...)
+}
+
+// Create returns a builder for creating a USDTPaymentIntent entity.
+func (c *USDTPaymentIntentClient) Create() *USDTPaymentIntentCreate {
+	mutation := newUSDTPaymentIntentMutation(c.config, OpCreate)
+	return &USDTPaymentIntentCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of USDTPaymentIntent entities.
+func (c *USDTPaymentIntentClient) CreateBulk(builders ...*USDTPaymentIntentCreate) *USDTPaymentIntentCreateBulk {
+	return &USDTPaymentIntentCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *USDTPaymentIntentClient) MapCreateBulk(slice any, setFunc func(*USDTPaymentIntentCreate, int)) *USDTPaymentIntentCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &USDTPaymentIntentCreateBulk{err: fmt.Errorf("calling to USDTPaymentIntentClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*USDTPaymentIntentCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &USDTPaymentIntentCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for USDTPaymentIntent.
+func (c *USDTPaymentIntentClient) Update() *USDTPaymentIntentUpdate {
+	mutation := newUSDTPaymentIntentMutation(c.config, OpUpdate)
+	return &USDTPaymentIntentUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *USDTPaymentIntentClient) UpdateOne(_m *USDTPaymentIntent) *USDTPaymentIntentUpdateOne {
+	mutation := newUSDTPaymentIntentMutation(c.config, OpUpdateOne, withUSDTPaymentIntent(_m))
+	return &USDTPaymentIntentUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *USDTPaymentIntentClient) UpdateOneID(id int64) *USDTPaymentIntentUpdateOne {
+	mutation := newUSDTPaymentIntentMutation(c.config, OpUpdateOne, withUSDTPaymentIntentID(id))
+	return &USDTPaymentIntentUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for USDTPaymentIntent.
+func (c *USDTPaymentIntentClient) Delete() *USDTPaymentIntentDelete {
+	mutation := newUSDTPaymentIntentMutation(c.config, OpDelete)
+	return &USDTPaymentIntentDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *USDTPaymentIntentClient) DeleteOne(_m *USDTPaymentIntent) *USDTPaymentIntentDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *USDTPaymentIntentClient) DeleteOneID(id int64) *USDTPaymentIntentDeleteOne {
+	builder := c.Delete().Where(usdtpaymentintent.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &USDTPaymentIntentDeleteOne{builder}
+}
+
+// Query returns a query builder for USDTPaymentIntent.
+func (c *USDTPaymentIntentClient) Query() *USDTPaymentIntentQuery {
+	return &USDTPaymentIntentQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeUSDTPaymentIntent},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a USDTPaymentIntent entity by its id.
+func (c *USDTPaymentIntentClient) Get(ctx context.Context, id int64) (*USDTPaymentIntent, error) {
+	return c.Query().Where(usdtpaymentintent.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *USDTPaymentIntentClient) GetX(ctx context.Context, id int64) *USDTPaymentIntent {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *USDTPaymentIntentClient) Hooks() []Hook {
+	return c.hooks.USDTPaymentIntent
+}
+
+// Interceptors returns the client interceptors.
+func (c *USDTPaymentIntentClient) Interceptors() []Interceptor {
+	return c.inters.USDTPaymentIntent
+}
+
+func (c *USDTPaymentIntentClient) mutate(ctx context.Context, m *USDTPaymentIntentMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&USDTPaymentIntentCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&USDTPaymentIntentUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&USDTPaymentIntentUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&USDTPaymentIntentDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown USDTPaymentIntent mutation op: %q", m.Op())
+	}
+}
+
 // UsageCleanupTaskClient is a client for the UsageCleanupTask schema.
 type UsageCleanupTaskClient struct {
 	config
@@ -6828,24 +7112,24 @@ type (
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
 		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob,
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
-		ChannelMonitorRequestTemplate, CompositeModelRoute,
-		ErrorPassthroughRule, Group, IdempotencyRecord, IdentityAdoptionDecision,
-		PaymentAuditLog, PaymentOrder, PaymentProviderInstance, PendingAuthSession,
-		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
-		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
-		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
+		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
+		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
+		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
+		TLSFingerprintProfile, USDTDeposit, USDTPaymentIntent, UsageCleanupTask,
+		UsageLog, User, UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
 		UserPlatformQuota, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
 		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob,
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
-		ChannelMonitorRequestTemplate, CompositeModelRoute,
-		ErrorPassthroughRule, Group, IdempotencyRecord, IdentityAdoptionDecision,
-		PaymentAuditLog, PaymentOrder, PaymentProviderInstance, PendingAuthSession,
-		PromoCode, PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting,
-		SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog, User,
-		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		ChannelMonitorRequestTemplate, CompositeModelRoute, ErrorPassthroughRule,
+		Group, IdempotencyRecord, IdentityAdoptionDecision, PaymentAuditLog,
+		PaymentOrder, PaymentProviderInstance, PendingAuthSession, PromoCode,
+		PromoCodeUsage, Proxy, RedeemCode, SecuritySecret, Setting, SubscriptionPlan,
+		TLSFingerprintProfile, USDTDeposit, USDTPaymentIntent, UsageCleanupTask,
+		UsageLog, User, UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
 		UserPlatformQuota, UserSubscription []ent.Interceptor
 	}
 )

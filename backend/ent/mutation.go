@@ -46,6 +46,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
+	"github.com/Wei-Shaw/sub2api/ent/usdtdeposit"
+	"github.com/Wei-Shaw/sub2api/ent/usdtpaymentintent"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
@@ -95,6 +97,8 @@ const (
 	TypeSetting                       = "Setting"
 	TypeSubscriptionPlan              = "SubscriptionPlan"
 	TypeTLSFingerprintProfile         = "TLSFingerprintProfile"
+	TypeUSDTDeposit                   = "USDTDeposit"
+	TypeUSDTPaymentIntent             = "USDTPaymentIntent"
 	TypeUsageCleanupTask              = "UsageCleanupTask"
 	TypeUsageLog                      = "UsageLog"
 	TypeUser                          = "User"
@@ -42033,6 +42037,2198 @@ func (m *TLSFingerprintProfileMutation) ClearEdge(name string) error {
 // It returns an error if the edge is not defined in the schema.
 func (m *TLSFingerprintProfileMutation) ResetEdge(name string) error {
 	return fmt.Errorf("unknown TLSFingerprintProfile edge %s", name)
+}
+
+// USDTDepositMutation represents an operation that mutates the USDTDeposit nodes in the graph.
+type USDTDepositMutation struct {
+	config
+	op                  Op
+	typ                 string
+	id                  *int64
+	tx_hash             *string
+	address             *string
+	from_address        *string
+	token_contract      *string
+	amount_usdt         *string
+	block_timestamp     *time.Time
+	status              *string
+	matched_order_id    *int64
+	addmatched_order_id *int64
+	notes               *string
+	created_at          *time.Time
+	updated_at          *time.Time
+	clearedFields       map[string]struct{}
+	done                bool
+	oldValue            func(context.Context) (*USDTDeposit, error)
+	predicates          []predicate.USDTDeposit
+}
+
+var _ ent.Mutation = (*USDTDepositMutation)(nil)
+
+// usdtdepositOption allows management of the mutation configuration using functional options.
+type usdtdepositOption func(*USDTDepositMutation)
+
+// newUSDTDepositMutation creates new mutation for the USDTDeposit entity.
+func newUSDTDepositMutation(c config, op Op, opts ...usdtdepositOption) *USDTDepositMutation {
+	m := &USDTDepositMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeUSDTDeposit,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withUSDTDepositID sets the ID field of the mutation.
+func withUSDTDepositID(id int64) usdtdepositOption {
+	return func(m *USDTDepositMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *USDTDeposit
+		)
+		m.oldValue = func(ctx context.Context) (*USDTDeposit, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().USDTDeposit.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withUSDTDeposit sets the old USDTDeposit of the mutation.
+func withUSDTDeposit(node *USDTDeposit) usdtdepositOption {
+	return func(m *USDTDepositMutation) {
+		m.oldValue = func(context.Context) (*USDTDeposit, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m USDTDepositMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m USDTDepositMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *USDTDepositMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *USDTDepositMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().USDTDeposit.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetTxHash sets the "tx_hash" field.
+func (m *USDTDepositMutation) SetTxHash(s string) {
+	m.tx_hash = &s
+}
+
+// TxHash returns the value of the "tx_hash" field in the mutation.
+func (m *USDTDepositMutation) TxHash() (r string, exists bool) {
+	v := m.tx_hash
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTxHash returns the old "tx_hash" field's value of the USDTDeposit entity.
+// If the USDTDeposit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTDepositMutation) OldTxHash(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTxHash is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTxHash requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTxHash: %w", err)
+	}
+	return oldValue.TxHash, nil
+}
+
+// ResetTxHash resets all changes to the "tx_hash" field.
+func (m *USDTDepositMutation) ResetTxHash() {
+	m.tx_hash = nil
+}
+
+// SetAddress sets the "address" field.
+func (m *USDTDepositMutation) SetAddress(s string) {
+	m.address = &s
+}
+
+// Address returns the value of the "address" field in the mutation.
+func (m *USDTDepositMutation) Address() (r string, exists bool) {
+	v := m.address
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAddress returns the old "address" field's value of the USDTDeposit entity.
+// If the USDTDeposit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTDepositMutation) OldAddress(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAddress is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAddress requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAddress: %w", err)
+	}
+	return oldValue.Address, nil
+}
+
+// ResetAddress resets all changes to the "address" field.
+func (m *USDTDepositMutation) ResetAddress() {
+	m.address = nil
+}
+
+// SetFromAddress sets the "from_address" field.
+func (m *USDTDepositMutation) SetFromAddress(s string) {
+	m.from_address = &s
+}
+
+// FromAddress returns the value of the "from_address" field in the mutation.
+func (m *USDTDepositMutation) FromAddress() (r string, exists bool) {
+	v := m.from_address
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFromAddress returns the old "from_address" field's value of the USDTDeposit entity.
+// If the USDTDeposit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTDepositMutation) OldFromAddress(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFromAddress is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFromAddress requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFromAddress: %w", err)
+	}
+	return oldValue.FromAddress, nil
+}
+
+// ResetFromAddress resets all changes to the "from_address" field.
+func (m *USDTDepositMutation) ResetFromAddress() {
+	m.from_address = nil
+}
+
+// SetTokenContract sets the "token_contract" field.
+func (m *USDTDepositMutation) SetTokenContract(s string) {
+	m.token_contract = &s
+}
+
+// TokenContract returns the value of the "token_contract" field in the mutation.
+func (m *USDTDepositMutation) TokenContract() (r string, exists bool) {
+	v := m.token_contract
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTokenContract returns the old "token_contract" field's value of the USDTDeposit entity.
+// If the USDTDeposit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTDepositMutation) OldTokenContract(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTokenContract is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTokenContract requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTokenContract: %w", err)
+	}
+	return oldValue.TokenContract, nil
+}
+
+// ResetTokenContract resets all changes to the "token_contract" field.
+func (m *USDTDepositMutation) ResetTokenContract() {
+	m.token_contract = nil
+}
+
+// SetAmountUsdt sets the "amount_usdt" field.
+func (m *USDTDepositMutation) SetAmountUsdt(s string) {
+	m.amount_usdt = &s
+}
+
+// AmountUsdt returns the value of the "amount_usdt" field in the mutation.
+func (m *USDTDepositMutation) AmountUsdt() (r string, exists bool) {
+	v := m.amount_usdt
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAmountUsdt returns the old "amount_usdt" field's value of the USDTDeposit entity.
+// If the USDTDeposit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTDepositMutation) OldAmountUsdt(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAmountUsdt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAmountUsdt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAmountUsdt: %w", err)
+	}
+	return oldValue.AmountUsdt, nil
+}
+
+// ResetAmountUsdt resets all changes to the "amount_usdt" field.
+func (m *USDTDepositMutation) ResetAmountUsdt() {
+	m.amount_usdt = nil
+}
+
+// SetBlockTimestamp sets the "block_timestamp" field.
+func (m *USDTDepositMutation) SetBlockTimestamp(t time.Time) {
+	m.block_timestamp = &t
+}
+
+// BlockTimestamp returns the value of the "block_timestamp" field in the mutation.
+func (m *USDTDepositMutation) BlockTimestamp() (r time.Time, exists bool) {
+	v := m.block_timestamp
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBlockTimestamp returns the old "block_timestamp" field's value of the USDTDeposit entity.
+// If the USDTDeposit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTDepositMutation) OldBlockTimestamp(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBlockTimestamp is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBlockTimestamp requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBlockTimestamp: %w", err)
+	}
+	return oldValue.BlockTimestamp, nil
+}
+
+// ResetBlockTimestamp resets all changes to the "block_timestamp" field.
+func (m *USDTDepositMutation) ResetBlockTimestamp() {
+	m.block_timestamp = nil
+}
+
+// SetStatus sets the "status" field.
+func (m *USDTDepositMutation) SetStatus(s string) {
+	m.status = &s
+}
+
+// Status returns the value of the "status" field in the mutation.
+func (m *USDTDepositMutation) Status() (r string, exists bool) {
+	v := m.status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStatus returns the old "status" field's value of the USDTDeposit entity.
+// If the USDTDeposit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTDepositMutation) OldStatus(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStatus: %w", err)
+	}
+	return oldValue.Status, nil
+}
+
+// ResetStatus resets all changes to the "status" field.
+func (m *USDTDepositMutation) ResetStatus() {
+	m.status = nil
+}
+
+// SetMatchedOrderID sets the "matched_order_id" field.
+func (m *USDTDepositMutation) SetMatchedOrderID(i int64) {
+	m.matched_order_id = &i
+	m.addmatched_order_id = nil
+}
+
+// MatchedOrderID returns the value of the "matched_order_id" field in the mutation.
+func (m *USDTDepositMutation) MatchedOrderID() (r int64, exists bool) {
+	v := m.matched_order_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMatchedOrderID returns the old "matched_order_id" field's value of the USDTDeposit entity.
+// If the USDTDeposit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTDepositMutation) OldMatchedOrderID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMatchedOrderID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMatchedOrderID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMatchedOrderID: %w", err)
+	}
+	return oldValue.MatchedOrderID, nil
+}
+
+// AddMatchedOrderID adds i to the "matched_order_id" field.
+func (m *USDTDepositMutation) AddMatchedOrderID(i int64) {
+	if m.addmatched_order_id != nil {
+		*m.addmatched_order_id += i
+	} else {
+		m.addmatched_order_id = &i
+	}
+}
+
+// AddedMatchedOrderID returns the value that was added to the "matched_order_id" field in this mutation.
+func (m *USDTDepositMutation) AddedMatchedOrderID() (r int64, exists bool) {
+	v := m.addmatched_order_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearMatchedOrderID clears the value of the "matched_order_id" field.
+func (m *USDTDepositMutation) ClearMatchedOrderID() {
+	m.matched_order_id = nil
+	m.addmatched_order_id = nil
+	m.clearedFields[usdtdeposit.FieldMatchedOrderID] = struct{}{}
+}
+
+// MatchedOrderIDCleared returns if the "matched_order_id" field was cleared in this mutation.
+func (m *USDTDepositMutation) MatchedOrderIDCleared() bool {
+	_, ok := m.clearedFields[usdtdeposit.FieldMatchedOrderID]
+	return ok
+}
+
+// ResetMatchedOrderID resets all changes to the "matched_order_id" field.
+func (m *USDTDepositMutation) ResetMatchedOrderID() {
+	m.matched_order_id = nil
+	m.addmatched_order_id = nil
+	delete(m.clearedFields, usdtdeposit.FieldMatchedOrderID)
+}
+
+// SetNotes sets the "notes" field.
+func (m *USDTDepositMutation) SetNotes(s string) {
+	m.notes = &s
+}
+
+// Notes returns the value of the "notes" field in the mutation.
+func (m *USDTDepositMutation) Notes() (r string, exists bool) {
+	v := m.notes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldNotes returns the old "notes" field's value of the USDTDeposit entity.
+// If the USDTDeposit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTDepositMutation) OldNotes(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldNotes is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldNotes requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldNotes: %w", err)
+	}
+	return oldValue.Notes, nil
+}
+
+// ClearNotes clears the value of the "notes" field.
+func (m *USDTDepositMutation) ClearNotes() {
+	m.notes = nil
+	m.clearedFields[usdtdeposit.FieldNotes] = struct{}{}
+}
+
+// NotesCleared returns if the "notes" field was cleared in this mutation.
+func (m *USDTDepositMutation) NotesCleared() bool {
+	_, ok := m.clearedFields[usdtdeposit.FieldNotes]
+	return ok
+}
+
+// ResetNotes resets all changes to the "notes" field.
+func (m *USDTDepositMutation) ResetNotes() {
+	m.notes = nil
+	delete(m.clearedFields, usdtdeposit.FieldNotes)
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *USDTDepositMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *USDTDepositMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the USDTDeposit entity.
+// If the USDTDeposit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTDepositMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *USDTDepositMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *USDTDepositMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *USDTDepositMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the USDTDeposit entity.
+// If the USDTDeposit object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTDepositMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *USDTDepositMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// Where appends a list predicates to the USDTDepositMutation builder.
+func (m *USDTDepositMutation) Where(ps ...predicate.USDTDeposit) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the USDTDepositMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *USDTDepositMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.USDTDeposit, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *USDTDepositMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *USDTDepositMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (USDTDeposit).
+func (m *USDTDepositMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *USDTDepositMutation) Fields() []string {
+	fields := make([]string, 0, 11)
+	if m.tx_hash != nil {
+		fields = append(fields, usdtdeposit.FieldTxHash)
+	}
+	if m.address != nil {
+		fields = append(fields, usdtdeposit.FieldAddress)
+	}
+	if m.from_address != nil {
+		fields = append(fields, usdtdeposit.FieldFromAddress)
+	}
+	if m.token_contract != nil {
+		fields = append(fields, usdtdeposit.FieldTokenContract)
+	}
+	if m.amount_usdt != nil {
+		fields = append(fields, usdtdeposit.FieldAmountUsdt)
+	}
+	if m.block_timestamp != nil {
+		fields = append(fields, usdtdeposit.FieldBlockTimestamp)
+	}
+	if m.status != nil {
+		fields = append(fields, usdtdeposit.FieldStatus)
+	}
+	if m.matched_order_id != nil {
+		fields = append(fields, usdtdeposit.FieldMatchedOrderID)
+	}
+	if m.notes != nil {
+		fields = append(fields, usdtdeposit.FieldNotes)
+	}
+	if m.created_at != nil {
+		fields = append(fields, usdtdeposit.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, usdtdeposit.FieldUpdatedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *USDTDepositMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case usdtdeposit.FieldTxHash:
+		return m.TxHash()
+	case usdtdeposit.FieldAddress:
+		return m.Address()
+	case usdtdeposit.FieldFromAddress:
+		return m.FromAddress()
+	case usdtdeposit.FieldTokenContract:
+		return m.TokenContract()
+	case usdtdeposit.FieldAmountUsdt:
+		return m.AmountUsdt()
+	case usdtdeposit.FieldBlockTimestamp:
+		return m.BlockTimestamp()
+	case usdtdeposit.FieldStatus:
+		return m.Status()
+	case usdtdeposit.FieldMatchedOrderID:
+		return m.MatchedOrderID()
+	case usdtdeposit.FieldNotes:
+		return m.Notes()
+	case usdtdeposit.FieldCreatedAt:
+		return m.CreatedAt()
+	case usdtdeposit.FieldUpdatedAt:
+		return m.UpdatedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *USDTDepositMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case usdtdeposit.FieldTxHash:
+		return m.OldTxHash(ctx)
+	case usdtdeposit.FieldAddress:
+		return m.OldAddress(ctx)
+	case usdtdeposit.FieldFromAddress:
+		return m.OldFromAddress(ctx)
+	case usdtdeposit.FieldTokenContract:
+		return m.OldTokenContract(ctx)
+	case usdtdeposit.FieldAmountUsdt:
+		return m.OldAmountUsdt(ctx)
+	case usdtdeposit.FieldBlockTimestamp:
+		return m.OldBlockTimestamp(ctx)
+	case usdtdeposit.FieldStatus:
+		return m.OldStatus(ctx)
+	case usdtdeposit.FieldMatchedOrderID:
+		return m.OldMatchedOrderID(ctx)
+	case usdtdeposit.FieldNotes:
+		return m.OldNotes(ctx)
+	case usdtdeposit.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case usdtdeposit.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown USDTDeposit field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *USDTDepositMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case usdtdeposit.FieldTxHash:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTxHash(v)
+		return nil
+	case usdtdeposit.FieldAddress:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAddress(v)
+		return nil
+	case usdtdeposit.FieldFromAddress:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFromAddress(v)
+		return nil
+	case usdtdeposit.FieldTokenContract:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTokenContract(v)
+		return nil
+	case usdtdeposit.FieldAmountUsdt:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAmountUsdt(v)
+		return nil
+	case usdtdeposit.FieldBlockTimestamp:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBlockTimestamp(v)
+		return nil
+	case usdtdeposit.FieldStatus:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStatus(v)
+		return nil
+	case usdtdeposit.FieldMatchedOrderID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMatchedOrderID(v)
+		return nil
+	case usdtdeposit.FieldNotes:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetNotes(v)
+		return nil
+	case usdtdeposit.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case usdtdeposit.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown USDTDeposit field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *USDTDepositMutation) AddedFields() []string {
+	var fields []string
+	if m.addmatched_order_id != nil {
+		fields = append(fields, usdtdeposit.FieldMatchedOrderID)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *USDTDepositMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case usdtdeposit.FieldMatchedOrderID:
+		return m.AddedMatchedOrderID()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *USDTDepositMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case usdtdeposit.FieldMatchedOrderID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddMatchedOrderID(v)
+		return nil
+	}
+	return fmt.Errorf("unknown USDTDeposit numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *USDTDepositMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(usdtdeposit.FieldMatchedOrderID) {
+		fields = append(fields, usdtdeposit.FieldMatchedOrderID)
+	}
+	if m.FieldCleared(usdtdeposit.FieldNotes) {
+		fields = append(fields, usdtdeposit.FieldNotes)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *USDTDepositMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *USDTDepositMutation) ClearField(name string) error {
+	switch name {
+	case usdtdeposit.FieldMatchedOrderID:
+		m.ClearMatchedOrderID()
+		return nil
+	case usdtdeposit.FieldNotes:
+		m.ClearNotes()
+		return nil
+	}
+	return fmt.Errorf("unknown USDTDeposit nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *USDTDepositMutation) ResetField(name string) error {
+	switch name {
+	case usdtdeposit.FieldTxHash:
+		m.ResetTxHash()
+		return nil
+	case usdtdeposit.FieldAddress:
+		m.ResetAddress()
+		return nil
+	case usdtdeposit.FieldFromAddress:
+		m.ResetFromAddress()
+		return nil
+	case usdtdeposit.FieldTokenContract:
+		m.ResetTokenContract()
+		return nil
+	case usdtdeposit.FieldAmountUsdt:
+		m.ResetAmountUsdt()
+		return nil
+	case usdtdeposit.FieldBlockTimestamp:
+		m.ResetBlockTimestamp()
+		return nil
+	case usdtdeposit.FieldStatus:
+		m.ResetStatus()
+		return nil
+	case usdtdeposit.FieldMatchedOrderID:
+		m.ResetMatchedOrderID()
+		return nil
+	case usdtdeposit.FieldNotes:
+		m.ResetNotes()
+		return nil
+	case usdtdeposit.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case usdtdeposit.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown USDTDeposit field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *USDTDepositMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *USDTDepositMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *USDTDepositMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *USDTDepositMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *USDTDepositMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *USDTDepositMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *USDTDepositMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown USDTDeposit unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *USDTDepositMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown USDTDeposit edge %s", name)
+}
+
+// USDTPaymentIntentMutation represents an operation that mutates the USDTPaymentIntent nodes in the graph.
+type USDTPaymentIntentMutation struct {
+	config
+	op                   Op
+	typ                  string
+	id                   *int64
+	order_id             *int64
+	addorder_id          *int64
+	out_trade_no         *string
+	provider_instance_id *string
+	address              *string
+	network              *string
+	token_contract       *string
+	amount_usdt          *string
+	rate                 *string
+	base_rate            *string
+	premium_percent      *string
+	rate_source          *string
+	rate_quoted_at       *time.Time
+	status               *string
+	matched_tx_hash      *string
+	expires_at           *time.Time
+	created_at           *time.Time
+	updated_at           *time.Time
+	clearedFields        map[string]struct{}
+	done                 bool
+	oldValue             func(context.Context) (*USDTPaymentIntent, error)
+	predicates           []predicate.USDTPaymentIntent
+}
+
+var _ ent.Mutation = (*USDTPaymentIntentMutation)(nil)
+
+// usdtpaymentintentOption allows management of the mutation configuration using functional options.
+type usdtpaymentintentOption func(*USDTPaymentIntentMutation)
+
+// newUSDTPaymentIntentMutation creates new mutation for the USDTPaymentIntent entity.
+func newUSDTPaymentIntentMutation(c config, op Op, opts ...usdtpaymentintentOption) *USDTPaymentIntentMutation {
+	m := &USDTPaymentIntentMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeUSDTPaymentIntent,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withUSDTPaymentIntentID sets the ID field of the mutation.
+func withUSDTPaymentIntentID(id int64) usdtpaymentintentOption {
+	return func(m *USDTPaymentIntentMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *USDTPaymentIntent
+		)
+		m.oldValue = func(ctx context.Context) (*USDTPaymentIntent, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().USDTPaymentIntent.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withUSDTPaymentIntent sets the old USDTPaymentIntent of the mutation.
+func withUSDTPaymentIntent(node *USDTPaymentIntent) usdtpaymentintentOption {
+	return func(m *USDTPaymentIntentMutation) {
+		m.oldValue = func(context.Context) (*USDTPaymentIntent, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m USDTPaymentIntentMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m USDTPaymentIntentMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *USDTPaymentIntentMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *USDTPaymentIntentMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().USDTPaymentIntent.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetOrderID sets the "order_id" field.
+func (m *USDTPaymentIntentMutation) SetOrderID(i int64) {
+	m.order_id = &i
+	m.addorder_id = nil
+}
+
+// OrderID returns the value of the "order_id" field in the mutation.
+func (m *USDTPaymentIntentMutation) OrderID() (r int64, exists bool) {
+	v := m.order_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOrderID returns the old "order_id" field's value of the USDTPaymentIntent entity.
+// If the USDTPaymentIntent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTPaymentIntentMutation) OldOrderID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOrderID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOrderID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOrderID: %w", err)
+	}
+	return oldValue.OrderID, nil
+}
+
+// AddOrderID adds i to the "order_id" field.
+func (m *USDTPaymentIntentMutation) AddOrderID(i int64) {
+	if m.addorder_id != nil {
+		*m.addorder_id += i
+	} else {
+		m.addorder_id = &i
+	}
+}
+
+// AddedOrderID returns the value that was added to the "order_id" field in this mutation.
+func (m *USDTPaymentIntentMutation) AddedOrderID() (r int64, exists bool) {
+	v := m.addorder_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetOrderID resets all changes to the "order_id" field.
+func (m *USDTPaymentIntentMutation) ResetOrderID() {
+	m.order_id = nil
+	m.addorder_id = nil
+}
+
+// SetOutTradeNo sets the "out_trade_no" field.
+func (m *USDTPaymentIntentMutation) SetOutTradeNo(s string) {
+	m.out_trade_no = &s
+}
+
+// OutTradeNo returns the value of the "out_trade_no" field in the mutation.
+func (m *USDTPaymentIntentMutation) OutTradeNo() (r string, exists bool) {
+	v := m.out_trade_no
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOutTradeNo returns the old "out_trade_no" field's value of the USDTPaymentIntent entity.
+// If the USDTPaymentIntent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTPaymentIntentMutation) OldOutTradeNo(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOutTradeNo is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOutTradeNo requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOutTradeNo: %w", err)
+	}
+	return oldValue.OutTradeNo, nil
+}
+
+// ResetOutTradeNo resets all changes to the "out_trade_no" field.
+func (m *USDTPaymentIntentMutation) ResetOutTradeNo() {
+	m.out_trade_no = nil
+}
+
+// SetProviderInstanceID sets the "provider_instance_id" field.
+func (m *USDTPaymentIntentMutation) SetProviderInstanceID(s string) {
+	m.provider_instance_id = &s
+}
+
+// ProviderInstanceID returns the value of the "provider_instance_id" field in the mutation.
+func (m *USDTPaymentIntentMutation) ProviderInstanceID() (r string, exists bool) {
+	v := m.provider_instance_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldProviderInstanceID returns the old "provider_instance_id" field's value of the USDTPaymentIntent entity.
+// If the USDTPaymentIntent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTPaymentIntentMutation) OldProviderInstanceID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldProviderInstanceID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldProviderInstanceID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldProviderInstanceID: %w", err)
+	}
+	return oldValue.ProviderInstanceID, nil
+}
+
+// ResetProviderInstanceID resets all changes to the "provider_instance_id" field.
+func (m *USDTPaymentIntentMutation) ResetProviderInstanceID() {
+	m.provider_instance_id = nil
+}
+
+// SetAddress sets the "address" field.
+func (m *USDTPaymentIntentMutation) SetAddress(s string) {
+	m.address = &s
+}
+
+// Address returns the value of the "address" field in the mutation.
+func (m *USDTPaymentIntentMutation) Address() (r string, exists bool) {
+	v := m.address
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAddress returns the old "address" field's value of the USDTPaymentIntent entity.
+// If the USDTPaymentIntent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTPaymentIntentMutation) OldAddress(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAddress is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAddress requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAddress: %w", err)
+	}
+	return oldValue.Address, nil
+}
+
+// ResetAddress resets all changes to the "address" field.
+func (m *USDTPaymentIntentMutation) ResetAddress() {
+	m.address = nil
+}
+
+// SetNetwork sets the "network" field.
+func (m *USDTPaymentIntentMutation) SetNetwork(s string) {
+	m.network = &s
+}
+
+// Network returns the value of the "network" field in the mutation.
+func (m *USDTPaymentIntentMutation) Network() (r string, exists bool) {
+	v := m.network
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldNetwork returns the old "network" field's value of the USDTPaymentIntent entity.
+// If the USDTPaymentIntent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTPaymentIntentMutation) OldNetwork(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldNetwork is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldNetwork requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldNetwork: %w", err)
+	}
+	return oldValue.Network, nil
+}
+
+// ResetNetwork resets all changes to the "network" field.
+func (m *USDTPaymentIntentMutation) ResetNetwork() {
+	m.network = nil
+}
+
+// SetTokenContract sets the "token_contract" field.
+func (m *USDTPaymentIntentMutation) SetTokenContract(s string) {
+	m.token_contract = &s
+}
+
+// TokenContract returns the value of the "token_contract" field in the mutation.
+func (m *USDTPaymentIntentMutation) TokenContract() (r string, exists bool) {
+	v := m.token_contract
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTokenContract returns the old "token_contract" field's value of the USDTPaymentIntent entity.
+// If the USDTPaymentIntent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTPaymentIntentMutation) OldTokenContract(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTokenContract is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTokenContract requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTokenContract: %w", err)
+	}
+	return oldValue.TokenContract, nil
+}
+
+// ResetTokenContract resets all changes to the "token_contract" field.
+func (m *USDTPaymentIntentMutation) ResetTokenContract() {
+	m.token_contract = nil
+}
+
+// SetAmountUsdt sets the "amount_usdt" field.
+func (m *USDTPaymentIntentMutation) SetAmountUsdt(s string) {
+	m.amount_usdt = &s
+}
+
+// AmountUsdt returns the value of the "amount_usdt" field in the mutation.
+func (m *USDTPaymentIntentMutation) AmountUsdt() (r string, exists bool) {
+	v := m.amount_usdt
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAmountUsdt returns the old "amount_usdt" field's value of the USDTPaymentIntent entity.
+// If the USDTPaymentIntent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTPaymentIntentMutation) OldAmountUsdt(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAmountUsdt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAmountUsdt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAmountUsdt: %w", err)
+	}
+	return oldValue.AmountUsdt, nil
+}
+
+// ResetAmountUsdt resets all changes to the "amount_usdt" field.
+func (m *USDTPaymentIntentMutation) ResetAmountUsdt() {
+	m.amount_usdt = nil
+}
+
+// SetRate sets the "rate" field.
+func (m *USDTPaymentIntentMutation) SetRate(s string) {
+	m.rate = &s
+}
+
+// Rate returns the value of the "rate" field in the mutation.
+func (m *USDTPaymentIntentMutation) Rate() (r string, exists bool) {
+	v := m.rate
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRate returns the old "rate" field's value of the USDTPaymentIntent entity.
+// If the USDTPaymentIntent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTPaymentIntentMutation) OldRate(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRate is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRate requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRate: %w", err)
+	}
+	return oldValue.Rate, nil
+}
+
+// ResetRate resets all changes to the "rate" field.
+func (m *USDTPaymentIntentMutation) ResetRate() {
+	m.rate = nil
+}
+
+// SetBaseRate sets the "base_rate" field.
+func (m *USDTPaymentIntentMutation) SetBaseRate(s string) {
+	m.base_rate = &s
+}
+
+// BaseRate returns the value of the "base_rate" field in the mutation.
+func (m *USDTPaymentIntentMutation) BaseRate() (r string, exists bool) {
+	v := m.base_rate
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldBaseRate returns the old "base_rate" field's value of the USDTPaymentIntent entity.
+// If the USDTPaymentIntent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTPaymentIntentMutation) OldBaseRate(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldBaseRate is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldBaseRate requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldBaseRate: %w", err)
+	}
+	return oldValue.BaseRate, nil
+}
+
+// ResetBaseRate resets all changes to the "base_rate" field.
+func (m *USDTPaymentIntentMutation) ResetBaseRate() {
+	m.base_rate = nil
+}
+
+// SetPremiumPercent sets the "premium_percent" field.
+func (m *USDTPaymentIntentMutation) SetPremiumPercent(s string) {
+	m.premium_percent = &s
+}
+
+// PremiumPercent returns the value of the "premium_percent" field in the mutation.
+func (m *USDTPaymentIntentMutation) PremiumPercent() (r string, exists bool) {
+	v := m.premium_percent
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPremiumPercent returns the old "premium_percent" field's value of the USDTPaymentIntent entity.
+// If the USDTPaymentIntent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTPaymentIntentMutation) OldPremiumPercent(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPremiumPercent is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPremiumPercent requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPremiumPercent: %w", err)
+	}
+	return oldValue.PremiumPercent, nil
+}
+
+// ResetPremiumPercent resets all changes to the "premium_percent" field.
+func (m *USDTPaymentIntentMutation) ResetPremiumPercent() {
+	m.premium_percent = nil
+}
+
+// SetRateSource sets the "rate_source" field.
+func (m *USDTPaymentIntentMutation) SetRateSource(s string) {
+	m.rate_source = &s
+}
+
+// RateSource returns the value of the "rate_source" field in the mutation.
+func (m *USDTPaymentIntentMutation) RateSource() (r string, exists bool) {
+	v := m.rate_source
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRateSource returns the old "rate_source" field's value of the USDTPaymentIntent entity.
+// If the USDTPaymentIntent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTPaymentIntentMutation) OldRateSource(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRateSource is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRateSource requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRateSource: %w", err)
+	}
+	return oldValue.RateSource, nil
+}
+
+// ResetRateSource resets all changes to the "rate_source" field.
+func (m *USDTPaymentIntentMutation) ResetRateSource() {
+	m.rate_source = nil
+}
+
+// SetRateQuotedAt sets the "rate_quoted_at" field.
+func (m *USDTPaymentIntentMutation) SetRateQuotedAt(t time.Time) {
+	m.rate_quoted_at = &t
+}
+
+// RateQuotedAt returns the value of the "rate_quoted_at" field in the mutation.
+func (m *USDTPaymentIntentMutation) RateQuotedAt() (r time.Time, exists bool) {
+	v := m.rate_quoted_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRateQuotedAt returns the old "rate_quoted_at" field's value of the USDTPaymentIntent entity.
+// If the USDTPaymentIntent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTPaymentIntentMutation) OldRateQuotedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRateQuotedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRateQuotedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRateQuotedAt: %w", err)
+	}
+	return oldValue.RateQuotedAt, nil
+}
+
+// ResetRateQuotedAt resets all changes to the "rate_quoted_at" field.
+func (m *USDTPaymentIntentMutation) ResetRateQuotedAt() {
+	m.rate_quoted_at = nil
+}
+
+// SetStatus sets the "status" field.
+func (m *USDTPaymentIntentMutation) SetStatus(s string) {
+	m.status = &s
+}
+
+// Status returns the value of the "status" field in the mutation.
+func (m *USDTPaymentIntentMutation) Status() (r string, exists bool) {
+	v := m.status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStatus returns the old "status" field's value of the USDTPaymentIntent entity.
+// If the USDTPaymentIntent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTPaymentIntentMutation) OldStatus(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStatus: %w", err)
+	}
+	return oldValue.Status, nil
+}
+
+// ResetStatus resets all changes to the "status" field.
+func (m *USDTPaymentIntentMutation) ResetStatus() {
+	m.status = nil
+}
+
+// SetMatchedTxHash sets the "matched_tx_hash" field.
+func (m *USDTPaymentIntentMutation) SetMatchedTxHash(s string) {
+	m.matched_tx_hash = &s
+}
+
+// MatchedTxHash returns the value of the "matched_tx_hash" field in the mutation.
+func (m *USDTPaymentIntentMutation) MatchedTxHash() (r string, exists bool) {
+	v := m.matched_tx_hash
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMatchedTxHash returns the old "matched_tx_hash" field's value of the USDTPaymentIntent entity.
+// If the USDTPaymentIntent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTPaymentIntentMutation) OldMatchedTxHash(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMatchedTxHash is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMatchedTxHash requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMatchedTxHash: %w", err)
+	}
+	return oldValue.MatchedTxHash, nil
+}
+
+// ClearMatchedTxHash clears the value of the "matched_tx_hash" field.
+func (m *USDTPaymentIntentMutation) ClearMatchedTxHash() {
+	m.matched_tx_hash = nil
+	m.clearedFields[usdtpaymentintent.FieldMatchedTxHash] = struct{}{}
+}
+
+// MatchedTxHashCleared returns if the "matched_tx_hash" field was cleared in this mutation.
+func (m *USDTPaymentIntentMutation) MatchedTxHashCleared() bool {
+	_, ok := m.clearedFields[usdtpaymentintent.FieldMatchedTxHash]
+	return ok
+}
+
+// ResetMatchedTxHash resets all changes to the "matched_tx_hash" field.
+func (m *USDTPaymentIntentMutation) ResetMatchedTxHash() {
+	m.matched_tx_hash = nil
+	delete(m.clearedFields, usdtpaymentintent.FieldMatchedTxHash)
+}
+
+// SetExpiresAt sets the "expires_at" field.
+func (m *USDTPaymentIntentMutation) SetExpiresAt(t time.Time) {
+	m.expires_at = &t
+}
+
+// ExpiresAt returns the value of the "expires_at" field in the mutation.
+func (m *USDTPaymentIntentMutation) ExpiresAt() (r time.Time, exists bool) {
+	v := m.expires_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldExpiresAt returns the old "expires_at" field's value of the USDTPaymentIntent entity.
+// If the USDTPaymentIntent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTPaymentIntentMutation) OldExpiresAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldExpiresAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldExpiresAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldExpiresAt: %w", err)
+	}
+	return oldValue.ExpiresAt, nil
+}
+
+// ResetExpiresAt resets all changes to the "expires_at" field.
+func (m *USDTPaymentIntentMutation) ResetExpiresAt() {
+	m.expires_at = nil
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *USDTPaymentIntentMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *USDTPaymentIntentMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the USDTPaymentIntent entity.
+// If the USDTPaymentIntent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTPaymentIntentMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *USDTPaymentIntentMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *USDTPaymentIntentMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *USDTPaymentIntentMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the USDTPaymentIntent entity.
+// If the USDTPaymentIntent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *USDTPaymentIntentMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *USDTPaymentIntentMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// Where appends a list predicates to the USDTPaymentIntentMutation builder.
+func (m *USDTPaymentIntentMutation) Where(ps ...predicate.USDTPaymentIntent) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the USDTPaymentIntentMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *USDTPaymentIntentMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.USDTPaymentIntent, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *USDTPaymentIntentMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *USDTPaymentIntentMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (USDTPaymentIntent).
+func (m *USDTPaymentIntentMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *USDTPaymentIntentMutation) Fields() []string {
+	fields := make([]string, 0, 17)
+	if m.order_id != nil {
+		fields = append(fields, usdtpaymentintent.FieldOrderID)
+	}
+	if m.out_trade_no != nil {
+		fields = append(fields, usdtpaymentintent.FieldOutTradeNo)
+	}
+	if m.provider_instance_id != nil {
+		fields = append(fields, usdtpaymentintent.FieldProviderInstanceID)
+	}
+	if m.address != nil {
+		fields = append(fields, usdtpaymentintent.FieldAddress)
+	}
+	if m.network != nil {
+		fields = append(fields, usdtpaymentintent.FieldNetwork)
+	}
+	if m.token_contract != nil {
+		fields = append(fields, usdtpaymentintent.FieldTokenContract)
+	}
+	if m.amount_usdt != nil {
+		fields = append(fields, usdtpaymentintent.FieldAmountUsdt)
+	}
+	if m.rate != nil {
+		fields = append(fields, usdtpaymentintent.FieldRate)
+	}
+	if m.base_rate != nil {
+		fields = append(fields, usdtpaymentintent.FieldBaseRate)
+	}
+	if m.premium_percent != nil {
+		fields = append(fields, usdtpaymentintent.FieldPremiumPercent)
+	}
+	if m.rate_source != nil {
+		fields = append(fields, usdtpaymentintent.FieldRateSource)
+	}
+	if m.rate_quoted_at != nil {
+		fields = append(fields, usdtpaymentintent.FieldRateQuotedAt)
+	}
+	if m.status != nil {
+		fields = append(fields, usdtpaymentintent.FieldStatus)
+	}
+	if m.matched_tx_hash != nil {
+		fields = append(fields, usdtpaymentintent.FieldMatchedTxHash)
+	}
+	if m.expires_at != nil {
+		fields = append(fields, usdtpaymentintent.FieldExpiresAt)
+	}
+	if m.created_at != nil {
+		fields = append(fields, usdtpaymentintent.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, usdtpaymentintent.FieldUpdatedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *USDTPaymentIntentMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case usdtpaymentintent.FieldOrderID:
+		return m.OrderID()
+	case usdtpaymentintent.FieldOutTradeNo:
+		return m.OutTradeNo()
+	case usdtpaymentintent.FieldProviderInstanceID:
+		return m.ProviderInstanceID()
+	case usdtpaymentintent.FieldAddress:
+		return m.Address()
+	case usdtpaymentintent.FieldNetwork:
+		return m.Network()
+	case usdtpaymentintent.FieldTokenContract:
+		return m.TokenContract()
+	case usdtpaymentintent.FieldAmountUsdt:
+		return m.AmountUsdt()
+	case usdtpaymentintent.FieldRate:
+		return m.Rate()
+	case usdtpaymentintent.FieldBaseRate:
+		return m.BaseRate()
+	case usdtpaymentintent.FieldPremiumPercent:
+		return m.PremiumPercent()
+	case usdtpaymentintent.FieldRateSource:
+		return m.RateSource()
+	case usdtpaymentintent.FieldRateQuotedAt:
+		return m.RateQuotedAt()
+	case usdtpaymentintent.FieldStatus:
+		return m.Status()
+	case usdtpaymentintent.FieldMatchedTxHash:
+		return m.MatchedTxHash()
+	case usdtpaymentintent.FieldExpiresAt:
+		return m.ExpiresAt()
+	case usdtpaymentintent.FieldCreatedAt:
+		return m.CreatedAt()
+	case usdtpaymentintent.FieldUpdatedAt:
+		return m.UpdatedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *USDTPaymentIntentMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case usdtpaymentintent.FieldOrderID:
+		return m.OldOrderID(ctx)
+	case usdtpaymentintent.FieldOutTradeNo:
+		return m.OldOutTradeNo(ctx)
+	case usdtpaymentintent.FieldProviderInstanceID:
+		return m.OldProviderInstanceID(ctx)
+	case usdtpaymentintent.FieldAddress:
+		return m.OldAddress(ctx)
+	case usdtpaymentintent.FieldNetwork:
+		return m.OldNetwork(ctx)
+	case usdtpaymentintent.FieldTokenContract:
+		return m.OldTokenContract(ctx)
+	case usdtpaymentintent.FieldAmountUsdt:
+		return m.OldAmountUsdt(ctx)
+	case usdtpaymentintent.FieldRate:
+		return m.OldRate(ctx)
+	case usdtpaymentintent.FieldBaseRate:
+		return m.OldBaseRate(ctx)
+	case usdtpaymentintent.FieldPremiumPercent:
+		return m.OldPremiumPercent(ctx)
+	case usdtpaymentintent.FieldRateSource:
+		return m.OldRateSource(ctx)
+	case usdtpaymentintent.FieldRateQuotedAt:
+		return m.OldRateQuotedAt(ctx)
+	case usdtpaymentintent.FieldStatus:
+		return m.OldStatus(ctx)
+	case usdtpaymentintent.FieldMatchedTxHash:
+		return m.OldMatchedTxHash(ctx)
+	case usdtpaymentintent.FieldExpiresAt:
+		return m.OldExpiresAt(ctx)
+	case usdtpaymentintent.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case usdtpaymentintent.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown USDTPaymentIntent field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *USDTPaymentIntentMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case usdtpaymentintent.FieldOrderID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOrderID(v)
+		return nil
+	case usdtpaymentintent.FieldOutTradeNo:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOutTradeNo(v)
+		return nil
+	case usdtpaymentintent.FieldProviderInstanceID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetProviderInstanceID(v)
+		return nil
+	case usdtpaymentintent.FieldAddress:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAddress(v)
+		return nil
+	case usdtpaymentintent.FieldNetwork:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetNetwork(v)
+		return nil
+	case usdtpaymentintent.FieldTokenContract:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTokenContract(v)
+		return nil
+	case usdtpaymentintent.FieldAmountUsdt:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAmountUsdt(v)
+		return nil
+	case usdtpaymentintent.FieldRate:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRate(v)
+		return nil
+	case usdtpaymentintent.FieldBaseRate:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetBaseRate(v)
+		return nil
+	case usdtpaymentintent.FieldPremiumPercent:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPremiumPercent(v)
+		return nil
+	case usdtpaymentintent.FieldRateSource:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRateSource(v)
+		return nil
+	case usdtpaymentintent.FieldRateQuotedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRateQuotedAt(v)
+		return nil
+	case usdtpaymentintent.FieldStatus:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStatus(v)
+		return nil
+	case usdtpaymentintent.FieldMatchedTxHash:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMatchedTxHash(v)
+		return nil
+	case usdtpaymentintent.FieldExpiresAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetExpiresAt(v)
+		return nil
+	case usdtpaymentintent.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case usdtpaymentintent.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown USDTPaymentIntent field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *USDTPaymentIntentMutation) AddedFields() []string {
+	var fields []string
+	if m.addorder_id != nil {
+		fields = append(fields, usdtpaymentintent.FieldOrderID)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *USDTPaymentIntentMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case usdtpaymentintent.FieldOrderID:
+		return m.AddedOrderID()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *USDTPaymentIntentMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case usdtpaymentintent.FieldOrderID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddOrderID(v)
+		return nil
+	}
+	return fmt.Errorf("unknown USDTPaymentIntent numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *USDTPaymentIntentMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(usdtpaymentintent.FieldMatchedTxHash) {
+		fields = append(fields, usdtpaymentintent.FieldMatchedTxHash)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *USDTPaymentIntentMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *USDTPaymentIntentMutation) ClearField(name string) error {
+	switch name {
+	case usdtpaymentintent.FieldMatchedTxHash:
+		m.ClearMatchedTxHash()
+		return nil
+	}
+	return fmt.Errorf("unknown USDTPaymentIntent nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *USDTPaymentIntentMutation) ResetField(name string) error {
+	switch name {
+	case usdtpaymentintent.FieldOrderID:
+		m.ResetOrderID()
+		return nil
+	case usdtpaymentintent.FieldOutTradeNo:
+		m.ResetOutTradeNo()
+		return nil
+	case usdtpaymentintent.FieldProviderInstanceID:
+		m.ResetProviderInstanceID()
+		return nil
+	case usdtpaymentintent.FieldAddress:
+		m.ResetAddress()
+		return nil
+	case usdtpaymentintent.FieldNetwork:
+		m.ResetNetwork()
+		return nil
+	case usdtpaymentintent.FieldTokenContract:
+		m.ResetTokenContract()
+		return nil
+	case usdtpaymentintent.FieldAmountUsdt:
+		m.ResetAmountUsdt()
+		return nil
+	case usdtpaymentintent.FieldRate:
+		m.ResetRate()
+		return nil
+	case usdtpaymentintent.FieldBaseRate:
+		m.ResetBaseRate()
+		return nil
+	case usdtpaymentintent.FieldPremiumPercent:
+		m.ResetPremiumPercent()
+		return nil
+	case usdtpaymentintent.FieldRateSource:
+		m.ResetRateSource()
+		return nil
+	case usdtpaymentintent.FieldRateQuotedAt:
+		m.ResetRateQuotedAt()
+		return nil
+	case usdtpaymentintent.FieldStatus:
+		m.ResetStatus()
+		return nil
+	case usdtpaymentintent.FieldMatchedTxHash:
+		m.ResetMatchedTxHash()
+		return nil
+	case usdtpaymentintent.FieldExpiresAt:
+		m.ResetExpiresAt()
+		return nil
+	case usdtpaymentintent.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case usdtpaymentintent.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown USDTPaymentIntent field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *USDTPaymentIntentMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *USDTPaymentIntentMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *USDTPaymentIntentMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *USDTPaymentIntentMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *USDTPaymentIntentMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *USDTPaymentIntentMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *USDTPaymentIntentMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown USDTPaymentIntent unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *USDTPaymentIntentMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown USDTPaymentIntent edge %s", name)
 }
 
 // UsageCleanupTaskMutation represents an operation that mutates the UsageCleanupTask nodes in the graph.

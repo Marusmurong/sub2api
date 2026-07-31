@@ -116,6 +116,7 @@ var providerSensitiveConfigFields = map[string]map[string]struct{}{
 	payment.TypeWxpay:     {"privatekey": {}, "apiv3key": {}, "publickey": {}},
 	payment.TypeStripe:    {"secretkey": {}, "webhooksecret": {}},
 	payment.TypeAirwallex: {"apikey": {}, "webhooksecret": {}},
+	payment.TypeUSDT:      {"tronapikey": {}, "coingeckoapikey": {}},
 }
 
 // providerPendingOrderProtectedConfigFields lists config keys that cannot be
@@ -128,6 +129,10 @@ var providerPendingOrderProtectedConfigFields = map[string]map[string]struct{}{
 	payment.TypeWxpay:     {"privatekey": {}, "apiv3key": {}, "publickey": {}, "appid": {}, "mpappid": {}, "mchid": {}, "publickeyid": {}, "certserial": {}},
 	payment.TypeStripe:    {"secretkey": {}, "webhooksecret": {}, "currency": {}},
 	payment.TypeAirwallex: {"clientid": {}, "apikey": {}, "webhooksecret": {}, "apibase": {}, "accountid": {}, "currency": {}},
+	// Changing the receiving address or the chain while deposits are in flight
+	// would strand them: reconciliation matches against the address the intent
+	// was created for, and money sent to the old address has nowhere to land.
+	payment.TypeUSDT: {"walletaddress": {}, "network": {}, "tokencontract": {}, "tronapikey": {}, "tronapibase": {}},
 }
 
 func isSensitiveProviderConfigField(providerKey, fieldName string) bool {
@@ -179,6 +184,7 @@ func (s *PaymentConfigService) countPendingOrdersByPlan(ctx context.Context, pla
 
 var validProviderKeys = map[string]bool{
 	payment.TypeEasyPay: true, payment.TypeAlipay: true, payment.TypeWxpay: true, payment.TypeStripe: true, payment.TypeAirwallex: true,
+	payment.TypeUSDT: true,
 }
 
 func (s *PaymentConfigService) CreateProviderInstance(ctx context.Context, req CreateProviderInstanceRequest) (*dbent.PaymentProviderInstance, error) {

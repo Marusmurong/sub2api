@@ -42,6 +42,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
+	"github.com/Wei-Shaw/sub2api/ent/usdtdeposit"
+	"github.com/Wei-Shaw/sub2api/ent/usdtpaymentintent"
 	"github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
 	"github.com/Wei-Shaw/sub2api/ent/userattributedefinition"
@@ -943,6 +945,60 @@ func (f TraverseTLSFingerprintProfile) Traverse(ctx context.Context, q ent.Query
 	return fmt.Errorf("unexpected query type %T. expect *ent.TLSFingerprintProfileQuery", q)
 }
 
+// The USDTDepositFunc type is an adapter to allow the use of ordinary function as a Querier.
+type USDTDepositFunc func(context.Context, *ent.USDTDepositQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f USDTDepositFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.USDTDepositQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.USDTDepositQuery", q)
+}
+
+// The TraverseUSDTDeposit type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseUSDTDeposit func(context.Context, *ent.USDTDepositQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseUSDTDeposit) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseUSDTDeposit) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.USDTDepositQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.USDTDepositQuery", q)
+}
+
+// The USDTPaymentIntentFunc type is an adapter to allow the use of ordinary function as a Querier.
+type USDTPaymentIntentFunc func(context.Context, *ent.USDTPaymentIntentQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f USDTPaymentIntentFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.USDTPaymentIntentQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.USDTPaymentIntentQuery", q)
+}
+
+// The TraverseUSDTPaymentIntent type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseUSDTPaymentIntent func(context.Context, *ent.USDTPaymentIntentQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseUSDTPaymentIntent) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseUSDTPaymentIntent) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.USDTPaymentIntentQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.USDTPaymentIntentQuery", q)
+}
+
 // The UsageCleanupTaskFunc type is an adapter to allow the use of ordinary function as a Querier.
 type UsageCleanupTaskFunc func(context.Context, *ent.UsageCleanupTaskQuery) (ent.Value, error)
 
@@ -1224,6 +1280,10 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.SubscriptionPlanQuery, predicate.SubscriptionPlan, subscriptionplan.OrderOption]{typ: ent.TypeSubscriptionPlan, tq: q}, nil
 	case *ent.TLSFingerprintProfileQuery:
 		return &query[*ent.TLSFingerprintProfileQuery, predicate.TLSFingerprintProfile, tlsfingerprintprofile.OrderOption]{typ: ent.TypeTLSFingerprintProfile, tq: q}, nil
+	case *ent.USDTDepositQuery:
+		return &query[*ent.USDTDepositQuery, predicate.USDTDeposit, usdtdeposit.OrderOption]{typ: ent.TypeUSDTDeposit, tq: q}, nil
+	case *ent.USDTPaymentIntentQuery:
+		return &query[*ent.USDTPaymentIntentQuery, predicate.USDTPaymentIntent, usdtpaymentintent.OrderOption]{typ: ent.TypeUSDTPaymentIntent, tq: q}, nil
 	case *ent.UsageCleanupTaskQuery:
 		return &query[*ent.UsageCleanupTaskQuery, predicate.UsageCleanupTask, usagecleanuptask.OrderOption]{typ: ent.TypeUsageCleanupTask, tq: q}, nil
 	case *ent.UsageLogQuery:

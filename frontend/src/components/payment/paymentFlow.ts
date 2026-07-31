@@ -1,5 +1,6 @@
 import type {
   CreateOrderRequest,
+  USDTPaymentInfo,
   CreateOrderResult,
   MethodLimit,
   OrderType,
@@ -16,9 +17,10 @@ const VISIBLE_METHOD_ALIASES = {
   wxpay_direct: 'wxpay',
   stripe: 'stripe',
   airwallex: 'airwallex',
+  usdt: 'usdt',
 } as const
 
-export type VisiblePaymentMethod = 'alipay' | 'wxpay' | 'stripe' | 'airwallex'
+export type VisiblePaymentMethod = 'alipay' | 'wxpay' | 'stripe' | 'airwallex' | 'usdt'
 export type StripeVisibleMethod = 'alipay' | 'wechat_pay'
 export type PaymentLaunchKind =
   | 'qr_waiting'
@@ -27,6 +29,7 @@ export type PaymentLaunchKind =
   | 'stripe_popup'
   | 'stripe_route'
   | 'airwallex_route'
+  | 'usdt_waiting'
   | 'wechat_oauth'
   | 'wechat_jsapi'
   | 'unhandled'
@@ -49,6 +52,7 @@ export interface PaymentRecoverySnapshot {
   paymentMode: string
   resumeToken: string
   alipayMobilePrecreateDeepLink?: boolean
+  usdt?: USDTPaymentInfo
   createdAt: number
 }
 
@@ -169,7 +173,19 @@ export function decidePaymentLaunch(
     paymentMode: (result.payment_mode || '').trim(),
     resumeToken: result.resume_token || '',
     alipayMobilePrecreateDeepLink: result.alipay_mobile_precreate_deep_link === true,
+    usdt: result.usdt,
   }, context.now)
+
+  if (visibleMethod === 'usdt') {
+    // USDT never has a hosted checkout: the customer transfers to our address
+    // and the backend settles from the chain. Without the receiving details
+    // there is nothing payable to show, so fall through to the error state
+    // rather than rendering a page the customer cannot act on.
+    if (!baseState.usdt?.address || !baseState.usdt?.amount_usdt) {
+      return { kind: 'unhandled', paymentState: baseState, recovery: baseState }
+    }
+    return { kind: 'usdt_waiting', paymentState: baseState, recovery: baseState }
+  }
 
   if (visibleMethod === 'airwallex' && baseState.clientSecret && baseState.intentId) {
     if (!context.airwallexRouteUrl) {
@@ -296,6 +312,7 @@ export function readPaymentRecoverySnapshot(
       || typeof parsed.paymentMode !== 'string'
       || typeof parsed.resumeToken !== 'string'
       || (parsed.alipayMobilePrecreateDeepLink != null && typeof parsed.alipayMobilePrecreateDeepLink !== 'boolean')
+      || (parsed.usdt != null && typeof parsed.usdt !== 'object')
       || typeof parsed.createdAt !== 'number'
     ) {
       return null
@@ -328,6 +345,7 @@ export function readPaymentRecoverySnapshot(
       paymentMode: parsed.paymentMode,
       resumeToken: parsed.resumeToken,
       alipayMobilePrecreateDeepLink: parsed.alipayMobilePrecreateDeepLink === true,
+      usdt: parsed.usdt,
       createdAt: parsed.createdAt,
     }
   } catch {

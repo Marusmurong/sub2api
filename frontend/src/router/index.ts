@@ -690,6 +690,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/orders/usdt-deposits',
+    name: 'AdminUSDTDeposits',
+    component: () => import('@/views/admin/orders/AdminUSDTDepositsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'USDT Deposits',
+      titleKey: 'nav.usdtDeposits',
+      requiresPayment: true
+    }
+  },
+  {
     path: '/admin/orders/plans',
     name: 'AdminPaymentPlans',
     component: () => import('@/views/admin/orders/AdminPaymentPlansView.vue'),

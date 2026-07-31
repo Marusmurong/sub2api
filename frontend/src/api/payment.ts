@@ -11,7 +11,8 @@ import type {
   CheckoutInfoResponse,
   CreateOrderRequest,
   CreateOrderResult,
-  PaymentOrder
+  PaymentOrder,
+  USDTPaymentInfo
 } from '@/types/payment'
 import type { BasePaginationResponse } from '@/types'
 
@@ -87,5 +88,16 @@ export const paymentAPI = {
   /** Get provider instance IDs that allow user refund */
   getRefundEligibleProviders() {
     return apiClient.get<{ provider_instance_ids: string[] }>('/payment/orders/refund-eligible-providers')
+  },
+
+  /**
+   * Re-read the USDT receiving details for an order.
+   *
+   * The create-order response already carries these, but the payment page has
+   * to survive a refresh or being reopened from the order list — a customer who
+   * loses the address or the exact amount mid-transfer cannot complete payment.
+   */
+  getOrderUSDTInfo(id: number) {
+    return apiClient.get<USDTPaymentInfo>(`/payment/orders/${id}/usdt`)
   }
 }

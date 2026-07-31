@@ -107,6 +107,7 @@ type CreateOrderResponse struct {
 	JSAPI                         *payment.WechatJSAPIPayload     `json:"jsapi,omitempty"`
 	JSAPIPayload                  *payment.WechatJSAPIPayload     `json:"jsapi_payload,omitempty"`
 	ExpiresAt                     time.Time                       `json:"expires_at"`
+	USDT                          *USDTPaymentInfo                `json:"usdt,omitempty"`
 	PaymentMode                   string                          `json:"payment_mode,omitempty"`
 	ResumeToken                   string                          `json:"resume_token,omitempty"`
 	AlipayMobilePrecreateDeepLink bool                            `json:"alipay_mobile_precreate_deep_link,omitempty"`
@@ -198,6 +199,8 @@ type PaymentService struct {
 	resumeService            *PaymentResumeService
 	affiliateService         *AffiliateService
 	notificationEmailService *NotificationEmailService
+	usdtIntents              *USDTIntentService
+	usdtReconcile            *USDTReconcileService
 }
 
 func NewPaymentService(entClient *dbent.Client, registry *payment.Registry, loadBalancer payment.LoadBalancer, redeemService *RedeemService, subscriptionSvc *SubscriptionService, configService *PaymentConfigService, userRepo UserRepository, groupRepo GroupRepository, affiliateService *AffiliateService) *PaymentService {
