@@ -848,6 +848,14 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					return
 				}
 
+				// 工具块结构非法：换账号也是同样的 400，立即返回、不做故障转移。
+				var malformedToolErr *service.MalformedToolBlockError
+				if errors.As(err, &malformedToolErr) {
+					service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
+					h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", malformedToolErr.Message)
+					return
+				}
+
 				var promptTooLongErr *service.PromptTooLongError
 				if errors.As(err, &promptTooLongErr) {
 					reqLog.Warn("gateway.prompt_too_long_from_antigravity",

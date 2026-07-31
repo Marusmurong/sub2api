@@ -352,6 +352,17 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	// 调试日志：记录即将转发的账号信息
 	logger.LegacyPrintf("service.gateway", "[Forward] Using account: ID=%d Name=%s Platform=%s Type=%s TLSFingerprint=%v Proxy=%s",
 		account.ID, account.Name, account.Platform, account.Type, tlsProfile, proxyURL)
+	// 工具块结构校验：Anthropic schema 的硬性必填项缺失时，这个请求 100% 会被 400
+	// 拒绝。在这里拦下，避免白白消耗一次订阅账号的调用、并在账号上留下一条格式非法
+	// 的请求记录。位置必须在任何改写之前——我们的 thinking 剥离会改变块下标，
+	// 之后再报就分不清是客户端发错还是我们改坏。详见 gateway_tool_block_validate.go。
+	if problem := describeMalformedToolBlock(body); problem != "" {
+		logger.LegacyPrintf("service.gateway",
+			"[reject] malformed tool block from client, not forwarded: %s (account would be %d)",
+			problem, account.ID)
+		return nil, &MalformedToolBlockError{Message: problem}
+	}
+
 	// 诊断基线：在任何改写之前取一次 thinking 块指纹，出口再取一次做对比。
 	// 目的是把"客户端本来就发了坏签名"和"我们在转发链上改坏了它"分开——
 	// 2026-07-31 连续两次归因失败都源于没有先确认这一点。详见
