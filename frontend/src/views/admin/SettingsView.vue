@@ -8083,6 +8083,7 @@ import type {
   Proxy,
 } from "@/types";
 import type { ProviderInstance } from "@/types/payment";
+import { PROVIDER_KEYS } from "@/components/payment/providerConfig";
 import AppLayout from "@/components/layout/AppLayout.vue";
 import Icon from "@/components/icons/Icon.vue";
 import Select from "@/components/common/Select.vue";
@@ -11299,13 +11300,14 @@ async function saveBetaPolicySettings() {
 
 // ==================== Provider Management ====================
 
-const allPaymentTypes = computed(() => [
-  { value: "easypay", label: t("payment.methods.easypay") },
-  { value: "alipay", label: t("payment.methods.alipay") },
-  { value: "wxpay", label: t("payment.methods.wxpay") },
-  { value: "stripe", label: t("payment.methods.stripe") },
-  { value: "airwallex", label: t("payment.methods.airwallex") },
-]);
+// Both lists derive from PROVIDER_KEYS so a new provider cannot end up with
+// config fields defined but no way to select it.
+const allPaymentTypes = computed(() =>
+  PROVIDER_KEYS.map((key) => ({
+    value: key,
+    label: t(`payment.methods.${key}`),
+  })),
+);
 
 function isPaymentTypeEnabled(type: string): boolean {
   return form.payment_enabled_types.includes(type);
@@ -11356,13 +11358,14 @@ const providerDialogRef = ref<InstanceType<
   typeof PaymentProviderDialog
 > | null>(null);
 
-const providerKeyOptions = computed(() => [
-  { value: "easypay", label: t("admin.settings.payment.providerEasypay") },
-  { value: "alipay", label: t("admin.settings.payment.providerAlipay") },
-  { value: "wxpay", label: t("admin.settings.payment.providerWxpay") },
-  { value: "stripe", label: t("admin.settings.payment.providerStripe") },
-  { value: "airwallex", label: t("admin.settings.payment.providerAirwallex") },
-]);
+const providerKeyOptions = computed(() =>
+  PROVIDER_KEYS.map((key) => ({
+    value: key,
+    label: t(
+      `admin.settings.payment.provider${key.charAt(0).toUpperCase()}${key.slice(1)}`,
+    ),
+  })),
+);
 
 const enabledProviderKeyOptions = computed(() => {
   const enabled = form.payment_enabled_types;

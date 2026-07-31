@@ -35,6 +35,18 @@ export interface CallbackPaths {
 
 // --- Constants ---
 
+/**
+ * Every provider key the admin UI can create, in display order.
+ *
+ * Single source of truth: the settings view derives both the payment-type
+ * toggles and the create-dialog dropdown from this. Keeping separate hardcoded
+ * lists is how a provider ends up with config fields defined but no way to
+ * select it.
+ */
+export const PROVIDER_KEYS = ['easypay', 'alipay', 'wxpay', 'stripe', 'airwallex', 'usdt'] as const
+
+export type ProviderKey = typeof PROVIDER_KEYS[number]
+
 /** Maps provider key → available payment types. */
 export const PROVIDER_SUPPORTED_TYPES: Record<string, string[]> = {
   easypay: ['alipay', 'wxpay'],
