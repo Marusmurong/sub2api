@@ -129,3 +129,40 @@ describe('PROVIDER_KEYS 与各渠道定义保持一致', () => {
     expect(sensitive).toContain('coingeckoApiKey')
   })
 })
+
+describe('每个渠道配置字段都有可显示的标签', () => {
+  // The dialog falls back to t(`admin.settings.payment.field_${key}`) when a
+  // field declares no literal label. A missing translation renders the raw key
+  // path on screen — which is exactly what shipped for all nine USDT fields.
+  it('every field either has a literal label or a translation', async () => {
+    const zh = (await import('@/i18n/locales/zh/admin/settings')).default as Record<string, any>
+    const en = (await import('@/i18n/locales/en/admin/settings')).default as Record<string, any>
+
+    for (const [providerKey, fields] of Object.entries(PROVIDER_CONFIG_FIELDS)) {
+      for (const field of fields) {
+        if (field.label) continue
+        const key = `field_${field.key}`
+        expect(zh.settings.payment[key], `zh 缺少 ${providerKey}.${key}`).toBeTruthy()
+        expect(en.settings.payment[key], `en 缺少 ${providerKey}.${key}`).toBeTruthy()
+      }
+    }
+  })
+
+  // Hints render as plain text, so markdown emphasis shows up literally.
+  it('hints contain no markdown emphasis', async () => {
+    const zh = (await import('@/i18n/locales/zh/admin/settings')).default as Record<string, any>
+    const en = (await import('@/i18n/locales/en/admin/settings')).default as Record<string, any>
+
+    for (const fields of Object.values(PROVIDER_CONFIG_FIELDS)) {
+      for (const field of fields) {
+        if (!field.hintKey) continue
+        const leaf = field.hintKey.split('.').pop() as string
+        for (const [name, bundle] of [['zh', zh], ['en', en]] as const) {
+          const text = bundle.settings.payment[leaf]
+          expect(text, `${name} 缺少 ${leaf}`).toBeTruthy()
+          expect(text, `${name}.${leaf} 含字面 markdown`).not.toMatch(/\*\*/)
+        }
+      }
+    }
+  })
+})
