@@ -56,7 +56,14 @@ type cleanupRepoStub struct {
 }
 
 type dashboardRepoStub struct {
-	recomputeErr   error
+	recomputeErr error
+
+	// RecomputeRange runs on the goroutine TriggerRecomputeRange spawns while
+	// the test polls the counter from its own goroutine, so the counter needs
+	// synchronising. Without this the race detector fails whichever test
+	// happens to be running when the write lands, which makes the whole
+	// package unrunnable under -race.
+	mu             sync.Mutex
 	recomputeCalls int
 }
 
@@ -65,8 +72,16 @@ func (s *dashboardRepoStub) AggregateRange(ctx context.Context, start, end time.
 }
 
 func (s *dashboardRepoStub) RecomputeRange(ctx context.Context, start, end time.Time) error {
+	s.mu.Lock()
 	s.recomputeCalls++
+	s.mu.Unlock()
 	return s.recomputeErr
+}
+
+func (s *dashboardRepoStub) recomputeCallCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.recomputeCalls
 }
 
 func (s *dashboardRepoStub) GetAggregationWatermark(ctx context.Context) (time.Time, error) {
@@ -580,7 +595,7 @@ func TestUsageCleanupServiceExecuteTaskDashboardRecomputeError(t *testing.T) {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 	require.Len(t, repo.markSucceeded, 1)
-	require.Eventually(t, func() bool { return dashboardRepo.recomputeCalls == 1 }, time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return dashboardRepo.recomputeCallCount() == 1 }, time.Second, 10*time.Millisecond)
 }
 
 func TestUsageCleanupServiceExecuteTaskDashboardRecomputeSuccess(t *testing.T) {
@@ -608,7 +623,7 @@ func TestUsageCleanupServiceExecuteTaskDashboardRecomputeSuccess(t *testing.T) {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 	require.Len(t, repo.markSucceeded, 1)
-	require.Eventually(t, func() bool { return dashboardRepo.recomputeCalls == 1 }, time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return dashboardRepo.recomputeCallCount() == 1 }, time.Second, 10*time.Millisecond)
 }
 
 func TestUsageCleanupServiceExecuteTaskCanceled(t *testing.T) {
