@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"regexp"
 
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -38,8 +39,21 @@ import (
 // 空 UA 按第三方处理：真实 Claude Code 一定带 claude-cli/ 前缀，不表明身份的请求
 // 没有理由享受订阅账号。
 func isNonClaudeCodeUserAgent(ua string) bool {
-	return !claudeCodeValidator.ValidateUserAgent(ua)
+	return !claudeCodeValidator.ValidateUserAgent(ua) && !officialClaudeCodeAltUAPattern.MatchString(ua)
 }
+
+// officialClaudeCodeAltUAPattern 补上 claude-code/ 这个前缀。
+//
+// 生产实测（拦截启用后）：UA 为 claude-code/2.1.132 的请求被拦了 124 次——那是官方
+// Claude Code，只是部分版本/构建自称 claude-code/ 而不是 claude-cli/。
+//
+// 只在本拦截器内放宽，刻意不改 ClaudeCodeValidator 的 claudeCodeUAPattern：
+// 那个正则还被 group.claude_code_only 与客户端版本闸使用，放宽它会连带改变那两处
+// 的判定语义，而这里要解决的只是"别把官方客户端拦掉"。
+//
+// 要求带版本号（\d+\.\d+\.\d+）并锚定行首，避免 claude-coder/ 或
+// my-claude-code-proxy/ 这类形似名字蒙混过关。
+var officialClaudeCodeAltUAPattern = regexp.MustCompile(`(?i)^claude-code/\d+\.\d+\.\d+`)
 
 // rejectNonClaudeCodeClient 在账号选择之前拦下第三方客户端并固定返回。
 // 返回 true 表示响应已写出，调用方必须立即返回。

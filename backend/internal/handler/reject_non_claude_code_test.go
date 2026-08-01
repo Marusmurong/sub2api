@@ -132,3 +132,37 @@ func TestRejectDoesNotMarkWhenAllowed(t *testing.T) {
 		t.Error("放行的请求不得留下策略拒绝标记")
 	}
 }
+
+// claude-code/ 前缀也是官方 Claude Code。
+//
+// 生产实测（拦截启用后）：UA 为 claude-code/2.1.132 的请求被拦了 124 次。
+// 判定用的 claudeCodeUAPattern 只认 ^claude-cli/，而部分版本/构建自称 claude-code/。
+// 这是官方客户端被误伤，必须放行。
+//
+// 只在本拦截器内放宽，不动 ClaudeCodeValidator 的正则：那个正则还被
+// group.claude_code_only 与客户端版本闸使用，放宽它会连带改变那两处的语义。
+func TestNonClaudeCodeUA_AcceptsClaudeCodePrefix(t *testing.T) {
+	accepted := []string{
+		"claude-code/2.1.132",
+		"claude-code/2.1.220 (external, cli)",
+		"Claude-Code/2.1.132", // 大小写不敏感
+	}
+	for _, ua := range accepted {
+		if isNonClaudeCodeUserAgent(ua) {
+			t.Errorf("官方客户端被误拦: %q", ua)
+		}
+	}
+
+	// 反向保护：形似但不是官方客户端的仍要拦。
+	rejected := []string{
+		"claude-coder/1.0",
+		"my-claude-code-proxy/1.0",
+		"axonhub/1.0",
+		"Go-http-client/2.0",
+	}
+	for _, ua := range rejected {
+		if !isNonClaudeCodeUserAgent(ua) {
+			t.Errorf("非官方客户端应被拦: %q", ua)
+		}
+	}
+}
