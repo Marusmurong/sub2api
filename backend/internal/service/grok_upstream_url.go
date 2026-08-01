@@ -83,14 +83,15 @@ func buildGrokChatCompletionsURL(account *Account, cfg *config.Config) (string, 
 	return xai.BuildChatCompletionsURLWithValidator(account.GetGrokBaseURL(), validator)
 }
 
-// buildGrokBillingURL 解析 billing 探测端点：跟随账号的转发 base_url，
-// 未定制的账号仍指向官方 CLI 网关。
+// buildGrokBillingURL 解析 billing 探测端点。
+// 基址由 GetGrokBillingBaseURL 决定：指向 xAI 官方推理主机的账号回退到 CLI 网关
+// （那里才有 /billing），指向第三方中转的账号保持跟随。
 func buildGrokBillingURL(account *Account, cfg *config.Config, weekly bool) (string, error) {
 	validator, err := grokBaseURLValidator(account, cfg)
 	if err != nil {
 		return "", err
 	}
-	return xai.BuildBillingURLWithValidator(account.GetGrokBaseURL(), weekly, validator)
+	return xai.BuildBillingURLWithValidator(account.GetGrokBillingBaseURL(), weekly, validator)
 }
 
 func buildGrokMediaURL(account *Account, cfg *config.Config, endpoint GrokMediaEndpoint, requestID string) (string, error) {

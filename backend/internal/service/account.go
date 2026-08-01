@@ -1356,6 +1356,31 @@ func (a *Account) GetGrokMediaBaseURL() string {
 	return baseURL
 }
 
+// GetGrokBillingBaseURL 解析计费探测的基址。
+//
+// 与 GetGrokMediaBaseURL 是对称的一对：媒体**不在** CLI 网关上（命中 CLI 网关时改用
+// API 主机），计费则**只在** CLI 网关上（不在时改回 CLI 网关）。
+//
+// 生产事故（2026-08-01）：账号的 credentials.base_url 是 https://api.x.ai/v1——xAI 官方
+// 的推理接口，那上面没有 /billing。探测因此持续 404（每 10 分钟一次），拿不到 plan 与
+// 配额，GrokMediaGenerationEligibility 判为 billing_inconclusive，媒体资格被拒，
+// 视频生成返回 503 No eligible Grok media accounts。上游本身没问题：直接打
+// cli-chat-proxy.grok.com/v1/billing 返回 200（monthlyLimit=150000、used=949）。
+//
+// 判定用"是不是 xAI 官方推理主机"而不是"有没有开自定义中转开关"：base_url 由 OAuth
+// 绑定流程写入，并不代表运维配置了自定义上游；而真正指向第三方中转的账号必须保持
+// 跟随（那类中转通常自己实现了 /billing），所以只对已知的官方推理主机做回退。
+func (a *Account) GetGrokBillingBaseURL() string {
+	if !a.IsGrok() {
+		return ""
+	}
+	baseURL := a.GetGrokBaseURL()
+	if a.IsGrokOAuth() && isGrokInferenceOnlyHost(baseURL) {
+		return xai.DefaultCLIBaseURL
+	}
+	return baseURL
+}
+
 func (a *Account) GetGrokAccessToken() string {
 	if !a.IsGrok() {
 		return ""

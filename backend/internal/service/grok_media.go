@@ -596,6 +596,19 @@ func grokMediaSignedVideoContentURL(body []byte, requestID string) (string, erro
 	return parsed.String(), nil
 }
 
+// isGrokInferenceOnlyHost 判断该地址是否为 xAI 官方的"只做推理、不提供 /billing"的主机。
+//
+// 覆盖 api.x.ai 及其区域变体（api.<region>.x.ai）。第三方中转不在此列——那类地址要
+// 保持跟随，因为它们通常自己实现了计费端点。
+func isGrokInferenceOnlyHost(rawURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "api.x.ai" || strings.HasSuffix(host, ".x.ai") && strings.HasPrefix(host, "api.")
+}
+
 func isGrokCLIProxyTarget(rawURL string) bool {
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	return err == nil && strings.EqualFold(parsed.Hostname(), "cli-chat-proxy.grok.com")
