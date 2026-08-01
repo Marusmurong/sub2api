@@ -772,178 +772,96 @@ func FilterThinkingBlocksForRetry(body []byte, mappedModel string) []byte {
 		return body
 	}
 
-	var messages []any
-	if err := json.Unmarshal(sliceRawFromBody(body, msgsRes), &messages); err != nil {
-		return body
-	}
+	// 只改该改的块，其余字节一律不碰。
+	//
+	// 早先这里把 messages 整个 json.Unmarshal 到 []any 再 Marshal 回去。两个代价：
+	//
+	//  1. 正确性——往返会重排 key、把字符串里的 < > & 转义成 \u003c \u0026 \u003e，
+	//     连没打算动的 tool_use / text 一起改写。同一类问题今天已在
+	//     StripEmptyTextBlocks / FilterThinkingBlocks / FilterWebSearchHistoryBlocks
+	//     上修过三次，这里是最后一处。
+	//  2. 开销——本函数被污染标记机制放大：被标记的会话每一轮都会走这里。生产实测
+	//     账号 57 累计剥掉 24997 个 thinking 块，单次中位 180、最多 238，而 body
+	//     上下文常达 40~60 万 token。每轮完整反序列化再序列化这么大的 body，纯属浪费。
+	out := body
+	msgsRes.ForEach(func(msgIdx, msg gjson.Result) bool {
+		content := msg.Get("content")
+		if !content.Exists() || !content.IsArray() {
+			return true
+		}
+		blocks := content.Array()
+		base := "messages." + msgIdx.String() + ".content."
+		removed := 0
 
-	modified := false
+		// 倒序处理：删除会让后面的下标前移，替换不会，倒序对两者都安全。
+		for i := len(blocks) - 1; i >= 0; i-- {
+			b := blocks[i]
+			if !b.IsObject() {
+				continue
+			}
+			path := base + strconv.Itoa(i)
+			switch b.Get("type").String() {
+			case "text":
+				if strings.TrimSpace(b.Get("text").String()) != "" {
+					continue
+				}
+				if next, err := sjson.DeleteBytes(out, path); err == nil {
+					out = next
+					removed++
+				}
+			case "thinking":
+				// 转成 text 保留推理内容；内容为空则直接删。
+				text := b.Get("thinking").String()
+				if text == "" {
+					if next, err := sjson.DeleteBytes(out, path); err == nil {
+						out = next
+						removed++
+					}
+					continue
+				}
+				raw, err := json.Marshal(map[string]any{"type": "text", "text": text})
+				if err != nil {
+					continue
+				}
+				if next, err := sjson.SetRawBytes(out, path, raw); err == nil {
+					out = next
+				}
+			case "redacted_thinking":
+				// 无法转成文本（内容已被上游加密），只能删除。
+				if next, err := sjson.DeleteBytes(out, path); err == nil {
+					out = next
+					removed++
+				}
+			case "tool_result":
+				// 嵌套内容里的空白 text 同样要清掉（上游对嵌套块一视同仁）。
+				// 与外层不同：嵌套内容被清空时**不补占位块**，保持既有语义
+				// （见 TestFilterThinkingBlocksForRetry_NestedAllEmptyGetsEmptySlice）。
+				out = stripBlankTextInNestedContent(out, path, b)
+			}
+		}
+
+		if removed > 0 && removed == len(blocks) {
+			// 整条被删空：留下 content: [] 会换来另一个 400，补占位块。
+			placeholder, err := json.Marshal(emptyContentPlaceholder(msg.Get("role").String()))
+			if err == nil {
+				if next, err := sjson.SetRawBytes(out, "messages."+msgIdx.String()+".content", placeholder); err == nil {
+					out = next
+				}
+			}
+		}
+		return true
+	})
 
 	// Disable top-level thinking mode for retry to avoid structural/signature constraints upstream.
-	deleteTopLevelThinking := gjson.Get(jsonStr, "thinking").Exists()
-
-	for i := 0; i < len(messages); i++ {
-		msgMap, ok := messages[i].(map[string]any)
-		if !ok {
-			continue
-		}
-
-		role, _ := msgMap["role"].(string)
-		content, ok := msgMap["content"].([]any)
-		if !ok {
-			// String content or other format - keep as is
-			continue
-		}
-
-		// 延迟分配：只有检测到需要修改的块，才构建新 slice。
-		var newContent []any
-		modifiedThisMsg := false
-
-		ensureNewContent := func(prefixLen int) {
-			if newContent != nil {
-				return
-			}
-			newContent = make([]any, 0, len(content))
-			if prefixLen > 0 {
-				newContent = append(newContent, content[:prefixLen]...)
-			}
-		}
-
-		for bi := 0; bi < len(content); bi++ {
-			block := content[bi]
-			blockMap, ok := block.(map[string]any)
-			if !ok {
-				if newContent != nil {
-					newContent = append(newContent, block)
-				}
-				continue
-			}
-
-			blockType, _ := blockMap["type"].(string)
-
-			// Strip empty text blocks: {"type":"text","text":""}
-			// Upstream rejects these with 400: "text content blocks must be non-empty",
-			// 纯空白同样被拒("must contain non-whitespace text"),故按 TrimSpace 判空。
-			if blockType == "text" {
-				if txt, _ := blockMap["text"].(string); strings.TrimSpace(txt) == "" {
-					modifiedThisMsg = true
-					ensureNewContent(bi)
-					continue
-				}
-			}
-
-			// Convert thinking blocks to text (preserve content) and drop redacted_thinking.
-			switch blockType {
-			case "thinking":
-				modifiedThisMsg = true
-				ensureNewContent(bi)
-				thinkingText, _ := blockMap["thinking"].(string)
-				if thinkingText != "" {
-					newContent = append(newContent, map[string]any{"type": "text", "text": thinkingText})
-				}
-				continue
-			case "redacted_thinking":
-				modifiedThisMsg = true
-				ensureNewContent(bi)
-				continue
-			}
-
-			// Handle blocks without type discriminator but with a "thinking" field.
-			if blockType == "" {
-				if rawThinking, hasThinking := blockMap["thinking"]; hasThinking {
-					modifiedThisMsg = true
-					ensureNewContent(bi)
-					switch v := rawThinking.(type) {
-					case string:
-						if v != "" {
-							newContent = append(newContent, map[string]any{"type": "text", "text": v})
-						}
-					default:
-						if b, err := json.Marshal(v); err == nil && len(b) > 0 {
-							newContent = append(newContent, map[string]any{"type": "text", "text": string(b)})
-						}
-					}
-					continue
-				}
-			}
-
-			// Recursively strip empty text blocks from tool_result nested content.
-			if blockType == "tool_result" {
-				if nestedContent, ok := blockMap["content"].([]any); ok {
-					if cleaned, changed := stripEmptyTextBlocksFromSlice(nestedContent); changed {
-						modifiedThisMsg = true
-						ensureNewContent(bi)
-						blockCopy := make(map[string]any, len(blockMap))
-						for k, v := range blockMap {
-							blockCopy[k] = v
-						}
-						blockCopy["content"] = cleaned
-						newContent = append(newContent, blockCopy)
-						continue
-					}
-				}
-			}
-
-			if newContent != nil {
-				newContent = append(newContent, block)
-			}
-		}
-
-		// Handle empty content: either from filtering or originally empty
-		if newContent == nil {
-			if len(content) == 0 {
-				modified = true
-				msgMap["content"] = emptyContentPlaceholder(role)
-			}
-			continue
-		}
-
-		if len(newContent) == 0 {
-			modified = true
-			msgMap["content"] = emptyContentPlaceholder(role)
-			continue
-		}
-
-		if modifiedThisMsg {
-			modified = true
-			msgMap["content"] = newContent
+	if gjson.GetBytes(out, "thinking").Exists() {
+		if next, err := sjson.DeleteBytes(out, "thinking"); err == nil {
+			out = next
 		}
 	}
-
-	if !modified && !deleteTopLevelThinking {
-		// Avoid rewriting JSON when no changes are needed.
-		return body
-	}
-
-	out := body
-	if deleteTopLevelThinking {
-		if b, err := sjson.DeleteBytes(out, "thinking"); err == nil {
-			out = b
-		} else {
-			return body
-		}
-		// Removing "thinking" makes any context_management strategy that requires it invalid
-		// (e.g. clear_thinking_20251015).  Strip those entries so the retry request does not
-		// receive a 400 "strategy requires thinking to be enabled or adaptive".
-		out = removeThinkingDependentContextStrategies(out)
-	}
-	if modified {
-		msgsBytes, err := json.Marshal(messages)
-		if err != nil {
-			return body
-		}
-		out, err = sjson.SetRawBytes(out, "messages", msgsBytes)
-		if err != nil {
-			return body
-		}
-	}
+	out = removeThinkingDependentContextStrategies(out)
 	return out
 }
 
-// removeThinkingDependentContextStrategies 从 context_management.edits 中移除
-// 需要 thinking 启用的策略（如 clear_thinking_20251015）。
-// 当顶层 "thinking" 字段被禁用时必须调用，否则上游会返回
-// "strategy requires thinking to be enabled or adaptive"。
 func removeThinkingDependentContextStrategies(body []byte) []byte {
 	jsonStr := *(*string)(unsafe.Pointer(&body))
 	editsRes := gjson.Get(jsonStr, "context_management.edits")
@@ -1571,4 +1489,31 @@ func NormalizeChineseLLMThinking(body []byte, mappedModel string) ([]byte, bool)
 		return body, false
 	}
 	return modified, true
+}
+
+// stripBlankTextInNestedContent 清理 tool_result 嵌套 content 里的空白 text 块。
+//
+// 单独一个函数而不是递归调用主循环：嵌套层的语义与外层不同——清空后不补占位块，
+// 也不处理 thinking（嵌套内容里不会有 thinking 块）。
+func stripBlankTextInNestedContent(body []byte, blockPath string, block gjson.Result) []byte {
+	nested := block.Get("content")
+	if !nested.Exists() || !nested.IsArray() {
+		return body
+	}
+	items := nested.Array()
+	out := body
+	// 倒序：正序删会让后面的下标前移。
+	for i := len(items) - 1; i >= 0; i-- {
+		it := items[i]
+		if !it.IsObject() || it.Get("type").String() != "text" {
+			continue
+		}
+		if strings.TrimSpace(it.Get("text").String()) != "" {
+			continue
+		}
+		if next, err := sjson.DeleteBytes(out, blockPath+".content."+strconv.Itoa(i)); err == nil {
+			out = next
+		}
+	}
+	return out
 }

@@ -987,6 +987,25 @@ func (s *GatewayService) markSessionSignatureTainted(ctx context.Context, c *gin
 	_ = s.cache.MarkSignatureTainted(ctx, ref.groupID, ref.sessionHash)
 }
 
+// clearStickyAndMarkTainted 清理粘性绑定，并把该会话标为「签名已污染」。
+//
+// 两件事必须一起做。清绑定的触发条件是账号已不可用（吊销、限流、被驱逐），
+// 这意味着**下一轮必然换号**；而客户端手里那份 thinking 历史是旧账号签发的，
+// 换号后必然被上游拒绝。
+//
+// 不标记的话，我们要先盲发一个已知会被 400 拒绝的请求，靠那次失败才学会剥离——
+// 生产实测：一个账号被吊销后，它上面的每个会话都以「一次 400」的代价重新学习。
+// 提前标记把这个代价降为零。
+//
+// 标记失败不影响清绑定：污染标记只是让剥离提前发生，缺了仍有 400 重试兜底。
+func (s *GatewayService) clearStickyAndMarkTainted(ctx context.Context, groupID int64, sessionHash string) {
+	if s.cache == nil || sessionHash == "" {
+		return
+	}
+	_ = s.cache.DeleteSessionAccountID(ctx, groupID, sessionHash)
+	_ = s.cache.MarkSignatureTainted(ctx, groupID, sessionHash)
+}
+
 // FindGeminiSession 查找 Gemini 会话（基于内容摘要链的 Fallback 匹配）
 // 返回最长匹配的会话信息（uuid, accountID）
 func (s *GatewayService) FindGeminiSession(_ context.Context, groupID int64, prefixHash, digestChain string) (uuid string, accountID int64, matchedChain string, found bool) {
