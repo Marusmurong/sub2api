@@ -162,6 +162,19 @@ func (Group) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			Comment("非 Claude Code 请求降级使用的分组 ID"),
+
+		// 非 Claude Code 客户端放行开关（migration 194）
+		//
+		// 默认 false = 强制 Claude Code，与 gateway.reject_non_claude_code_clients
+		// 打开时的既有行为一致；置 true 表示该分组解除强制、接受任意客户端。
+		//
+		// 刻意新增字段而不是复用 claude_code_only：后者默认 false 的含义是「不限制」，
+		// 拿它当判据会让全部未配置的分组在开关生效的瞬间同时放行非 CC；而且它还被
+		// responses / chat_completions 两个端点跨平台读取，改动语义会波及 OpenAI、
+		// Gemini 分组。本字段默认值即为强制，新增列不需要迁移既有数据。
+		field.Bool("allow_non_claude_code").
+			Default(false).
+			Comment("是否允许非 Claude Code 客户端（默认否＝强制 Claude Code）"),
 		field.Int64("fallback_group_id_on_invalid_request").
 			Optional().
 			Nillable().

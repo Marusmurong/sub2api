@@ -478,6 +478,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		VideoPrice1080P:                 videoPrice1080P,
 		WebSearchPricePerCall:           webSearchPricePerCall,
 		ClaudeCodeOnly:                  input.ClaudeCodeOnly,
+		AllowNonClaudeCode:              input.AllowNonClaudeCode,
 		FallbackGroupID:                 input.FallbackGroupID,
 		FallbackGroupIDOnInvalidRequest: fallbackOnInvalidRequest,
 		ModelRouting:                    input.ModelRouting,
@@ -762,6 +763,10 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	// Claude Code 客户端限制
 	if input.ClaudeCodeOnly != nil {
 		group.ClaudeCodeOnly = *input.ClaudeCodeOnly
+	}
+	// 非 Claude Code 放行开关：默认 false＝强制 CC，置 true 才解除本分组的强制。
+	if input.AllowNonClaudeCode != nil {
+		group.AllowNonClaudeCode = *input.AllowNonClaudeCode
 	}
 	if input.FallbackGroupID != nil {
 		// 校验降级分组

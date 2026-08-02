@@ -1074,6 +1074,12 @@ export default {
           detector: '内置识别'
         }
       },
+      allowNonClaudeCode: {
+        label: '允许非 Claude Code 客户端',
+        hint: '默认关闭＝本分组强制 Claude Code。打开后本分组接受任意客户端（Go SDK、litellm 等），这些请求会以伪装形态发往上游订阅账号，请仅在你愿意让该分组的账号承担相应风险时开启。',
+        enabled: '已放行非 Claude Code',
+        disabled: '强制 Claude Code（默认）',
+      },
       claudeCode: {
         title: 'Claude Code 客户端限制',
         tooltip:

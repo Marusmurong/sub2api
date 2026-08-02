@@ -88,6 +88,8 @@ const (
 	FieldClaudeCodeOnly = "claude_code_only"
 	// FieldFallbackGroupID holds the string denoting the fallback_group_id field in the database.
 	FieldFallbackGroupID = "fallback_group_id"
+	// FieldAllowNonClaudeCode holds the string denoting the allow_non_claude_code field in the database.
+	FieldAllowNonClaudeCode = "allow_non_claude_code"
 	// FieldFallbackGroupIDOnInvalidRequest holds the string denoting the fallback_group_id_on_invalid_request field in the database.
 	FieldFallbackGroupIDOnInvalidRequest = "fallback_group_id_on_invalid_request"
 	// FieldModelRouting holds the string denoting the model_routing field in the database.
@@ -237,6 +239,7 @@ var Columns = []string{
 	FieldWebSearchPricePerCall,
 	FieldClaudeCodeOnly,
 	FieldFallbackGroupID,
+	FieldAllowNonClaudeCode,
 	FieldFallbackGroupIDOnInvalidRequest,
 	FieldModelRouting,
 	FieldModelRoutingEnabled,
@@ -343,6 +346,8 @@ var (
 	DefaultVideoRateMultiplier float64
 	// DefaultClaudeCodeOnly holds the default value on creation for the "claude_code_only" field.
 	DefaultClaudeCodeOnly bool
+	// DefaultAllowNonClaudeCode holds the default value on creation for the "allow_non_claude_code" field.
+	DefaultAllowNonClaudeCode bool
 	// DefaultModelRoutingEnabled holds the default value on creation for the "model_routing_enabled" field.
 	DefaultModelRoutingEnabled bool
 	// DefaultMcpXMLInject holds the default value on creation for the "mcp_xml_inject" field.
@@ -569,6 +574,11 @@ func ByClaudeCodeOnly(opts ...sql.OrderTermOption) OrderOption {
 // ByFallbackGroupID orders the results by the fallback_group_id field.
 func ByFallbackGroupID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldFallbackGroupID, opts...).ToFunc()
+}
+
+// ByAllowNonClaudeCode orders the results by the allow_non_claude_code field.
+func ByAllowNonClaudeCode(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldAllowNonClaudeCode, opts...).ToFunc()
 }
 
 // ByFallbackGroupIDOnInvalidRequest orders the results by the fallback_group_id_on_invalid_request field.

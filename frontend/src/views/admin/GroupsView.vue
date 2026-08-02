@@ -1393,6 +1393,43 @@
               }}
             </span>
           </div>
+          <!-- 非 Claude Code 客户端放行（默认关＝强制 Claude Code） -->
+          <div class="mt-4 border-t border-gray-200 pt-4 dark:border-dark-600">
+            <div class="mb-2">
+              <label class="input-label">{{
+                t("admin.groups.allowNonClaudeCode.label")
+              }}</label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t("admin.groups.allowNonClaudeCode.hint") }}
+              </p>
+            </div>
+            <div class="flex items-center gap-3">
+              <button
+                type="button"
+                @click="createForm.allow_non_claude_code = !createForm.allow_non_claude_code"
+                :class="[
+                  'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+                  createForm.allow_non_claude_code
+                    ? 'bg-amber-500'
+                    : 'bg-gray-300 dark:bg-dark-600',
+                ]"
+              >
+                <span
+                  :class="[
+                    'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                    createForm.allow_non_claude_code ? 'translate-x-6' : 'translate-x-1',
+                  ]"
+                />
+              </button>
+              <span class="text-sm text-gray-500 dark:text-gray-400">
+                {{
+                  createForm.allow_non_claude_code
+                    ? t("admin.groups.allowNonClaudeCode.enabled")
+                    : t("admin.groups.allowNonClaudeCode.disabled")
+                }}
+              </span>
+            </div>
+          </div>
           <!-- 降级分组选择（仅当启用 claude_code_only 时显示） -->
           <div v-if="createForm.claude_code_only" class="mt-3">
             <label class="input-label">{{
@@ -2993,6 +3030,43 @@
                   : t("admin.groups.claudeCode.disabled")
               }}
             </span>
+          </div>
+          <!-- 非 Claude Code 客户端放行（默认关＝强制 Claude Code） -->
+          <div class="mt-4 border-t border-gray-200 pt-4 dark:border-dark-600">
+            <div class="mb-2">
+              <label class="input-label">{{
+                t("admin.groups.allowNonClaudeCode.label")
+              }}</label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t("admin.groups.allowNonClaudeCode.hint") }}
+              </p>
+            </div>
+            <div class="flex items-center gap-3">
+              <button
+                type="button"
+                @click="editForm.allow_non_claude_code = !editForm.allow_non_claude_code"
+                :class="[
+                  'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+                  editForm.allow_non_claude_code
+                    ? 'bg-amber-500'
+                    : 'bg-gray-300 dark:bg-dark-600',
+                ]"
+              >
+                <span
+                  :class="[
+                    'inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform',
+                    editForm.allow_non_claude_code ? 'translate-x-6' : 'translate-x-1',
+                  ]"
+                />
+              </button>
+              <span class="text-sm text-gray-500 dark:text-gray-400">
+                {{
+                  editForm.allow_non_claude_code
+                    ? t("admin.groups.allowNonClaudeCode.enabled")
+                    : t("admin.groups.allowNonClaudeCode.disabled")
+                }}
+              </span>
+            </div>
           </div>
           <!-- 降级分组选择（仅当启用 claude_code_only 时显示） -->
           <div v-if="editForm.claude_code_only" class="mt-3">
@@ -4731,6 +4805,7 @@ const createForm = reactive({
   profit_safety_buffer_percent: 0,
   // Claude Code 客户端限制（仅 anthropic 平台使用）
   claude_code_only: false,
+  allow_non_claude_code: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
@@ -5085,6 +5160,7 @@ const editForm = reactive({
   profit_safety_buffer_percent: 0,
   // Claude Code 客户端限制（仅 anthropic 平台使用）
   claude_code_only: false,
+  allow_non_claude_code: false,
   fallback_group_id: null as number | null,
   fallback_group_id_on_invalid_request: null as number | null,
   // OpenAI Messages 调度配置（仅 openai 平台使用）
@@ -5531,6 +5607,7 @@ const closeCreateModal = () => {
   createForm.profit_min_margin_percent = 0;
   createForm.profit_safety_buffer_percent = 0;
   createForm.claude_code_only = false;
+  createForm.allow_non_claude_code = false;
   createForm.fallback_group_id = null;
   createForm.fallback_group_id_on_invalid_request = null;
   resetMessagesDispatchFormState(createForm);
@@ -5746,6 +5823,7 @@ const handleEdit = async (group: AdminGroup) => {
     group.profit_safety_buffer ?? 0,
   );
   editForm.claude_code_only = group.claude_code_only || false;
+  editForm.allow_non_claude_code = group.allow_non_claude_code || false;
   editForm.fallback_group_id = group.fallback_group_id;
   editForm.fallback_group_id_on_invalid_request =
     group.fallback_group_id_on_invalid_request;

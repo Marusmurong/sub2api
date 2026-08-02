@@ -525,6 +525,20 @@ func (_c *GroupCreate) SetNillableFallbackGroupID(v *int64) *GroupCreate {
 	return _c
 }
 
+// SetAllowNonClaudeCode sets the "allow_non_claude_code" field.
+func (_c *GroupCreate) SetAllowNonClaudeCode(v bool) *GroupCreate {
+	_c.mutation.SetAllowNonClaudeCode(v)
+	return _c
+}
+
+// SetNillableAllowNonClaudeCode sets the "allow_non_claude_code" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableAllowNonClaudeCode(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetAllowNonClaudeCode(*v)
+	}
+	return _c
+}
+
 // SetFallbackGroupIDOnInvalidRequest sets the "fallback_group_id_on_invalid_request" field.
 func (_c *GroupCreate) SetFallbackGroupIDOnInvalidRequest(v int64) *GroupCreate {
 	_c.mutation.SetFallbackGroupIDOnInvalidRequest(v)
@@ -984,6 +998,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultClaudeCodeOnly
 		_c.mutation.SetClaudeCodeOnly(v)
 	}
+	if _, ok := _c.mutation.AllowNonClaudeCode(); !ok {
+		v := group.DefaultAllowNonClaudeCode
+		_c.mutation.SetAllowNonClaudeCode(v)
+	}
 	if _, ok := _c.mutation.ModelRoutingEnabled(); !ok {
 		v := group.DefaultModelRoutingEnabled
 		_c.mutation.SetModelRoutingEnabled(v)
@@ -1157,6 +1175,9 @@ func (_c *GroupCreate) check() error {
 	}
 	if _, ok := _c.mutation.ClaudeCodeOnly(); !ok {
 		return &ValidationError{Name: "claude_code_only", err: errors.New(`ent: missing required field "Group.claude_code_only"`)}
+	}
+	if _, ok := _c.mutation.AllowNonClaudeCode(); !ok {
+		return &ValidationError{Name: "allow_non_claude_code", err: errors.New(`ent: missing required field "Group.allow_non_claude_code"`)}
 	}
 	if _, ok := _c.mutation.ModelRoutingEnabled(); !ok {
 		return &ValidationError{Name: "model_routing_enabled", err: errors.New(`ent: missing required field "Group.model_routing_enabled"`)}
@@ -1389,6 +1410,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.FallbackGroupID(); ok {
 		_spec.SetField(group.FieldFallbackGroupID, field.TypeInt64, value)
 		_node.FallbackGroupID = &value
+	}
+	if value, ok := _c.mutation.AllowNonClaudeCode(); ok {
+		_spec.SetField(group.FieldAllowNonClaudeCode, field.TypeBool, value)
+		_node.AllowNonClaudeCode = value
 	}
 	if value, ok := _c.mutation.FallbackGroupIDOnInvalidRequest(); ok {
 		_spec.SetField(group.FieldFallbackGroupIDOnInvalidRequest, field.TypeInt64, value)
@@ -2213,6 +2238,18 @@ func (u *GroupUpsert) AddFallbackGroupID(v int64) *GroupUpsert {
 // ClearFallbackGroupID clears the value of the "fallback_group_id" field.
 func (u *GroupUpsert) ClearFallbackGroupID() *GroupUpsert {
 	u.SetNull(group.FieldFallbackGroupID)
+	return u
+}
+
+// SetAllowNonClaudeCode sets the "allow_non_claude_code" field.
+func (u *GroupUpsert) SetAllowNonClaudeCode(v bool) *GroupUpsert {
+	u.Set(group.FieldAllowNonClaudeCode, v)
+	return u
+}
+
+// UpdateAllowNonClaudeCode sets the "allow_non_claude_code" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateAllowNonClaudeCode() *GroupUpsert {
+	u.SetExcluded(group.FieldAllowNonClaudeCode)
 	return u
 }
 
@@ -3224,6 +3261,20 @@ func (u *GroupUpsertOne) UpdateFallbackGroupID() *GroupUpsertOne {
 func (u *GroupUpsertOne) ClearFallbackGroupID() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearFallbackGroupID()
+	})
+}
+
+// SetAllowNonClaudeCode sets the "allow_non_claude_code" field.
+func (u *GroupUpsertOne) SetAllowNonClaudeCode(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetAllowNonClaudeCode(v)
+	})
+}
+
+// UpdateAllowNonClaudeCode sets the "allow_non_claude_code" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateAllowNonClaudeCode() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateAllowNonClaudeCode()
 	})
 }
 
@@ -4446,6 +4497,20 @@ func (u *GroupUpsertBulk) UpdateFallbackGroupID() *GroupUpsertBulk {
 func (u *GroupUpsertBulk) ClearFallbackGroupID() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearFallbackGroupID()
+	})
+}
+
+// SetAllowNonClaudeCode sets the "allow_non_claude_code" field.
+func (u *GroupUpsertBulk) SetAllowNonClaudeCode(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetAllowNonClaudeCode(v)
+	})
+}
+
+// UpdateAllowNonClaudeCode sets the "allow_non_claude_code" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateAllowNonClaudeCode() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateAllowNonClaudeCode()
 	})
 }
 

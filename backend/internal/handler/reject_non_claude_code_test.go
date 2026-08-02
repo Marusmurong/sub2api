@@ -103,7 +103,7 @@ func TestRejectMarksOpsBusinessLimited(t *testing.T) {
 	h := &GatewayHandler{cfg: &config.Config{}}
 	h.cfg.Gateway.RejectNonClaudeCodeClients = true
 
-	if !h.rejectNonClaudeCodeClient(c, service.PlatformAnthropic, nil) {
+	if !h.rejectNonClaudeCodeClient(c, claudeCodeOnlyAPIKey(), nil) {
 		t.Fatal("应当拦截 Go-http-client")
 	}
 	if w.Code != http.StatusForbidden {
@@ -125,11 +125,82 @@ func TestRejectDoesNotMarkWhenAllowed(t *testing.T) {
 	h := &GatewayHandler{cfg: &config.Config{}}
 	h.cfg.Gateway.RejectNonClaudeCodeClients = true
 
-	if h.rejectNonClaudeCodeClient(c, service.PlatformAnthropic, nil) {
+	if h.rejectNonClaudeCodeClient(c, claudeCodeOnlyAPIKey(), nil) {
 		t.Fatal("真 Claude Code 不应被拦")
 	}
 	if service.HasOpsClientBusinessLimited(c) {
 		t.Error("放行的请求不得留下策略拒绝标记")
+	}
+}
+
+// claudeCodeOnlyAPIKey 构造一个「未放行非 CC」的 api key，即默认的强制 Claude Code。
+func claudeCodeOnlyAPIKey() *service.APIKey {
+	return &service.APIKey{Group: &service.Group{
+		ID:       1,
+		Name:     "cc-only",
+		Platform: service.PlatformAnthropic,
+		// AllowNonClaudeCode 保持零值 false —— 默认即强制。
+	}}
+}
+
+// 拦不拦由分组的 allow_non_claude_code 决定，且默认（零值）为强制。
+//
+// 默认即强制是关键：新字段上线时全部分组都是零值，行为与既有一致，不会出现
+// 「开关一生效，15 个 anthropic 分组同时放行非 CC」的暴露。
+func TestRejectRespectsGroupSwitch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name       string
+		apiKey     *service.APIKey
+		wantReject bool
+	}{
+		{name: "分组默认（未放行）→ 拦", apiKey: claudeCodeOnlyAPIKey(), wantReject: true},
+		{
+			name: "分组显式放行非 CC → 放行",
+			apiKey: &service.APIKey{Group: &service.Group{
+				ID: 2, Name: "ToB", Platform: service.PlatformAnthropic, AllowNonClaudeCode: true,
+			}},
+			wantReject: false,
+		},
+		{
+			name: "分组开了 claude_code_only 但未放行 → 仍拦（两个字段互不影响）",
+			apiKey: &service.APIKey{Group: &service.Group{
+				ID: 3, Name: "legacy", Platform: service.PlatformAnthropic, ClaudeCodeOnly: true,
+			}},
+			wantReject: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			c.Request.Header.Set("User-Agent", "Go-http-client/2.0")
+
+			h := &GatewayHandler{cfg: &config.Config{}}
+			h.cfg.Gateway.RejectNonClaudeCodeClients = true
+
+			if got := h.rejectNonClaudeCodeClient(c, tt.apiKey, nil); got != tt.wantReject {
+				t.Fatalf("拦截 = %v，期望 %v", got, tt.wantReject)
+			}
+		})
+	}
+}
+
+// 全局开关关闭时，即使分组开了仅 CC 也不拦——它是整体停用本功能的总闸。
+func TestRejectGlobalSwitchActsAsMasterOff(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	c.Request.Header.Set("User-Agent", "Go-http-client/2.0")
+
+	h := &GatewayHandler{cfg: &config.Config{}}
+	h.cfg.Gateway.RejectNonClaudeCodeClients = false
+
+	if h.rejectNonClaudeCodeClient(c, claudeCodeOnlyAPIKey(), nil) {
+		t.Fatal("全局开关关闭时不应拦截")
 	}
 }
 

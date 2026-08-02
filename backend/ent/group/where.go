@@ -235,6 +235,11 @@ func FallbackGroupID(v int64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldFallbackGroupID, v))
 }
 
+// AllowNonClaudeCode applies equality check predicate on the "allow_non_claude_code" field. It's identical to AllowNonClaudeCodeEQ.
+func AllowNonClaudeCode(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldAllowNonClaudeCode, v))
+}
+
 // FallbackGroupIDOnInvalidRequest applies equality check predicate on the "fallback_group_id_on_invalid_request" field. It's identical to FallbackGroupIDOnInvalidRequestEQ.
 func FallbackGroupIDOnInvalidRequest(v int64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldFallbackGroupIDOnInvalidRequest, v))
@@ -1873,6 +1878,16 @@ func FallbackGroupIDIsNil() predicate.Group {
 // FallbackGroupIDNotNil applies the NotNil predicate on the "fallback_group_id" field.
 func FallbackGroupIDNotNil() predicate.Group {
 	return predicate.Group(sql.FieldNotNull(FieldFallbackGroupID))
+}
+
+// AllowNonClaudeCodeEQ applies the EQ predicate on the "allow_non_claude_code" field.
+func AllowNonClaudeCodeEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldAllowNonClaudeCode, v))
+}
+
+// AllowNonClaudeCodeNEQ applies the NEQ predicate on the "allow_non_claude_code" field.
+func AllowNonClaudeCodeNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldAllowNonClaudeCode, v))
 }
 
 // FallbackGroupIDOnInvalidRequestEQ applies the EQ predicate on the "fallback_group_id_on_invalid_request" field.

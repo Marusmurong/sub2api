@@ -708,6 +708,20 @@ func (_u *GroupUpdate) ClearFallbackGroupID() *GroupUpdate {
 	return _u
 }
 
+// SetAllowNonClaudeCode sets the "allow_non_claude_code" field.
+func (_u *GroupUpdate) SetAllowNonClaudeCode(v bool) *GroupUpdate {
+	_u.mutation.SetAllowNonClaudeCode(v)
+	return _u
+}
+
+// SetNillableAllowNonClaudeCode sets the "allow_non_claude_code" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableAllowNonClaudeCode(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetAllowNonClaudeCode(*v)
+	}
+	return _u
+}
+
 // SetFallbackGroupIDOnInvalidRequest sets the "fallback_group_id_on_invalid_request" field.
 func (_u *GroupUpdate) SetFallbackGroupIDOnInvalidRequest(v int64) *GroupUpdate {
 	_u.mutation.ResetFallbackGroupIDOnInvalidRequest()
@@ -1526,6 +1540,9 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.FallbackGroupIDCleared() {
 		_spec.ClearField(group.FieldFallbackGroupID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.AllowNonClaudeCode(); ok {
+		_spec.SetField(group.FieldAllowNonClaudeCode, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.FallbackGroupIDOnInvalidRequest(); ok {
 		_spec.SetField(group.FieldFallbackGroupIDOnInvalidRequest, field.TypeInt64, value)
@@ -2601,6 +2618,20 @@ func (_u *GroupUpdateOne) ClearFallbackGroupID() *GroupUpdateOne {
 	return _u
 }
 
+// SetAllowNonClaudeCode sets the "allow_non_claude_code" field.
+func (_u *GroupUpdateOne) SetAllowNonClaudeCode(v bool) *GroupUpdateOne {
+	_u.mutation.SetAllowNonClaudeCode(v)
+	return _u
+}
+
+// SetNillableAllowNonClaudeCode sets the "allow_non_claude_code" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableAllowNonClaudeCode(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetAllowNonClaudeCode(*v)
+	}
+	return _u
+}
+
 // SetFallbackGroupIDOnInvalidRequest sets the "fallback_group_id_on_invalid_request" field.
 func (_u *GroupUpdateOne) SetFallbackGroupIDOnInvalidRequest(v int64) *GroupUpdateOne {
 	_u.mutation.ResetFallbackGroupIDOnInvalidRequest()
@@ -3449,6 +3480,9 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if _u.mutation.FallbackGroupIDCleared() {
 		_spec.ClearField(group.FieldFallbackGroupID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.AllowNonClaudeCode(); ok {
+		_spec.SetField(group.FieldAllowNonClaudeCode, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.FallbackGroupIDOnInvalidRequest(); ok {
 		_spec.SetField(group.FieldFallbackGroupIDOnInvalidRequest, field.TypeInt64, value)

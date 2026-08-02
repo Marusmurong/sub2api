@@ -60,16 +60,42 @@ var officialClaudeCodeAltUAPattern = regexp.MustCompile(`(?i)^claude-code/\d+\.\
 //
 // 响应用 Anthropic 的错误信封 + 403，而不是伪造一个 200：客户端的 SDK 会把
 // message 原样呈现给使用者，让对方知道该换 Claude Code，而不是拿到一句看不懂的正文。
-func (h *GatewayHandler) rejectNonClaudeCodeClient(c *gin.Context, apiKeyGroupPlatform string, reqLog *zap.Logger) bool {
+func (h *GatewayHandler) rejectNonClaudeCodeClient(c *gin.Context, apiKey *service.APIKey, reqLog *zap.Logger) bool {
+	// 全局开关此处只是总闸：关掉就整体停用本功能，开着时**由分组决定拦不拦**。
+	// 它不再越过分组独自判断——此前那样做的后果是后台「Claude Code 客户端限制」
+	// 开成「允许所有客户端」也毫无效果（实测 ToB-03/ToB-04 两个分组 claude_code_only
+	// 为 false，非 CC 流量仍被全部拒绝），界面与实际行为长期不一致。
 	if h.cfg == nil || !h.cfg.Gateway.RejectNonClaudeCodeClients {
 		return false
 	}
 	if c == nil || c.Request == nil {
 		return false
 	}
+	// 分组显式放行时不拦。默认强制 Claude Code——AllowNonClaudeCode 默认 false，
+	// 所以未配置的分组维持既有行为，不会因为本开关上线而集体放行。
+	//
+	// 判据取分组而非账号：拦截发生在账号选择之前，那时还不知道会用哪个号；
+	// 而 key → group → 账号池本就是既有的归属模型，把策略挂在分组上，即可通过
+	// 把账号编入不同分组来决定哪批号承接非 CC 流量。
+	//
+	// 刻意不复用 claude_code_only：它默认 false 的含义是「不限制」，拿它当判据会让
+	// 全部未配置的分组在上线瞬间同时放行（本站 15 个 anthropic 分组，含两个大流量
+	// 下游）；它还被 responses / chat_completions 跨平台读取，改语义会波及其它平台。
+	if apiKey != nil && apiKey.Group != nil && apiKey.Group.AllowNonClaudeCode {
+		return false
+	}
+	// 分组信息缺失时按空值处理而不是解引用：apiKey / Group 为 nil 在鉴权异常路径上
+	// 是可能出现的，拦截器不该因此 panic。
+	var groupPlatform, groupName string
+	var groupID int64
+	if apiKey != nil && apiKey.Group != nil {
+		groupPlatform = apiKey.Group.Platform
+		groupName = apiKey.Group.Name
+		groupID = apiKey.Group.ID
+	}
 	// 只对 Anthropic 生效。平台在本函数之后才被主流程解析，所以这里自行解析一次——
 	// 拦截位置不能后移：后移就会先占用户并发槽与账号槽，失去"不消耗资源"的意义。
-	if !rejectAppliesToPlatform(resolveRequestPlatform(c, apiKeyGroupPlatform)) {
+	if !rejectAppliesToPlatform(resolveRequestPlatform(c, groupPlatform)) {
 		return false
 	}
 	ua := c.Request.UserAgent()
@@ -84,6 +110,9 @@ func (h *GatewayHandler) rejectNonClaudeCodeClient(c *gin.Context, apiKeyGroupPl
 	if reqLog != nil {
 		reqLog.Info("gateway.reject_non_claude_code_client",
 			zap.String("user_agent", ua),
+			// 带上分组：拦不拦现在由分组决定，排查时第一个要看的就是它。
+			zap.Int64("group_id", groupID),
+			zap.String("group_name", groupName),
 			zap.String("path", c.Request.URL.Path))
 	}
 	c.AbortWithStatusJSON(http.StatusForbidden, gin.H{

@@ -60,8 +60,11 @@ type Group struct {
 	WebSearchPricePerCall *float64
 
 	// Claude Code 客户端限制
-	ClaudeCodeOnly  bool
-	FallbackGroupID *int64
+	ClaudeCodeOnly bool
+	// 是否允许非 Claude Code 客户端。默认 false＝强制 Claude Code；
+	// 置 true 才解除本分组的强制，是 /v1/messages 非 CC 拦截的唯一分组级判据。
+	AllowNonClaudeCode bool
+	FallbackGroupID    *int64
 	// 无效请求兜底分组（仅 anthropic 平台使用）
 	FallbackGroupIDOnInvalidRequest *int64
 

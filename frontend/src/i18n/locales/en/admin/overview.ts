@@ -1077,6 +1077,12 @@ export default {
           detector: 'Detector'
         }
       },
+      allowNonClaudeCode: {
+        label: 'Allow non-Claude-Code clients',
+        hint: 'Off by default, meaning this group enforces Claude Code. When on, the group accepts any client (Go SDK, litellm, ...); those requests are forwarded to upstream subscription accounts under mimicry. Enable only if you accept that risk for this group\'s accounts.',
+        enabled: 'Non-Claude-Code allowed',
+        disabled: 'Claude Code enforced (default)',
+      },
       claudeCode: {
         title: 'Claude Code Client Restriction',
         tooltip: 'When enabled, this group only allows official Claude Code clients. Non-Claude Code requests will be rejected or fallback to the specified group.',
