@@ -74,6 +74,26 @@ func (h *GatewayHandler) interceptNonUpstreamRequest(
 		}
 	}
 
+	// 算术降智探针。放在问候拦截之前：它带标准 Claude Code 的 system 块、
+	// metadata 里也有 _session_ 段，下面那套测活判定按设计不会认它。
+	//
+	// 返回的是**算出来的正确答案**而非固定文案——对方拿它验我们的上游有没有降智，
+	// 回错等于自证模型坏掉。详见 probe_arithmetic.go。
+	if h.cfg.Gateway.InterceptProbeArithmetic {
+		if answer, matched := detectArithmeticProbe(body); matched {
+			reqLog.Info("gateway.intercept_probe_arithmetic",
+				zap.String("model", model),
+				zap.Bool("stream", stream),
+				zap.String("answer", answer))
+			if stream {
+				sendGreetingInterceptStream(c, model, answer)
+			} else {
+				sendGreetingInterceptResponse(c, model, answer)
+			}
+			return true
+		}
+	}
+
 	// max_tokens=1 若未被上面的预热分支接走（例如该开关关闭、或非 haiku 模型），
 	// 不能落到下面的问候拦截：客户端期待被 max_tokens 截断的响应，
 	// 返回完整问候会让 stop_reason 变成 end_turn，与预期不符。

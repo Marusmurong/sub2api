@@ -1003,6 +1003,16 @@ type GatewayConfig struct {
 	// 判定极窄：单条 user 消息 + 无 tools + 无实质 system + 内容为纯问候。
 	InterceptGreeting bool `mapstructure:"intercept_greeting"`
 
+	// 是否本地拦截算术降智探针（默认开启）。
+	//
+	// 下游中转用它验我们的上游模型有没有被降智：固定两道例题给格式，最后一道随机
+	// 算术题验算力。实测每天约 1900 次、占用账号并发槽 74 分钟，只为换回十几个 token。
+	//
+	// 命中时**计算并返回正确答案**，不是固定文案——回错等于自证降智，会被下游判定
+	// 为劣质供应商，代价远大于那点槽位。判定锚在固定开场白上，真人不会发那句话。
+	// 独立于 intercept_greeting 的开关，便于单独回退。
+	InterceptProbeArithmetic bool `mapstructure:"intercept_probe_arithmetic"`
+
 	// RejectNonClaudeCodeClients: 就地拒绝非 Claude Code 客户端（默认关闭）。
 	//
 	// 判定只看 User-Agent 是否为 claude-cli/*，不走 ClaudeCodeValidator 的全套逻辑
@@ -2329,6 +2339,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.failover_on_400", false)
 	viper.SetDefault("gateway.intercept_warmup", true)
 	viper.SetDefault("gateway.intercept_probe_tools", true)
+	viper.SetDefault("gateway.intercept_probe_arithmetic", true)
 	viper.SetDefault("gateway.intercept_greeting", true)
 	viper.SetDefault("gateway.reject_non_claude_code_clients", false)
 	// 重复 payload 拦截。阈值依据实测滥用形态：22 次/55 分钟 ≈ 12 次/30 分钟，
