@@ -416,6 +416,18 @@ func buildClientHelloSpecFromProfile(profile *Profile) *utls.ClientHelloSpec {
 			extensions = append(extensions, &utls.ALPNExtension{AlpnProtocols: alpnProtocols})
 		case 18: // signed_certificate_timestamp
 			extensions = append(extensions, &utls.SCTExtension{})
+		case 21: // padding
+			// 必须用 UtlsPaddingExtension 而不是落到 default 的 GenericExtension：
+			// padding 要真的填零把 ClientHello 补到目标长度，空扩展只是长度为 0 的
+			// 21 号扩展，字节形态不对。
+			//
+			// BoringPaddingStyle 复刻 BoringSSL 的规则（0xff < 未填充长度 < 0x200
+			// 时补到 0x200），所以它会在每个长度上做出与真实客户端相同的选择：
+			// 该出现时出现、不该出现时不出现，不需要我们预判具体请求的长度。
+			//
+			// 实测（2026-08-02，Claude Code 2.1.220，Bun 1.4.0 编译的原生二进制）：
+			// 真实 ClientHello 扩展序列尾部带 21，我们此前不发，JA3 因此必然不同。
+			extensions = append(extensions, &utls.UtlsPaddingExtension{GetPaddingLen: utls.BoringPaddingStyle})
 		case 23: // extended_master_secret
 			extensions = append(extensions, &utls.ExtendedMasterSecretExtension{})
 		case 35: // session_ticket
