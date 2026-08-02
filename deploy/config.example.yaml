@@ -228,6 +228,31 @@ gateway:
   # Enable Gemini upstream response header debug logs (default: false)
   # 是否开启 Gemini 上游响应头调试日志（默认 false）
   gemini_debug_response_headers: false
+  # Repeat-payload guard: reject scripts that resubmit one identical large payload
+  # over and over to sample many completions (observed: 22 requests in an hour with
+  # input_tokens frozen at 266715 while outputs varied 12702-19442).
+  # 重复 payload 拦截：拦下"反复提交同一份大请求采样"的脚本。
+  # 实测形态：一小时 22 次请求 input_tokens 恒为 266715，输出却在 12702-19442 之间各不相同。
+  repeat_payload_guard:
+    # off | observe | block. observe only logs and lets the request through —
+    # use it to calibrate thresholds on real traffic before enforcing.
+    # observe 只记日志放行，用于在真实流量上校准阈值；误伤时改回 observe/off 并重启即可。
+    mode: block
+    # Requests smaller than this are never checked. Mandatory floor: Claude Code's
+    # own probe requests repeat identically over a thousand times a day.
+    # 低于此体积完全不检测。这是硬性门槛：Claude Code 自己的探测请求一天会重复上千次。
+    min_body_bytes: 200000
+    # Fixed window; TTL is not refreshed on later hits, so it clears on its own.
+    # 固定窗口，TTL 不随后续命中续期，到期自动清零。
+    window_minutes: 30
+    # /v1/messages threshold — the (N+1)th identical payload in the window is rejected.
+    # /v1/messages 阈值 —— 窗口内第 N+1 次相同 payload 被拒。
+    messages_threshold: 8
+    # count_tokens threshold, deliberately looser: Claude Code legitimately repeats
+    # count_tokens for the same conversation state, and that path costs no quota.
+    # count_tokens 阈值，刻意放宽：Claude Code 会为同一份会话状态合法地重复调用它，
+    # 且该路径不消耗账号额度。
+    count_tokens_threshold: 40
   # Sora max request body size in bytes (0=use max_body_size)
   # Sora 请求体最大字节数（0=使用 max_body_size）
   sora_max_body_size: 268435456

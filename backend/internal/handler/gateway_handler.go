@@ -51,6 +51,7 @@ type GatewayHandler struct {
 	errorPassthroughService   *service.ErrorPassthroughService
 	contentModerationService  *service.ContentModerationService
 	securityAuditCoordinator  *securityaudit.Coordinator
+	repeatPayloadCache        service.RepeatPayloadCache
 	concurrencyHelper         *ConcurrencyHelper
 	userMsgQueueHelper        *UserMsgQueueHelper
 	maxAccountSwitches        int
@@ -224,6 +225,24 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	}
 
 	if h.interceptNonUpstreamRequest(c, body, reqModel, parsedReq.MaxTokens, reqStream, isClaudeCodeClient, reqLog) {
+		return
+	}
+
+	// 重复 payload 拦截：同一 key 反复提交同一份大 payload 时就地拒绝。
+	// 仍在用户并发槽与账号选择之前——命中后不发上游、不占账号槽、不消耗订阅额度。
+	//
+	// 位置有两个约束，缺一不可：
+	//
+	//  1. 必须在 setOpsRequestContext 之后，被拦的请求才能在访问日志里带上 model。
+	//     少这一个字段的代价是实打实的——排查那批 400 时正因为拒绝发生在 model 落库
+	//     之前，日志里只剩一条没有 model 的 access 记录，最后只能靠抓包定位分支。
+	//
+	//  2. 必须在 rejectNonClaudeCodeClient 与 interceptNonUpstreamRequest 之后。
+	//     上线首日实测：放在它们之前时，10 分钟内 3260 个非 CC 请求（本来就要被 403、
+	//     根本不会到上游）全被算进了计数器，Redis 里堆出 273 个指纹、220 个卡在计数 4。
+	//     计数器于是反映不了真实的上游消耗，还要为注定被拒的请求白算一遍 200KB 的哈希
+	//     和一次 Redis 往返。这里只统计"确实会打到上游"的流量。
+	if h.rejectRepeatPayload(c, parsedReq, service.RepeatPayloadScopeMessages, apiKey.ID, reqLog) {
 		return
 	}
 
@@ -2005,6 +2024,13 @@ func (h *GatewayHandler) CountTokens(c *gin.Context) {
 
 	setOpsRequestContext(c, parsedReq.Model, parsedReq.Stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(parsedReq.Stream, false)))
+
+	// 重复 payload 拦截。count_tokens 用独立命名空间与更宽的阈值：Claude Code 会为
+	// 同一份会话状态合法地重复调用它，与 messages 共用计数会误伤正常客户端。
+	// 同样放在 setOpsRequestContext 之后，保证访问日志带得上 model。
+	if h.rejectRepeatPayload(c, parsedReq, service.RepeatPayloadScopeCountTokens, apiKey.ID, reqLog) {
+		return
+	}
 
 	// 获取订阅信息（可能为nil）
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)

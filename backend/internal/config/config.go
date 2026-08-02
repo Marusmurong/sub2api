@@ -1012,6 +1012,9 @@ type GatewayConfig struct {
 	// 默认关闭：这是会拒掉大量既有流量的策略开关，必须由运维显式打开。
 	RejectNonClaudeCodeClients bool `mapstructure:"reject_non_claude_code_clients"`
 
+	// RepeatPayloadGuard: 重复 payload 拦截（反复提交同一份大请求刷号）。
+	RepeatPayloadGuard RepeatPayloadGuardConfig `mapstructure:"repeat_payload_guard"`
+
 	// 账户切换最大次数（遇到上游错误时切换到其他账户的次数上限）
 	MaxAccountSwitches int `mapstructure:"max_account_switches"`
 	// Gemini 账户切换最大次数（Gemini 平台单独配置，因 API 限制更严格）
@@ -1037,6 +1040,89 @@ type GatewayConfig struct {
 	// UserMessageQueue: 用户消息串行队列配置
 	// 对 role:"user" 的真实用户消息实施账号级串行化 + RPM 自适应延迟
 	UserMessageQueue UserMessageQueueConfig `mapstructure:"user_message_queue"`
+}
+
+// RepeatPayloadGuardConfig 控制「同一 key 反复提交同一份大 payload」的拦截。
+//
+// 背景（2026-08-01）：账号 claude-e9b4a11a 在一小时内收到 22 次连续请求，
+// input_tokens 恒为 266715（一个 token 都不差），output_tokens 却在 12702–19442
+// 之间各不相同。真实对话每轮在尾部追加内容、input 必然单调增长，输入冻结而输出各异
+// 只能是同一份固定 payload 反复提交采样。该账号未缓存输入占比 87.8%，而全站其它账号
+// 都在 0.0%–2.1%；52 次请求吃掉 5 小时窗口内 22.2% 的金额。
+//
+// api_keys.rate_limit_5h 一类的额度封顶只能限制花销，拦不住这个动作本身——
+// 对方完全可以在额度内继续刷，烧的是订阅账号的真实窗口额度与封号风险。
+type RepeatPayloadGuardConfig struct {
+	// Mode: off | observe | block。
+	// observe 只记日志放行，用于在真实流量上校准阈值；block 命中即返回 429。
+	// 误伤时改这一项并重启即可回退，无需重新编译。
+	Mode string `mapstructure:"mode"`
+
+	// MinBodyBytes: 低于此体积的请求完全不检测。
+	//
+	// 这个门槛是硬性前提，不设会立刻误杀正常流量：实测 api_key 84 的 haiku 探测请求
+	// （input 43 token / output 固定 10）24 小时重复 1353 次；大量前缀全部命中缓存的
+	// 正常对话轮次 input_tokens 只有 2，单个 key 重复上千次。这些请求本来就该重复，
+	// 也不费钱。
+	MinBodyBytes int `mapstructure:"min_body_bytes"`
+
+	// WindowMinutes: 计数窗口。固定窗口，TTL 不随后续命中续期，到期自动恢复。
+	WindowMinutes int `mapstructure:"window_minutes"`
+
+	// MessagesThreshold: /v1/messages 上同一指纹在窗口内允许出现的次数，超过即命中。
+	MessagesThreshold int `mapstructure:"messages_threshold"`
+
+	// CountTokensThreshold: count_tokens 的阈值，显著放宽。
+	//
+	// Claude Code 会为同一份会话状态**合法地**重复调用 count_tokens，body 同样很大，
+	// 且该路径不消耗账号额度。与 messages 共用阈值会误伤。
+	CountTokensThreshold int `mapstructure:"count_tokens_threshold"`
+}
+
+// 重复 payload 拦截的模式取值。
+const (
+	RepeatPayloadGuardModeOff     = "off"
+	RepeatPayloadGuardModeObserve = "observe"
+	RepeatPayloadGuardModeBlock   = "block"
+)
+
+// NormalizedMode 返回去空白、转小写后的模式；无法识别的取值一律按 off 处理。
+//
+// 拼错的模式按关闭而不是按拦截处理：配置笔误不应该在半夜开始拒绝付费流量。
+func (c RepeatPayloadGuardConfig) NormalizedMode() string {
+	switch strings.ToLower(strings.TrimSpace(c.Mode)) {
+	case RepeatPayloadGuardModeObserve:
+		return RepeatPayloadGuardModeObserve
+	case RepeatPayloadGuardModeBlock:
+		return RepeatPayloadGuardModeBlock
+	default:
+		return RepeatPayloadGuardModeOff
+	}
+}
+
+func (c RepeatPayloadGuardConfig) validate() error {
+	switch strings.ToLower(strings.TrimSpace(c.Mode)) {
+	case RepeatPayloadGuardModeOff, RepeatPayloadGuardModeObserve, RepeatPayloadGuardModeBlock:
+	default:
+		return fmt.Errorf("gateway.repeat_payload_guard.mode must be one of off/observe/block, got %q", c.Mode)
+	}
+	if c.NormalizedMode() == RepeatPayloadGuardModeOff {
+		// 关闭时不校验其余参数，避免历史配置因为没填这些字段而启动失败。
+		return nil
+	}
+	if c.MinBodyBytes <= 0 {
+		return fmt.Errorf("gateway.repeat_payload_guard.min_body_bytes must be positive")
+	}
+	if c.WindowMinutes <= 0 {
+		return fmt.Errorf("gateway.repeat_payload_guard.window_minutes must be positive")
+	}
+	if c.MessagesThreshold <= 0 {
+		return fmt.Errorf("gateway.repeat_payload_guard.messages_threshold must be positive")
+	}
+	if c.CountTokensThreshold <= 0 {
+		return fmt.Errorf("gateway.repeat_payload_guard.count_tokens_threshold must be positive")
+	}
+	return nil
 }
 
 type GatewayLiveConfig struct {
@@ -2245,6 +2331,14 @@ func setDefaults() {
 	viper.SetDefault("gateway.intercept_probe_tools", true)
 	viper.SetDefault("gateway.intercept_greeting", true)
 	viper.SetDefault("gateway.reject_non_claude_code_clients", false)
+	// 重复 payload 拦截。阈值依据实测滥用形态：22 次/55 分钟 ≈ 12 次/30 分钟，
+	// 阈值 8 可在第 9 次截断；正常客户端在 30 分钟内重复提交 8 次完全相同的
+	// 200KB+ body 属于异常。min_body_bytes 200000 约合 5 万 token。
+	viper.SetDefault("gateway.repeat_payload_guard.mode", RepeatPayloadGuardModeBlock)
+	viper.SetDefault("gateway.repeat_payload_guard.min_body_bytes", 200000)
+	viper.SetDefault("gateway.repeat_payload_guard.window_minutes", 30)
+	viper.SetDefault("gateway.repeat_payload_guard.messages_threshold", 8)
+	viper.SetDefault("gateway.repeat_payload_guard.count_tokens_threshold", 40)
 	viper.SetDefault("gateway.max_account_switches", 10)
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
 	viper.SetDefault("gateway.force_codex_cli", false)
@@ -3123,6 +3217,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.UpstreamResponseReadMaxBytes <= 0 {
 		return fmt.Errorf("gateway.upstream_response_read_max_bytes must be positive")
+	}
+	if err := c.Gateway.RepeatPayloadGuard.validate(); err != nil {
+		return err
 	}
 	if c.Gateway.ProxyProbeResponseReadMaxBytes <= 0 {
 		return fmt.Errorf("gateway.proxy_probe_response_read_max_bytes must be positive")
