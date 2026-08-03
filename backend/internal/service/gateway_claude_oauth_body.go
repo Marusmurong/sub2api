@@ -256,11 +256,32 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 		}
 	}
 
-	// 确保 tools 字段存在（即使为空数组）
+	// 客户端没带 tools 时补上真实 Claude Code 的核心工具集。
+	//
+	// 此前补的是空数组。真实 CC 每个请求都带完整工具集，`tools: []` 是它从不产生的
+	// 形态——字段在、内容空，等于明确宣告「我不是一个编码 agent」，而上游那条判定
+	// 恰恰叫 "Third-party apps"。2026-08-03 实测：账号已用上正确 TLS 指纹、HTTP 身份
+	// 也早已对齐，非 CC 流量仍被判三方，请求体上唯一没做的维度就是 tools。
+	//
+	// 同时置 tool_choice=none：我们替客户端带了工具，但对方并不实现这些工具。不加这
+	// 一项，模型遇到合适的请求会真的返回 tool_use 块，下游客户端解析不了、直接故障。
+	// 只在「客户端自己没带 tools」时才这么做——带了 tools 的客户端是要用工具的，
+	// 给它塞 none 会把它的正常功能打掉。
 	if !gjson.GetBytes(out, "tools").Exists() {
-		if next, ok := setJSONRawBytes(out, "tools", []byte("[]")); ok {
-			out = next
-			modified = true
+		if coreTools := ClaudeCodeCoreToolsRaw(); len(coreTools) > 0 {
+			if next, ok := setJSONRawBytes(out, "tools", coreTools); ok {
+				out = next
+				modified = true
+				// 无条件覆盖 tool_choice，不保留客户端原值。
+				//
+				// 客户端没带 tools 却带了 tool_choice（例如 auto），那个值本来就指向一个
+				// 不存在的工具集；旧逻辑因此直接删掉它。现在我们注入了工具，若还保留
+				// auto，模型就会调用这些工具并返回 tool_use——而下游根本没有实现它们，
+				// 拿到就是解析失败。注入工具的前提是保证它们不会被调用。
+				if next, ok := setJSONRawBytes(out, "tool_choice", []byte(`{"type":"none"}`)); ok {
+					out = next
+				}
+			}
 		}
 	}
 

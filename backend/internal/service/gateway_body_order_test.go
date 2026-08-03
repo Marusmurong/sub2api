@@ -121,9 +121,14 @@ func TestNormalizeClaudeOAuthRequestBody_PreservesTopLevelFieldOrder(t *testing.
 	require.Equal(t, claude.NormalizeModelID("claude-3-5-sonnet-latest"), modelID)
 	assertJSONTokenOrder(t, resultStr, `"alpha"`, `"model"`, `"temperature"`, `"system"`, `"messages"`, `"omega"`, `"tools"`, `"metadata"`, `"max_tokens"`)
 	require.Contains(t, resultStr, `"temperature":0.2`)
-	require.NotContains(t, resultStr, `"tool_choice"`)
 	require.Contains(t, resultStr, `"system":"`+claudeCodeSystemPrompt+`"`)
-	require.Contains(t, resultStr, `"tools":[]`)
+	// tools 不再补空数组，而是注入真实 Claude Code 的核心工具集：`tools: []` 是真实
+	// 客户端从不产生的形态，等于自证不是编码 agent。见 claudecode_core_tools.go。
+	require.NotContains(t, resultStr, `"tools":[]`)
+	require.Contains(t, resultStr, `"name":"Bash"`)
+	// 随之必须把 tool_choice 覆盖成 none：客户端原来的 auto 指向的是一个不存在的工具集，
+	// 注入之后若保留，模型会调用这些工具并返回 tool_use，而下游并未实现它们。
+	require.Contains(t, resultStr, `"tool_choice":{"type":"none"}`)
 	require.Contains(t, resultStr, `"metadata":{"user_id":"user-1"}`)
 	require.Contains(t, resultStr, `"max_tokens":128000`)
 }
