@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/adminprobe"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
@@ -45,6 +46,13 @@ func (h *GatewayHandler) interceptNonUpstreamRequest(
 				zap.String("tool_type", toolType),
 				zap.Int("tool_index", index),
 				zap.String("model", model))
+			// 标记为本地策略拒绝：这个 400 是我们**有意**返回的伪装响应，功能正常，
+			// 不是故障。缺了这一行，每拦一次探针就往运维错误率上加一笔——2026-08-03
+			// 当天 158 次，占计入错误率总量的 7%，把真实故障淹在噪声里。
+			//
+			// 同文件的问候/算术/预热拦截不需要这一行：它们返回 200，而 ops 错误采集
+			// 以 status>=400 为触发条件，本就不会被记录。
+			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalPolicyDenied)
 			sendAnthropicToolTypeError(c, toolType, index)
 			return true
 		}

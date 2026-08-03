@@ -9,6 +9,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/adminprobe"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )
@@ -75,6 +76,13 @@ func TestInterceptNonUpstreamRequest_ProbeTool(t *testing.T) {
 	}
 	if !strings.HasPrefix(resp.RequestID, "req_") {
 		t.Errorf("request_id = %q, want req_ prefix", resp.RequestID)
+	}
+
+	// 必须标记为本地策略拒绝：这个 400 是我们有意返回的伪装响应，功能正常。
+	// 不标记的话，运维错误率会把每一次成功的反探测都记成一次故障——2026-08-03
+	// 当天 158 次，占当日计入错误率总量的 10%，真实故障被噪声淹没。
+	if !service.HasOpsClientBusinessLimited(c) {
+		t.Error("探针拦截未标记 business_limited —— 会污染运维错误率")
 	}
 }
 
