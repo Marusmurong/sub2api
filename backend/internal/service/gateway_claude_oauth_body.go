@@ -239,6 +239,17 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 	out := body
 	modified := false
 
+	// OpenAI 方言归一化必须排在最前：提升上来的 system 还要经过下面的 sanitize，
+	// tool_choice 的形态也要在后续判断之前先修正。见 gateway_openai_dialect_normalize.go。
+	if next, changed := hoistLeadingSystemMessage(out); changed {
+		out = next
+		modified = true
+	}
+	if next, changed := normalizeToolChoiceShape(out); changed {
+		out = next
+		modified = true
+	}
+
 	if next, changed := normalizeClaudeOAuthSystemBody(out, opts); changed {
 		out = next
 		modified = true
@@ -316,13 +327,21 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 			}
 		}
 
-		// output_config：实测两个入口都发 {"effort":"high"}，我们此前完全不发。
-		if !gjson.GetBytes(out, "output_config").Exists() {
-			if next, ok := setJSONRawBytes(out, "output_config", []byte(claudeCodeDefaultOutputConfig)); ok {
-				out = next
-				modified = true
-			}
-		}
+		// output_config 刻意不补，尽管实测真实 Claude Code 两个入口都发 {"effort":"high"}。
+		//
+		// 2026-08-03 短暂补过，当天就在生产上打出新的 400：
+		//
+		//	This model does not support the effort parameter.
+		//
+		// effort 不是所有模型都接受，而这里拿不到「当前模型是否支持」的可靠依据——
+		// 按模型名维护白名单意味着每出一个新模型就要跟一次，跟漏了就是线上 400。
+		//
+		// 更关键的是收益侧不成立：补这个字段的唯一目的是让非 CC 请求更像 CC，而当天
+		// 的数据显示 Third-party 判定率在补与不补之间没有可归因的差别（另见
+		// mimic_tool_name_rewrite 的注释——同一天里第三次「修掉真实缺陷但判定率不动」）。
+		// 一个确定会制造 400、收益又未被证实的注入，不该留在链路上。
+		//
+		// 客户端自己传的 output_config 保持透传：那是调用方的显式选择。
 	}
 
 	// context_management：thinking.type 为 enabled/adaptive 时，真实 CLI 会自动

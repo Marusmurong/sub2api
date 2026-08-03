@@ -44,8 +44,11 @@ func TestNormalizeStillFillsMessagesOnlyFieldsByDefault(t *testing.T) {
 	if gjson.GetBytes(out, "temperature").Exists() {
 		t.Error("不应补 temperature —— 真实 Claude Code 不发该字段")
 	}
-	if got := gjson.GetBytes(out, "output_config.effort").String(); got != "high" {
-		t.Errorf("output_config.effort = %q, want high", got)
+	// output_config 同理不补，但原因不同：它不是「真 CC 不发」，而是「补上去会 400」。
+	// effort 并非所有模型都接受，2026-08-03 生产上补了当天就打出
+	// "This model does not support the effort parameter."
+	if gjson.GetBytes(out, "output_config").Exists() {
+		t.Error("不应补 output_config —— 不支持 effort 的模型会直接 400")
 	}
 }
 

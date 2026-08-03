@@ -67,7 +67,7 @@ func TestMimicryShape_TopLevelFieldsMatchRealClaudeCode(t *testing.T) {
 	// 这里不含 system —— 它的三块结构（计费头 / 身份块 / agent 指令）由
 	// rewriteSystemForNonClaudeCode* 在更外层构造，不是本函数的职责；断言它会让这条
 	// 测试测错对象。
-	for _, must := range []string{"max_tokens", "output_config", "tools", "metadata"} {
+	for _, must := range []string{"max_tokens", "tools", "metadata"} {
 		if _, ok := got[must]; !ok {
 			t.Errorf("缺少真实 Claude Code 必发的顶层字段: %s", must)
 		}
@@ -94,8 +94,11 @@ func TestMimicryShape_DefaultsMatchMeasured(t *testing.T) {
 	if got := gjson.GetBytes(out, "max_tokens").Int(); got != claudeCodeDefaultMaxTokens {
 		t.Errorf("max_tokens = %d，实测真实值为 %d", got, claudeCodeDefaultMaxTokens)
 	}
-	if got := gjson.GetBytes(out, "output_config.effort").String(); got != "high" {
-		t.Errorf("output_config.effort = %q，实测真实值为 high", got)
+	// output_config 实测真实 CC 恒发 {"effort":"high"}，但我们不补：真实 CC 只对自己
+	// 支持的模型发，而我们面对下游任意模型，补上去换来的是上游 400
+	// "This model does not support the effort parameter."（2026-08-03 生产实测）。
+	if gjson.GetBytes(out, "output_config").Exists() {
+		t.Error("注入了 output_config —— 它会在不支持 effort 的模型上直接打出 400")
 	}
 	// tools 保持透传，客户端没带就是空数组。曾在这里注入过 8 个核心工具，2026-08-03 的
 	// 生产抓包证伪了它的前提（真 CC 的结构化输出调用发的就是空数组），而注入的真名还会

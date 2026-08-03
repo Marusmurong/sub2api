@@ -15,10 +15,12 @@ package service
 // 2026-08-03 的生产抓包（15 条转发，其中 5 条为真 CC 主对话）复核了同一组结论。
 //
 // 据此可以确定三件事：max_tokens 是 64000（不是此前写的 128000）；output_config 恒发
-// {"effort":"high"}（我们此前完全不发）；没有 temperature / top_p / top_k。
+// {"effort":"high"}；没有 temperature / top_p / top_k。
 //
-// 只在客户端自己没给的时候补这两个值——伪装是补齐缺失，不是改写调用方的意图。
-const (
-	claudeCodeDefaultMaxTokens    = 64000
-	claudeCodeDefaultOutputConfig = `{"effort":"high"}`
-)
+// 但这里只保留 max_tokens。output_config 曾按同样的理由补过，当天就在生产上打出
+// "This model does not support the effort parameter." —— 实测「真实 CC 会发」不等于
+// 「我们补上去是安全的」：真实 CC 只对自己支持的模型发，而我们面对的是下游任意模型。
+// 详见 gateway_claude_oauth_body.go 中该处的注释。
+//
+// 只在客户端自己没给的时候补——伪装是补齐缺失，不是改写调用方的意图。
+const claudeCodeDefaultMaxTokens = 64000

@@ -119,7 +119,7 @@ func TestNormalizeClaudeOAuthRequestBody_PreservesTopLevelFieldOrder(t *testing.
 	resultStr := string(result)
 
 	require.Equal(t, claude.NormalizeModelID("claude-3-5-sonnet-latest"), modelID)
-	assertJSONTokenOrder(t, resultStr, `"alpha"`, `"model"`, `"temperature"`, `"system"`, `"messages"`, `"omega"`, `"tools"`, `"metadata"`, `"max_tokens"`, `"output_config"`)
+	assertJSONTokenOrder(t, resultStr, `"alpha"`, `"model"`, `"temperature"`, `"system"`, `"messages"`, `"omega"`, `"tools"`, `"metadata"`, `"max_tokens"`)
 	require.Contains(t, resultStr, `"temperature":0.2`)
 	require.Contains(t, resultStr, `"system":"`+claudeCodeSystemPrompt+`"`)
 	// tools 只补空数组，不注入工具集：注入的真名会被后续的工具名混淆器改成
@@ -133,7 +133,9 @@ func TestNormalizeClaudeOAuthRequestBody_PreservesTopLevelFieldOrder(t *testing.
 	require.Contains(t, resultStr, `"metadata":{"user_id":"user-1"}`)
 	require.Contains(t, resultStr, `"max_tokens":64000`)
 	require.NotContains(t, resultStr, `"temperature":1`)
-	require.Contains(t, resultStr, `"output_config":{"effort":"high"}`)
+	// output_config 不注入：effort 并非所有模型都接受，补上去会直接换来上游 400
+	// "This model does not support the effort parameter."（2026-08-03 生产实测）。
+	require.NotContains(t, resultStr, `"output_config"`)
 }
 
 func TestInjectClaudeCodePrompt_PreservesFieldOrder(t *testing.T) {
