@@ -119,18 +119,21 @@ func TestNormalizeClaudeOAuthRequestBody_PreservesTopLevelFieldOrder(t *testing.
 	resultStr := string(result)
 
 	require.Equal(t, claude.NormalizeModelID("claude-3-5-sonnet-latest"), modelID)
-	assertJSONTokenOrder(t, resultStr, `"alpha"`, `"model"`, `"temperature"`, `"system"`, `"messages"`, `"omega"`, `"tools"`, `"metadata"`, `"max_tokens"`)
+	assertJSONTokenOrder(t, resultStr, `"alpha"`, `"model"`, `"temperature"`, `"system"`, `"messages"`, `"omega"`, `"tools"`, `"metadata"`, `"max_tokens"`, `"output_config"`)
 	require.Contains(t, resultStr, `"temperature":0.2`)
 	require.Contains(t, resultStr, `"system":"`+claudeCodeSystemPrompt+`"`)
-	// tools 不再补空数组，而是注入真实 Claude Code 的核心工具集：`tools: []` 是真实
-	// 客户端从不产生的形态，等于自证不是编码 agent。见 claudecode_core_tools.go。
-	require.NotContains(t, resultStr, `"tools":[]`)
-	require.Contains(t, resultStr, `"name":"Bash"`)
-	// 随之必须把 tool_choice 覆盖成 none：客户端原来的 auto 指向的是一个不存在的工具集，
-	// 注入之后若保留，模型会调用这些工具并返回 tool_use，而下游并未实现它们。
-	require.Contains(t, resultStr, `"tool_choice":{"type":"none"}`)
+	// tools 只补空数组，不注入工具集：注入的真名会被后续的工具名混淆器改成
+	// invoke_Bas01 这类假名，反而成了确凿的三方标记。见 gateway_claude_oauth_body.go
+	// 该处的长注释。
+	require.Contains(t, resultStr, `"tools":[]`)
+	require.NotContains(t, resultStr, `"name":"Bash"`)
+	// tool_choice 是真实 Claude Code 从不发送的字段（2026-08-03 抓包，5 条真 CC 主对话
+	// 样本全部缺席），因此这里既不注入、也不保留客户端指向空工具集的原值。
+	require.NotContains(t, resultStr, `"tool_choice"`)
 	require.Contains(t, resultStr, `"metadata":{"user_id":"user-1"}`)
-	require.Contains(t, resultStr, `"max_tokens":128000`)
+	require.Contains(t, resultStr, `"max_tokens":64000`)
+	require.NotContains(t, resultStr, `"temperature":1`)
+	require.Contains(t, resultStr, `"output_config":{"effort":"high"}`)
 }
 
 func TestInjectClaudeCodePrompt_PreservesFieldOrder(t *testing.T) {

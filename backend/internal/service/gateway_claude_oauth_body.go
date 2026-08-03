@@ -256,32 +256,29 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 		}
 	}
 
-	// 客户端没带 tools 时补上真实 Claude Code 的核心工具集。
+	// 确保 tools 字段存在（即使为空数组）。
 	//
-	// 此前补的是空数组。真实 CC 每个请求都带完整工具集，`tools: []` 是它从不产生的
-	// 形态——字段在、内容空，等于明确宣告「我不是一个编码 agent」，而上游那条判定
-	// 恰恰叫 "Third-party apps"。2026-08-03 实测：账号已用上正确 TLS 指纹、HTTP 身份
-	// 也早已对齐，非 CC 流量仍被判三方，请求体上唯一没做的维度就是 tools。
+	// 这里**不注入**工具集。曾短暂注入过真实 Claude Code 的 8 个核心工具，理由是
+	// 「`tools: []` 是真 CC 从不产生的形态」——2026-08-03 的生产抓包直接证伪了这句：
+	// 同一批样本里，一条确凿的真 CC 请求（结构化输出调用）发的就是空数组。前提不成立，
+	// 注入也就失去依据，而它实际带来三处新破绽：
 	//
-	// 同时置 tool_choice=none：我们替客户端带了工具，但对方并不实现这些工具。不加这
-	// 一项，模型遇到合适的请求会真的返回 tool_use 块，下游客户端解析不了、直接故障。
-	// 只在「客户端自己没带 tools」时才这么做——带了 tools 的客户端是要用工具的，
-	// 给它塞 none 会把它的正常功能打掉。
+	//  1. 注入的真名会被下游的工具名混淆器改掉。混淆在 gateway_forward.go 的
+	//     `if !isClaudeCode` 分支里、排在本函数之后，且阈值是 tools > 5，而核心工具集
+	//     正好 8 个——必然触发。发出去的是一个自称 claude-cli/2.1.220、计费头写着
+	//     cc_version=2.1.220 的请求，工具却叫 invoke_Bas01 / query_Rea03。上游不需要
+	//     任何推断，字符串一比就知道不是 Claude Code。
+	//  2. 本函数不区分 isClaudeCode，于是真 CC 那些本就不带 tools 的辅助调用
+	//     （生成标题一类，max_tokens 极小、thinking 关闭）也被塞进 8 个工具，
+	//     把原本干净的流量弄脏了。
+	//  3. tool_choice 是真 CC 从不发送的字段（同批 5 条真 CC 主对话样本全部缺席），
+	//     注入它本身就是一个新标记。
+	//
+	// 因此保持透传：客户端带什么就是什么，只在字段缺失时补空数组维持形态稳定。
 	if !gjson.GetBytes(out, "tools").Exists() {
-		if coreTools := ClaudeCodeCoreToolsRaw(); len(coreTools) > 0 {
-			if next, ok := setJSONRawBytes(out, "tools", coreTools); ok {
-				out = next
-				modified = true
-				// 无条件覆盖 tool_choice，不保留客户端原值。
-				//
-				// 客户端没带 tools 却带了 tool_choice（例如 auto），那个值本来就指向一个
-				// 不存在的工具集；旧逻辑因此直接删掉它。现在我们注入了工具，若还保留
-				// auto，模型就会调用这些工具并返回 tool_use——而下游根本没有实现它们，
-				// 拿到就是解析失败。注入工具的前提是保证它们不会被调用。
-				if next, ok := setJSONRawBytes(out, "tool_choice", []byte(`{"type":"none"}`)); ok {
-					out = next
-				}
-			}
+		if next, ok := setJSONRawBytes(out, "tools", []byte("[]")); ok {
+			out = next
+			modified = true
 		}
 	}
 
@@ -292,22 +289,36 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 		}
 	}
 
-	// temperature / max_tokens 只在 /v1/messages 上补齐；count_tokens 不接受它们，
+	// max_tokens / output_config 只在 /v1/messages 上补齐；count_tokens 不接受它们，
 	// 见 claudeOAuthNormalizeOptions.skipMessagesOnlyFields。
 	if !opts.skipMessagesOnlyFields {
-		// temperature：真实 Claude Code CLI 总是发送 temperature（默认 1，客户端可覆盖）。
-		// 之前的实现直接 delete 会导致 payload 缺字段，与真实 CLI 字节级不一致。
-		// 策略：客户端传了什么就透传；没传则补默认 1。
-		if !gjson.GetBytes(out, "temperature").Exists() {
-			if next, ok := setJSONValueBytes(out, "temperature", 1); ok {
+		// temperature 刻意不补。
+		//
+		// 此处原有的注释断言「真实 Claude Code CLI 总是发送 temperature（默认 1）」，
+		// 并据此把更早的「删除」改成了「补齐」。2026-08-03 实测证明那条断言是错的：
+		// 抓取真实 2.1.220 发出的请求，cc_entrypoint=cli（交互）与 sdk-cli（-p）
+		// 两个入口的顶层字段都是
+		//
+		//	context_management max_tokens messages metadata model
+		//	output_config stream system thinking tools
+		//
+		// 没有 temperature，也没有 top_p / top_k。补一个真实客户端从不发送的字段，
+		// 等于给每个请求盖一个我们自己的戳。
+		//
+		// 客户端自己传的 temperature 保持透传：那是调用方的显式选择，删掉会改变它的
+		// 采样行为；而它只出现在少数请求上，不像我们此前那样 100% 覆盖。
+
+		// max_tokens：实测两个入口都是 64000，此前写的 128000 没有依据。
+		if !gjson.GetBytes(out, "max_tokens").Exists() {
+			if next, ok := setJSONValueBytes(out, "max_tokens", claudeCodeDefaultMaxTokens); ok {
 				out = next
 				modified = true
 			}
 		}
 
-		// max_tokens：真实 CLI 的默认值是 128000。缺失时补齐以对齐指纹。
-		if !gjson.GetBytes(out, "max_tokens").Exists() {
-			if next, ok := setJSONValueBytes(out, "max_tokens", 128000); ok {
+		// output_config：实测两个入口都发 {"effort":"high"}，我们此前完全不发。
+		if !gjson.GetBytes(out, "output_config").Exists() {
+			if next, ok := setJSONRawBytes(out, "output_config", []byte(claudeCodeDefaultOutputConfig)); ok {
 				out = next
 				modified = true
 			}

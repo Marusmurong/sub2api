@@ -36,11 +36,16 @@ func TestNormalizeStillFillsMessagesOnlyFieldsByDefault(t *testing.T) {
 
 	out, _ := normalizeClaudeOAuthRequestBody(body, "claude-opus-5", claudeOAuthNormalizeOptions{})
 
-	if got := gjson.GetBytes(out, "max_tokens").Int(); got != 128000 {
-		t.Errorf("max_tokens = %d, want 128000", got)
+	if got := gjson.GetBytes(out, "max_tokens").Int(); got != claudeCodeDefaultMaxTokens {
+		t.Errorf("max_tokens = %d, want %d", got, claudeCodeDefaultMaxTokens)
 	}
-	if got := gjson.GetBytes(out, "temperature").Int(); got != 1 {
-		t.Errorf("temperature = %d, want 1", got)
+	// temperature 不再补齐：实测真实 2.1.220 的两个入口都不发这个字段，
+	// 补一个真实客户端从不发送的字段等于给每个请求盖我们自己的戳。
+	if gjson.GetBytes(out, "temperature").Exists() {
+		t.Error("不应补 temperature —— 真实 Claude Code 不发该字段")
+	}
+	if got := gjson.GetBytes(out, "output_config.effort").String(); got != "high" {
+		t.Errorf("output_config.effort = %q, want high", got)
 	}
 }
 

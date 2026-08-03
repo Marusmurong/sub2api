@@ -605,8 +605,9 @@ func TestBuildCountTokensRequest_OAuthMimicHaiku_PreservesContextManagementEndTo
 }
 
 func TestBuildCountTokensRequest_OAuthMimic_DropsInjectedMaxTokens(t *testing.T) {
-	// OAuth mimicry injects max_tokens=128000 for normal messages requests. It is
-	// invalid for Anthropic's count_tokens endpoint and must be stripped on wire.
+	// OAuth mimicry injects the Claude Code default max_tokens for normal messages
+	// requests. It is invalid for Anthropic's count_tokens endpoint and must be
+	// stripped on wire.
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -620,7 +621,7 @@ func TestBuildCountTokensRequest_OAuthMimic_DropsInjectedMaxTokens(t *testing.T)
 		[]byte(`{"model":"claude-sonnet-4-5","messages":[]}`),
 		"claude-sonnet-4-5", claudeOAuthNormalizeOptions{},
 	)
-	require.Equal(t, int64(128000), gjson.GetBytes(normalized, "max_tokens").Int(),
+	require.Equal(t, int64(claudeCodeDefaultMaxTokens), gjson.GetBytes(normalized, "max_tokens").Int(),
 		"precondition: OAuth mimicry injects the Claude Code default")
 
 	svc := &GatewayService{cfg: &config.Config{}}
