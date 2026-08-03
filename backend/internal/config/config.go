@@ -1022,6 +1022,29 @@ type GatewayConfig struct {
 	// 默认关闭：这是会拒掉大量既有流量的策略开关，必须由运维显式打开。
 	RejectNonClaudeCodeClients bool `mapstructure:"reject_non_claude_code_clients"`
 
+	// MimicToolNameRewrite: 伪装路径上是否仍做工具名混淆（默认关闭）。
+	//
+	// 混淆把客户端自带的工具名改写成 search_exe00 / invoke_Bas01 这类带序号的合成名，
+	// 原意是隐藏第三方工具身份。但它与「统一伪装成 Claude Code」的目标直接冲突：
+	// 发出去的是一个自称 claude-cli/2.1.220、计费头写着 cc_version=2.1.220 的请求，
+	// 工具却叫 search_exe00——没有任何 Claude Code 版本产生这种命名，上游不需要推断，
+	// 字符串一比就能分类。而那条判定恰恰叫 "Third-party apps"。
+	//
+	// 2026-08-03 生产数据：3 小时内 83 次 "Third-party apps now draw from your extra
+	// usage" 拒绝，100% 来自唯一开放非 CC 的分组（group 30），强制 CC 的三个分组合计
+	// 5958 条请求零命中。同期抓包确认该分组的请求体带的正是上述合成工具名。
+	//
+	// 关掉之后上游看到的是客户端真实的工具名——同样不是 Claude Code 的工具集，但至少
+	// 是自然的命名，而不是一个自证为改写产物的模式。
+	//
+	// 另需注意混淆本身有一处既有缺口：它只覆盖 tools[*].name / tool_choice.name /
+	// tool_use.name，不含 tool_reference.tool_name（tool search 特性产生），于是工具表
+	// 已是假名而历史引用仍是原名，触发 400 Tool reference 'WebFetch' not found。
+	//
+	// 保留为开关而非直接删代码：这是一条上线后需要按实际拒绝率复核的策略，回退只需改
+	// 配置重启，不必重新编译。
+	MimicToolNameRewrite bool `mapstructure:"mimic_tool_name_rewrite"`
+
 	// RepeatPayloadGuard: 重复 payload 拦截（反复提交同一份大请求刷号）。
 	RepeatPayloadGuard RepeatPayloadGuardConfig `mapstructure:"repeat_payload_guard"`
 
@@ -2342,6 +2365,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.intercept_probe_arithmetic", true)
 	viper.SetDefault("gateway.intercept_greeting", true)
 	viper.SetDefault("gateway.reject_non_claude_code_clients", false)
+	viper.SetDefault("gateway.mimic_tool_name_rewrite", false)
 	// 重复 payload 拦截。阈值依据实测滥用形态：22 次/55 分钟 ≈ 12 次/30 分钟，
 	// 阈值 8 可在第 9 次截断；正常客户端在 30 分钟内重复提交 8 次完全相同的
 	// 200KB+ body 属于异常。min_body_bytes 200000 约合 5 万 token。

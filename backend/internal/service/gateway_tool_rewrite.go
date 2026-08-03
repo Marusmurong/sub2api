@@ -12,6 +12,20 @@ import (
 	"github.com/tidwall/sjson"
 )
 
+// buildMimicToolNameRewrite 是伪装路径上构造工具名混淆映射的唯一入口：先过策略开关，
+// 再决定是否真的构造。开关关闭时返回 nil，调用方按「不需要混淆」处理，与工具集本来就
+// 不满足混淆条件时走同一分支。
+//
+// 之所以把开关判断收在这里而不是散在两个调用点（原生 /v1/messages 与 OpenAI 协议兼容
+// 层），是因为两条路径必须同进同出：只关一条，另一条仍会发出自证为改写产物的工具名，
+// 等于没关。开关语义见 config.GatewayConfig.MimicToolNameRewrite。
+func (s *GatewayService) buildMimicToolNameRewrite(body []byte) *ToolNameRewrite {
+	if s == nil || s.cfg == nil || !s.cfg.Gateway.MimicToolNameRewrite {
+		return nil
+	}
+	return buildToolNameRewriteFromBody(body)
+}
+
 // toolNameRewriteKey 是 gin.Context 上存 ToolNameRewrite 映射的 key。
 // 请求阶段写入，响应阶段读取，用于 bytes 级逆向还原假名 → 真名。
 const toolNameRewriteKey = "claude_tool_name_rewrite"

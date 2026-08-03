@@ -258,7 +258,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		// 两处缺口都是既有的，但真 CC 走透传时一直潜伏；统一伪装后才被激活。
 		// 身份统一（header / billing block / beta）仍然一律做，与本项无关。
 		if !isClaudeCode {
-			if toolRewrite := buildToolNameRewriteFromBody(body); toolRewrite != nil {
+			if toolRewrite := s.buildMimicToolNameRewrite(body); toolRewrite != nil {
 				if err := replaceBody(applyToolNameRewriteToBody(body, toolRewrite)); err != nil {
 					return nil, err
 				}
