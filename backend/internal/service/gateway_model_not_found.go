@@ -69,20 +69,29 @@ func (s *GatewayService) IsKnownMissingModel(ctx context.Context, platform, mode
 // model_mapping 且把请求模型映射成了别的名字时，404 说明的是"映射后的那个名字在这个
 // 账号上不存在"，不能推广成全局事实——别的账号可能映射到别处、或压根不映射。
 // 只有请求模型与实际发出的模型一致时，这个 404 才是关于模型本身的。
-func (s *GatewayService) rememberMissingModel(ctx context.Context, account *Account, requestedModel string) {
+//
+// 返回值表示是否确实记成了**全局事实**。调用方据此决定要不要继续故障转移：记成全局
+// 事实就意味着"模型本身不存在"，换任何账号都是同一个 404，转移是定义上不可能成功的
+// 空转；而因账号映射产生的 404 没有记（返回 false），换号仍然可能成功，必须照常转移。
+func (s *GatewayService) rememberMissingModel(ctx context.Context, account *Account, requestedModel string) bool {
 	store := s.modelNotFoundStore()
 	if store == nil || account == nil {
-		return
+		return false
 	}
 	model := normalizeMissingModelKey(requestedModel)
 	if model == "" {
-		return
+		return false
 	}
 	if mapped := strings.TrimSpace(account.GetMappedModel(requestedModel)); mapped != "" &&
 		!strings.EqualFold(mapped, strings.TrimSpace(requestedModel)) {
-		return
+		return false
 	}
-	_ = store.MarkModelNotFound(ctx, account.Platform, model, modelNotFoundTTL)
+	if err := store.MarkModelNotFound(ctx, account.Platform, model, modelNotFoundTTL); err != nil {
+		// 没记下就不能短路转移：下一次请求同样挡不住，此时保持原有的转移行为，
+		// 至少不会因为缓存故障把一个本可能成功的请求直接判死。
+		return false
+	}
+	return true
 }
 
 // normalizeMissingModelKey 统一大小写与空白，让 "Opus-5" 与 "opus-5" 命中同一条记忆。

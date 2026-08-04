@@ -87,8 +87,11 @@ func TestRememberMissingModel_RecordsGloballyNotPerAccount(t *testing.T) {
 	svc, cache := newModelNotFoundSvc()
 	acct := &Account{ID: 15, Platform: PlatformAnthropic}
 
-	svc.rememberMissingModel(context.Background(), acct, "claude-3-5-haiku-20241022")
+	recorded := svc.rememberMissingModel(context.Background(), acct, "claude-3-5-haiku-20241022")
 
+	// 返回 true 表示"模型本身不存在"已成为全局事实，调用方据此终止故障转移：
+	// 换任何账号都是同一个 404，继续转移只会把整个账号池喷一遍。
+	require.True(t, recorded, "记成全局事实后必须返回 true，否则调用方会继续遍历账号池")
 	require.Equal(t, modelNotFoundTTL, cache.marked["anthropic|claude-3-5-haiku-20241022"])
 
 	// 另一个账号的同一模型请求应当直接命中——这正是"不再喷遍账号池"的关键
@@ -125,8 +128,11 @@ func TestRememberMissingModel_SkipsWhenAccountRemapsTheModel(t *testing.T) {
 		"model_mapping": map[string]any{"claude-opus-4-8": "some-internal-alias"},
 	}}
 
-	svc.rememberMissingModel(context.Background(), acct, "claude-opus-4-8")
+	recorded := svc.rememberMissingModel(context.Background(), acct, "claude-opus-4-8")
 
+	// 必须返回 false：这个 404 只说明"映射后的名字在这个账号上不存在"，别的账号可能
+	// 映射到别处。此时故障转移仍然可能成功，不得被短路掉。
+	require.False(t, recorded, "映射改名的 404 不得终止故障转移")
 	require.Empty(t, cache.marked, "映射改名的 404 不得globalize")
 	require.False(t, svc.IsKnownMissingModel(context.Background(), PlatformAnthropic, "claude-opus-4-8"))
 }

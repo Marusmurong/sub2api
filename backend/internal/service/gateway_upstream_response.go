@@ -407,13 +407,33 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 		Detail:             upstreamDetail,
 	})
 
-	// 上游确认模型不存在时，把这件事记成全局事实（与账号无关）。
+	// 上游确认模型不存在时，把这件事记成全局事实（与账号无关），并**就地终止本次请求**。
 	//
-	// 下面的 HandleUpstreamError 会把 (账号, 模型) 冷却 30 分钟并要求故障转移，于是同一次
-	// 客户端请求会依次打到多个账号上，每个都往上游发一次不存在的模型名。记住模型本身之后，
-	// 后续请求在选号之前就被拒（见 isKnownMissingModel），账号池不再被喷。
+	// 只记不停是不够的：全局记忆生效在 handler 入口（IsKnownMissingModel，选号之前），
+	// 只能挡住**后续**请求；而正在飞的这一次，下面的 HandleUpstreamError 仍会把
+	// (账号, 模型) 冷却 30 分钟并要求故障转移，于是它继续走向下一个账号、再 404、再冷却，
+	// 一路把整个账号池喷完。
+	//
+	// 2026-08-04 06:25–06:27 生产实测：记忆的 6 小时 TTL 过期后，下游的模型扫描重新探测，
+	// 18 个账号在两分钟内全部被打上 upstream_404_model_not_found 的模型级限流；账号级也
+	// 被顺带标了 30 秒限流，07:00:00–07:00:12 一秒一个、顺序遍历全池。对订阅号而言这既是
+	// 无谓的上游暴露，也是明确的异常信号。
+	//
+	// 模型不存在与账号无关，换号必然是同一个 404 —— 转移在定义上不可能成功。因此记成
+	// 全局事实后直接返回 404，形态与 handler 入口的拦截一致（Model %q is not available
+	// upstream），下游看到的结果不变，代价从 N 个账号降到 1 个。
 	if len(requestedModel) > 0 && isUpstreamModelNotFoundError(resp.StatusCode, body) {
-		s.rememberMissingModel(ctx, account, requestedModel[0])
+		if s.rememberMissingModel(ctx, account, requestedModel[0]) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"type": "error",
+				"error": gin.H{
+					"type":    "model_not_found",
+					"message": fmt.Sprintf("Model %q is not available upstream", requestedModel[0]),
+				},
+			})
+			MarkResponseCommitted(c)
+			return nil, fmt.Errorf("upstream error: %d model not found: %s", resp.StatusCode, requestedModel[0])
+		}
 	}
 
 	// 处理上游错误，标记账号状态
