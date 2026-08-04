@@ -370,32 +370,6 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 	logger.LegacyPrintf("service.gateway", "[Forward] Upstream error (non-retryable): Account=%d(%s) Status=%d RequestID=%s Body=%s",
 		account.ID, account.Name, resp.StatusCode, upstreamRequestID(resp.Header), truncateString(string(body), 1000))
 
-	// 429 的响应头全量记一次。
-	//
-	// 生产上出现过一类只回 {"error":{"message":"Error","type":"rate_limit_error"}} 的
-	// 429：既不说明是哪个窗口，也没有 5h/7d 的 reset 头，于是
-	// persistAnthropicExhaustedWindowLimit 判定不出限流窗口，只能退回按秒计的兜底冷却。
-	//
-	// 问题是此前我们**一个响应头都没记**，所以无法区分两件事：上游确实什么都没给，
-	// 还是给了而我们在找错头名（Anthropic 陆续加过 anthropic-ratelimit-unified-*、
-	// -unified-5h-*、-7d_oi-* 等多组命名）。这两种情况的处理方式完全相反，靠猜没有意义。
-	//
-	// 只在 429 上打、且脱敏 authorization：429 的量级是每小时几十条，不构成日志压力；
-	// 而这是目前唯一能把「上游为什么限流」这件事从推断变成观测的入口。
-	if resp.StatusCode == http.StatusTooManyRequests {
-		var hdr strings.Builder
-		for _, k := range sortHeadersByWireOrder(resp.Header) {
-			if strings.EqualFold(k, "authorization") {
-				continue
-			}
-			for _, v := range resp.Header[k] {
-				fmt.Fprintf(&hdr, "%s=%s; ", k, v)
-			}
-		}
-		logger.LegacyPrintf("service.gateway",
-			"[Forward] upstream_429_headers account=%d model=%s headers={%s}",
-			account.ID, firstRequestedModel(requestedModel), hdr.String())
-	}
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(body))
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)

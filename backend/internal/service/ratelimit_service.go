@@ -954,6 +954,57 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	if account.IsShadow() {
 		return
 	}
+
+	// 诊断：把 429 的响应头全量记一次。
+	//
+	// 生产上有一类只回 {"error":{"message":"Error","type":"rate_limit_error"}} 的 429，
+	// 下面每一级解析（per-window 头 / 聚合头 / 响应体）都失配，最终落到
+	// apply429FallbackRateLimit 的按秒兜底。而我们此前一个响应头都没记，于是分不清
+	// 两件事：上游确实什么都没给，还是给了而我们在找错头名——Anthropic 陆续用过
+	// anthropic-ratelimit-unified-*、-unified-5h-*、-7d_oi-* 等多组命名。
+	// 这两种情况的处理方式相反，靠读代码猜不出来。
+	//
+	// 打在 handle429 入口而不是 handleErrorResponse：实测那条路径根本不经过——
+	// 部署诊断后 762 个请求里兜底冷却触发 111 次，而 handleErrorResponse 的 429
+	// 计数为 0。这里才是这类 429 的唯一必经之处。
+	//
+	// 只在**没有** X-Should-Retry 时打：带该头的已由下面的守卫处理并记了一行，
+	// 无需重复；而剩下这些才是真正需要弄清窗口的（也是将来上游改头名时的哨兵）。
+	if account.Platform == PlatformAnthropic && !upstreamSaysRetryable(headers) {
+		var hdr strings.Builder
+		for k, vs := range headers {
+			if strings.EqualFold(k, "authorization") {
+				continue
+			}
+			for _, v := range vs {
+				fmt.Fprintf(&hdr, "%s=%s; ", k, v)
+			}
+		}
+		slog.Warn("anthropic_429_headers",
+			"account_id", account.ID,
+			"body", truncateForLog(responseBody, 200),
+			"headers", hdr.String())
+	}
+
+	// 上游明说可重试的 429，不冷却账号。
+	//
+	// Anthropic 瞬时过载时返回 429 + X-Should-Retry: true，且不带任何 reset 头
+	// （2026-08-05 抓样 19/19 一致）。下面每一级解析都会失配，最终落到
+	// apply429FallbackRateLimit 把账号冷却 30 秒——而上游的意思是「立刻重试就行」。
+	//
+	// 后果是实测出来的：一次抖动顺着账号池挨个标记，762 个请求触发 111 次兜底冷却，
+	// UI 上整池「限流中」；同时换号会让 prompt 缓存失效（按账号绑定），单次重写观测到
+	// 近 20 万 token。真实配额耗尽不带这个头，那条路径的语义不受影响。
+	//
+	// 放在这里而不是各调用点：handle429 是所有 429 的唯一必经之处，一处守卫覆盖
+	// forward / passthrough / bedrock 全部入口。
+	if account.Platform == PlatformAnthropic && upstreamSaysRetryable(headers) {
+		slog.Info("anthropic_429_transient_not_cooling",
+			"account_id", account.ID,
+			"reason", "upstream sent X-Should-Retry: true")
+		return
+	}
+
 	// 1. OpenAI 平台：优先尝试解析 x-codex-* 响应头（用于 rate_limit_exceeded）
 	if account.Platform == PlatformOpenAI {
 		persistOpenAI429PlanType(ctx, s.accountRepo, account, responseBody)

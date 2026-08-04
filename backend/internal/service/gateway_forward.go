@@ -42,6 +42,31 @@ func (s *GatewayService) shouldRetryUpstreamError(account *Account, statusCode i
 	return !account.ShouldHandleErrorCode(statusCode)
 }
 
+// upstreamSaysRetryable 报告上游是否明确表示这次失败可以原样重试。
+//
+// Anthropic 在瞬时过载时返回一种信息量极低的 429：
+//
+//	HTTP 429
+//	{"type":"error","error":{"type":"rate_limit_error","message":"Error"}}
+//	X-Should-Retry: true
+//	（无任何 anthropic-ratelimit-* 头，无 retry-after）
+//
+// 2026-08-05 生产抓样 19/19 完全一致。关键是那个 X-Should-Retry —— 真正的配额耗尽
+// 不带它，带它意味着「同一个号立刻重试就能成功」。
+//
+// 此前我们不读这个头，把它按配额限流处理：冷却该账号 30 秒 + 故障转移到下一个号。
+// 于是上游让重试、我们却把号拉出轮转，一次抖动就顺着账号池挨个标记（实测 762 个请求
+// 触发 111 次兜底冷却），UI 上表现为整池「限流中」。换号还有第二重代价：prompt 缓存
+// 按账号绑定，换号即失效，单次重写观测到近 20 万 token。
+//
+// 只认 true。头缺失或为 false 时维持原有的冷却+换号语义——那才是真配额耗尽的处理方式。
+func upstreamSaysRetryable(h http.Header) bool {
+	if h == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(h.Get("X-Should-Retry")), "true")
+}
+
 // shouldFailoverUpstreamError determines whether an upstream error should trigger account failover.
 func (s *GatewayService) shouldFailoverUpstreamError(statusCode int) bool {
 	switch statusCode {
@@ -750,7 +775,14 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		}
 
 		// 检查是否需要通用重试（排除400，因为400已经在上面特殊处理过了）
-		if resp.StatusCode >= 400 && resp.StatusCode != 400 && s.shouldRetryUpstreamError(account, resp.StatusCode) {
+		//
+		// 429 + X-Should-Retry: true 也走这里：上游明确表示同号重试即可，那就退避后
+		// 重试，而不是冷却账号并换号。判据与代价见 upstreamSaysRetryable 的注释。
+		// 复用既有循环而非另起一套：退避曲线、5 次上限、10 秒总时长封顶都已在这里，
+		// 平行实现迟早会漂移。
+		if resp.StatusCode >= 400 && resp.StatusCode != 400 &&
+			(s.shouldRetryUpstreamError(account, resp.StatusCode) ||
+				(resp.StatusCode == http.StatusTooManyRequests && upstreamSaysRetryable(resp.Header))) {
 			if attempt < maxRetryAttempts {
 				elapsed := time.Since(retryStart)
 				if elapsed >= maxRetryElapsed {
