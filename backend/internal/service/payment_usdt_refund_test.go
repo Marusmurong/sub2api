@@ -28,6 +28,21 @@ func (r *usdtRefundUserRepo) DeductBalance(_ context.Context, _ int64, amount fl
 	return nil
 }
 
+// DeductAvailableBalance 实现上游 v0.1.171 新增的 availableBalanceDeductor 接口。
+//
+// 上游把退款扣款从 DeductBalance 换成了这个带返回值的版本，用于「余额不足时要求
+// force 确认」——退款金额超过可用余额时不再静默扣成负数。PaymentService 通过类型
+// 断言取用它，桩不实现就会走到 "user repository does not support available balance
+// deduction" 的错误分支。
+//
+// 计数与 DeductBalance 共用 deducted/calls：这三个用例断言的是「扣了多少、扣了几次」，
+// 与走哪个方法无关，共用计数器可以让断言在上游再次更换扣款方法时依然成立。
+func (r *usdtRefundUserRepo) DeductAvailableBalance(_ context.Context, _ int64, amount float64) (float64, error) {
+	r.deducted += amount
+	r.calls++
+	return amount, nil
+}
+
 type usdtRefundFixture struct {
 	client   *dbent.Client
 	svc      *PaymentService
