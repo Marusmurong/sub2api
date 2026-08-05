@@ -245,6 +245,12 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 		out = next
 		modified = true
 	}
+	// tools 先于 tool_choice：后者在 tools 为空时会删掉自己，若顺序颠倒，一个「函数工具
+	// 尚未转换、因而还不被认作有效工具」的中间态可能让 tool_choice 被误删。
+	if next, changed := normalizeFunctionToolsShape(out); changed {
+		out = next
+		modified = true
+	}
 	if next, changed := normalizeToolChoiceShape(out); changed {
 		out = next
 		modified = true

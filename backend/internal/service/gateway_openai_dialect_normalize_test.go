@@ -162,3 +162,121 @@ func TestNormalizeClaudeOAuthRequestBody_FixesOpenAIDialect(t *testing.T) {
 		t.Errorf("tool_choice.type = %q", got)
 	}
 }
+
+// OpenAI 的函数工具声明必须翻成 Anthropic 的扁平形式，否则上游按 type 枚举校验直接拒绝：
+// tools.0: Input tag 'function' found using 'type' does not match any of the expected tags
+func TestNormalizeFunctionToolsShape_ConvertsOpenAIFunctions(t *testing.T) {
+	body := []byte(`{"tools":[{"type":"function","function":{` +
+		`"name":"get_weather","description":"查天气",` +
+		`"parameters":{"type":"object","properties":{"city":{"type":"string"}},"required":["city"]}}}]}`)
+
+	out, changed := normalizeFunctionToolsShape(body)
+	if !changed {
+		t.Fatal("未转换 OpenAI 函数工具")
+	}
+	if gjson.GetBytes(out, "tools.0.type").Exists() {
+		t.Error("转换后不应保留 type=function —— 那正是上游拒绝的原因")
+	}
+	if got := gjson.GetBytes(out, "tools.0.name").String(); got != "get_weather" {
+		t.Errorf("name = %q", got)
+	}
+	if got := gjson.GetBytes(out, "tools.0.description").String(); got != "查天气" {
+		t.Errorf("description 丢失: %q", got)
+	}
+	// parameters 必须原样成为 input_schema，不能丢字段——丢了会让模型不知道怎么调用。
+	if got := gjson.GetBytes(out, "tools.0.input_schema.properties.city.type").String(); got != "string" {
+		t.Errorf("input_schema 未完整保留: %s", gjson.GetBytes(out, "tools.0.input_schema").Raw)
+	}
+	if got := gjson.GetBytes(out, "tools.0.input_schema.required.0").String(); got != "city" {
+		t.Error("required 丢失")
+	}
+}
+
+// 数组里混着 Anthropic 内建工具时，只动 function 那些，其余原样保留。
+func TestNormalizeFunctionToolsShape_LeavesNativeToolsAlone(t *testing.T) {
+	body := []byte(`{"tools":[` +
+		`{"type":"web_search_20250305","name":"web_search"},` +
+		`{"type":"function","function":{"name":"f1","parameters":{"type":"object"}}},` +
+		`{"name":"already_flat","input_schema":{"type":"object"}}]}`)
+
+	out, changed := normalizeFunctionToolsShape(body)
+	if !changed {
+		t.Fatal("应当转换其中的 function 元素")
+	}
+	if got := gjson.GetBytes(out, "tools.0.type").String(); got != "web_search_20250305" {
+		t.Errorf("内建工具被破坏: %q", got)
+	}
+	if gjson.GetBytes(out, "tools.1.type").Exists() {
+		t.Error("function 元素未被转换")
+	}
+	if got := gjson.GetBytes(out, "tools.2.name").String(); got != "already_flat" {
+		t.Errorf("已是扁平形式的工具被破坏: %q", got)
+	}
+	if len(gjson.GetBytes(out, "tools").Array()) != 3 {
+		t.Error("工具数量发生了变化")
+	}
+}
+
+// 没有 parameters 的函数（OpenAI 侧合法）要补一个空 object：Anthropic 的 input_schema 必填。
+func TestNormalizeFunctionToolsShape_FillsMissingSchema(t *testing.T) {
+	body := []byte(`{"tools":[{"type":"function","function":{"name":"noargs"}}]}`)
+
+	out, changed := normalizeFunctionToolsShape(body)
+	if !changed {
+		t.Fatal("未转换")
+	}
+	if got := gjson.GetBytes(out, "tools.0.input_schema.type").String(); got != "object" {
+		t.Errorf("缺失的 schema 应补成空 object，实际 %q", got)
+	}
+}
+
+// 没有名字的声明翻译不出来：原样保留，让上游报出真实原因，不由我们造假名掩盖。
+func TestNormalizeFunctionToolsShape_KeepsNamelessAsIs(t *testing.T) {
+	body := []byte(`{"tools":[{"type":"function","function":{"description":"无名"}}]}`)
+
+	if _, changed := normalizeFunctionToolsShape(body); changed {
+		t.Fatal("无名的函数声明不应被改写")
+	}
+}
+
+// tool_choice 的 OpenAI「指定工具」写法：{"type":"function","function":{"name":"x"}}
+// → Anthropic 的 {"type":"tool","name":"x"}
+func TestNormalizeToolChoiceShape_FunctionObject(t *testing.T) {
+	body := []byte(`{"tool_choice":{"type":"function","function":{"name":"get_weather"}}}`)
+
+	out, changed := normalizeToolChoiceShape(body)
+	if !changed {
+		t.Fatal("未转换 OpenAI 的 tool_choice 对象形式")
+	}
+	if got := gjson.GetBytes(out, "tool_choice.type").String(); got != "tool" {
+		t.Errorf("type = %q，want tool", got)
+	}
+	if got := gjson.GetBytes(out, "tool_choice.name").String(); got != "get_weather" {
+		t.Errorf("name = %q", got)
+	}
+}
+
+// 说不出要调哪个工具时删掉退回默认（缺省即 auto）——猜工具名会改变语义。
+func TestNormalizeToolChoiceShape_FunctionWithoutName(t *testing.T) {
+	body := []byte(`{"tool_choice":{"type":"function"}}`)
+
+	out, changed := normalizeToolChoiceShape(body)
+	if !changed {
+		t.Fatal("未处理")
+	}
+	if gjson.GetBytes(out, "tool_choice").Exists() {
+		t.Error("无名时应删除，不得猜一个工具名")
+	}
+}
+
+// Anthropic 自己的对象形式不得被动。
+func TestNormalizeToolChoiceShape_LeavesAnthropicObjectAlone(t *testing.T) {
+	for _, raw := range []string{
+		`{"type":"auto"}`, `{"type":"any"}`, `{"type":"none"}`, `{"type":"tool","name":"Bash"}`,
+	} {
+		body := []byte(`{"tool_choice":` + raw + `}`)
+		if _, changed := normalizeToolChoiceShape(body); changed {
+			t.Errorf("%s 不应被改写", raw)
+		}
+	}
+}

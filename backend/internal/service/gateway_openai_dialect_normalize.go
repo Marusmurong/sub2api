@@ -109,8 +109,37 @@ func hoistLeadingSystemMessage(body []byte) ([]byte, bool) {
 // 删掉最多是回到默认行为；猜错则可能把「不许用工具」改成「必须用工具」。
 func normalizeToolChoiceShape(body []byte) ([]byte, bool) {
 	tc := gjson.GetBytes(body, "tool_choice")
-	if !tc.Exists() || tc.IsObject() {
+	if !tc.Exists() {
 		return body, false
+	}
+
+	// OpenAI 的「指定某个工具」写法：{"type":"function","function":{"name":"x"}}
+	// Anthropic 的对应形式是 {"type":"tool","name":"x"}。上游对 type 做枚举校验，
+	// 原样转发得到：
+	//   tool_choice: Input tag 'function' ... expected 'auto','any','tool','none'
+	if tc.IsObject() {
+		if !strings.EqualFold(tc.Get("type").String(), "function") {
+			return body, false
+		}
+		name := strings.TrimSpace(tc.Get("function.name").String())
+		if name == "" {
+			// 说不出要调哪个工具，就没法翻译成 {"type":"tool","name":..}。删掉退回默认
+			// （缺省即 auto）——猜一个工具名会把语义改成完全不同的东西。
+			next, ok := deleteJSONPathBytes(body, "tool_choice")
+			if !ok {
+				return body, false
+			}
+			return next, true
+		}
+		encoded, err := json.Marshal(map[string]string{"type": "tool", "name": name})
+		if err != nil {
+			return body, false
+		}
+		next, ok := setJSONRawBytes(body, "tool_choice", encoded)
+		if !ok {
+			return body, false
+		}
+		return next, true
 	}
 
 	if tc.Type == gjson.String {
@@ -124,6 +153,77 @@ func normalizeToolChoiceShape(body []byte) ([]byte, bool) {
 	}
 
 	next, ok := deleteJSONPathBytes(body, "tool_choice")
+	if !ok {
+		return body, false
+	}
+	return next, true
+}
+
+// normalizeFunctionToolsShape 把 OpenAI 的函数工具声明翻成 Anthropic 的扁平形式。
+//
+//	OpenAI      {"type":"function","function":{"name":..,"description":..,"parameters":{..}}}
+//	Anthropic   {"name":..,"description":..,"input_schema":{..}}
+//
+// 上游对 tools[*].type 做枚举校验（只接受 bash_20250124 / text_editor_* /
+// web_search_* 等内建工具类型，或不带 type 的自定义工具），原样转发得到：
+//
+//	tools.0: Input tag 'function' found using 'type' does not match any of the expected tags
+//
+// 2026-08-05 生产 8 小时内 40 次，与此前修掉的 messages[0].system、tool_choice 字符串
+// 同源——同一个下游在用 OpenAI 的写法请求 Anthropic 原生端点。
+//
+// 只改 type=="function" 的元素：数组里可能混着已经正确的 Anthropic 内建工具
+// （web_search_20250305 之类），那些必须原样保留。
+//
+// parameters 缺失时仍然转换，补一个空 object schema：Anthropic 的 input_schema 是必填，
+// 而一个没有参数的函数在 OpenAI 侧确实可以省略 parameters。
+func normalizeFunctionToolsShape(body []byte) ([]byte, bool) {
+	tools := gjson.GetBytes(body, "tools")
+	if !tools.IsArray() {
+		return body, false
+	}
+
+	out := make([]json.RawMessage, 0, len(tools.Array()))
+	changed := false
+	for _, t := range tools.Array() {
+		if !strings.EqualFold(t.Get("type").String(), "function") {
+			out = append(out, json.RawMessage(t.Raw))
+			continue
+		}
+		fn := t.Get("function")
+		name := strings.TrimSpace(fn.Get("name").String())
+		if name == "" {
+			// 没有名字就不是一个可用的工具声明，翻译不出来。原样保留，让上游报出
+			// 真实原因，而不是由我们造一个假名掩盖掉。
+			out = append(out, json.RawMessage(t.Raw))
+			continue
+		}
+		conv := map[string]any{"name": name}
+		if d := fn.Get("description"); d.Exists() {
+			conv["description"] = d.String()
+		}
+		if p := fn.Get("parameters"); p.Exists() && p.IsObject() {
+			conv["input_schema"] = json.RawMessage(p.Raw)
+		} else {
+			conv["input_schema"] = json.RawMessage(`{"type":"object","properties":{}}`)
+		}
+		encoded, err := json.Marshal(conv)
+		if err != nil {
+			out = append(out, json.RawMessage(t.Raw))
+			continue
+		}
+		out = append(out, encoded)
+		changed = true
+	}
+	if !changed {
+		return body, false
+	}
+
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		return body, false
+	}
+	next, ok := setJSONRawBytes(body, "tools", encoded)
 	if !ok {
 		return body, false
 	}
