@@ -284,19 +284,35 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			shouldDisable = true
 			break
 		}
-		// Anthropic: "OAuth access token has been revoked." 表示授权被撤销，与 OpenAI 的
-		// token_revoked 同义。撤销后 refresh_token 一并失效（表现为后台刷新拿到 400
-		// non-retryable），所以下面那条"临时不可调度等刷新自愈"的路径救不回来——只会让废号
-		// 在冷却与重试之间空转，并持续把已撤销的凭据暴露给上游。这里与 OpenAI 分支对称，
-		// 直接永久禁用。
+		// Anthropic 的 "OAuth access token has been revoked." **不再**直接永久禁用。
+		//
+		// 原实现按「撤销后 refresh_token 一并失效」的假设，与 OpenAI 的 token_revoked 对称
+		// 处理，直接 SetError。2026-08-08 生产证伪了这个假设：
+		//
+		//	11:23:23  账号 117 收到该 401 → 被永久禁用
+		//	13:36:26  同一账号在后台点「测试」即恢复 active
+		//
+		// 账号 118 / 119 同日同样表现（11:33、12:08 被判死，随后均可用）。三个号的
+		// refresh_token 当时都还有效——被撤销的只是 access token，而 Anthropic 对这两种
+		// 情况返回同一句话，从错误文案上分不出来。
+		//
+		// 代价是双向的：误判会让一个还能用的订阅号立刻停止调度，Supply 侧同步标记 error
+		// 后又是单向终态（accounthealth 的 ListSyncTargets 排除 error 行），于是账号池里
+		// 留下一个永远不会自己恢复的假封号，还连带停掉了该号的日结算。
+		//
+		// 改为：交给下面 OAuth 的既有自愈路径——失效 token 缓存 + 临时不可调度，让
+		// token_refresh_service 用分布式锁走正路刷新一次，由**刷新结果**而不是错误文案
+		// 判定生死。真正被撤销的账号，刷新会拿到 non-retryable 错误，那里同样会 SetError
+		// 永久禁用（token_refresh_service.go:1015），安全网仍在，只是判据从「猜」换成了
+		// 「验证」。
+		//
+		// 没有 refresh_token 的账号不受影响：下面紧接着就有一条独立分支直接禁用它们。
 		if authAccount.Platform == PlatformAnthropic && strings.Contains(strings.ToLower(upstreamMsg), anthropicRevokedTokenMarker) {
-			msg := "Token revoked (401): account authorization has been revoked"
-			if upstreamMsg != "" {
-				msg = "Token revoked (401): " + upstreamMsg
-			}
-			s.handleAuthError(ctx, authAccount, msg)
-			shouldDisable = true
-			break
+			slog.Info("anthropic_401_revoked_deferring_to_refresh",
+				"account_id", authAccount.ID,
+				"upstream_message", upstreamMsg,
+				"reason", "verify via token refresh instead of trusting the error text")
+			// 不 break：继续走下面的 OAuth 自愈分支。
 		}
 		// OAuth 账号在 401 错误时临时不可调度（给 token 刷新窗口）；非 OAuth 账号保持原有 SetError 行为。
 		if authAccount.Type == AccountTypeOAuth {
