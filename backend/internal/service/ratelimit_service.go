@@ -284,35 +284,36 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			shouldDisable = true
 			break
 		}
-		// Anthropic 的 "OAuth access token has been revoked." **不再**直接永久禁用。
+		// Anthropic: "OAuth access token has been revoked." 表示授权被撤销，与 OpenAI 的
+		// token_revoked 同义。撤销后 refresh_token 一并失效（表现为后台刷新拿到 400
+		// non-retryable），所以下面那条"临时不可调度等刷新自愈"的路径救不回来——只会让废号
+		// 在冷却与重试之间空转，并持续把已撤销的凭据暴露给上游。这里与 OpenAI 分支对称，
+		// 直接永久禁用。
 		//
-		// 原实现按「撤销后 refresh_token 一并失效」的假设，与 OpenAI 的 token_revoked 对称
-		// 处理，直接 SetError。2026-08-08 生产证伪了这个假设：
+		// 2026-08-08 曾把这里改成"交给自愈路径、以刷新结果判定生死"，当天回滚。改的依据是
+		// 三个账号被判死后、在后台点「测试」即恢复 active，看起来 refresh_token 仍然有效。
 		//
-		//	11:23:23  账号 117 收到该 401 → 被永久禁用
-		//	13:36:26  同一账号在后台点「测试」即恢复 active
+		// 那个依据不成立，原因是把两条不同的路径当成了同一条：
 		//
-		// 账号 118 / 119 同日同样表现（11:33、12:08 被判死，随后均可用）。三个号的
-		// refresh_token 当时都还有效——被撤销的只是 access token，而 Anthropic 对这两种
-		// 情况返回同一句话，从错误文案上分不出来。
+		//   - 后台「测试」是人工触发的一次性重新鉴权，能拿到新 token 说明的是**那个动作**
+		//     可行，不代表后台刷新服务会自动做同样的事；
+		//   - 改动后实测账号 124：被标临时不可调度 10 分钟（16:01:50 → 16:11:50），
+		//     整个冷却期内刷新服务一次都没碰它——既没刷成功也没刷失败，就是不管；
+		//     冷却一到期立刻又撞 401，如此循环。
 		//
-		// 代价是双向的：误判会让一个还能用的订阅号立刻停止调度，Supply 侧同步标记 error
-		// 后又是单向终态（accounthealth 的 ListSyncTargets 排除 error 行），于是账号池里
-		// 留下一个永远不会自己恢复的假封号，还连带停掉了该号的日结算。
+		// 也就是说这条注释的后半句（"救不回来，只会空转"）是准确的；只有前半句关于
+		// refresh_token 是否同时失效的机制描述可能不够精确，但那不影响结论。
 		//
-		// 改为：交给下面 OAuth 的既有自愈路径——失效 token 缓存 + 临时不可调度，让
-		// token_refresh_service 用分布式锁走正路刷新一次，由**刷新结果**而不是错误文案
-		// 判定生死。真正被撤销的账号，刷新会拿到 non-retryable 错误，那里同样会 SetError
-		// 永久禁用（token_refresh_service.go:1015），安全网仍在，只是判据从「猜」换成了
-		// 「验证」。
-		//
-		// 没有 refresh_token 的账号不受影响：下面紧接着就有一条独立分支直接禁用它们。
+		// 想再动这里，前提是先确认后台刷新服务会主动拾取 temp-unschedulable 的账号——
+		// 目前它不会。
 		if authAccount.Platform == PlatformAnthropic && strings.Contains(strings.ToLower(upstreamMsg), anthropicRevokedTokenMarker) {
-			slog.Info("anthropic_401_revoked_deferring_to_refresh",
-				"account_id", authAccount.ID,
-				"upstream_message", upstreamMsg,
-				"reason", "verify via token refresh instead of trusting the error text")
-			// 不 break：继续走下面的 OAuth 自愈分支。
+			msg := "Token revoked (401): account authorization has been revoked"
+			if upstreamMsg != "" {
+				msg = "Token revoked (401): " + upstreamMsg
+			}
+			s.handleAuthError(ctx, authAccount, msg)
+			shouldDisable = true
+			break
 		}
 		// OAuth 账号在 401 错误时临时不可调度（给 token 刷新窗口）；非 OAuth 账号保持原有 SetError 行为。
 		if authAccount.Type == AccountTypeOAuth {
