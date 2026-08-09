@@ -163,3 +163,16 @@ func TestModelNotFound_NoStoreIsSilentlyDisabled(t *testing.T) {
 	require.False(t, svc.IsKnownMissingModel(context.Background(), PlatformAnthropic, "m"))
 	svc.rememberMissingModel(context.Background(), &Account{Platform: PlatformAnthropic}, "m") // 不得 panic
 }
+
+// 上游 v0.1.173 给 GatewayCache 加了 Grok 异步视频计费的四个方法。这个桩只关心
+// 模型缺失记忆，其余按空实现补齐即可——写成会 panic 的形式反而会掩盖真正的调用。
+func (c *fakeModelNotFoundCache) SetGrokVideoPendingBilling(context.Context, string, []byte, time.Duration) error {
+	return nil
+}
+func (c *fakeModelNotFoundCache) GetGrokVideoPendingBilling(context.Context, string) ([]byte, error) {
+	return nil, nil
+}
+func (c *fakeModelNotFoundCache) ClaimGrokVideoBilled(context.Context, string, time.Duration) (bool, error) {
+	return false, nil
+}
+func (c *fakeModelNotFoundCache) ReleaseGrokVideoBilled(context.Context, string) error { return nil }

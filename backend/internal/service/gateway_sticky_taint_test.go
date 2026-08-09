@@ -72,3 +72,16 @@ func (StubLikeCache) IsSignatureTainted(context.Context, int64, string) bool    
 func (StubLikeCache) GetSignatureOwnerAccountID(context.Context, int64, string) (int64, error) {
 	return 0, nil
 }
+
+// 同 gateway_model_not_found_test.go：补齐上游 v0.1.173 新增的 Grok 视频计费方法，
+// 本用例只验证签名污染标记，与它们无关。
+func (c *taintRecorder) SetGrokVideoPendingBilling(context.Context, string, []byte, time.Duration) error {
+	return nil
+}
+func (c *taintRecorder) GetGrokVideoPendingBilling(context.Context, string) ([]byte, error) {
+	return nil, nil
+}
+func (c *taintRecorder) ClaimGrokVideoBilled(context.Context, string, time.Duration) (bool, error) {
+	return false, nil
+}
+func (c *taintRecorder) ReleaseGrokVideoBilled(context.Context, string) error { return nil }
