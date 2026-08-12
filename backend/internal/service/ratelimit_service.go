@@ -342,6 +342,12 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			msg := "Identity verification required (400): " + upstreamMsg
 			s.handleAuthError(ctx, account, msg)
 			shouldDisable = true
+		} else if account.Platform == PlatformAnthropic && isAnthropicConsumerTermsBlock(upstreamMsg) {
+			// 号主未接受新版消费者条款 → 账号级阻断。与上面三条同族，但接受条款后
+			// 会自愈，所以是临时不可调度而非永久禁用；详见
+			// anthropic_consumer_terms_block.go。
+			s.persistAnthropicConsumerTermsBlock(ctx, account, upstreamMsg)
+			shouldDisable = true
 		}
 		// 其他 400 错误（如参数问题）不处理，不禁用账号
 	case 401:
