@@ -176,3 +176,9 @@ func (c *fakeModelNotFoundCache) ClaimGrokVideoBilled(context.Context, string, t
 	return false, nil
 }
 func (c *fakeModelNotFoundCache) ReleaseGrokVideoBilled(context.Context, string) error { return nil }
+func (c *fakeModelNotFoundCache) SetReasoningContent(context.Context, string, string, time.Duration) error {
+	return nil
+}
+func (c *fakeModelNotFoundCache) GetReasoningContent(context.Context, string) (string, error) {
+	return "", ErrReasoningContentNotFound
+}

@@ -194,13 +194,20 @@ func newTestGatewayHandler(t *testing.T, group *service.Group, accounts []*servi
 	)
 
 	// RunModeSimple：跳过计费检查，避免引入 repo/cache 依赖。
+	//
+	// Gateway.InterceptWarmup 必须显式打开：预热拦截已从「选完账号后按
+	// credentials.intercept_warmup_requests 判定」提前到「选号前按全局开关判定」
+	// （见 probe_intercept.go）。手工构造的 Config 拿不到 viper 的 true 默认值，
+	// 不设这一位会让本文件的用例穿透拦截、打到 fixture 里为 nil 的平台 service。
 	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Gateway.InterceptWarmup = true
 	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 
 	concurrencySvc := service.NewConcurrencyService(&fakeConcurrencyCache{})
 	concurrencyHelper := NewConcurrencyHelper(concurrencySvc, SSEPingFormatClaude, 0)
 
 	h := &GatewayHandler{
+		cfg:                 cfg,
 		gatewayService:      gwSvc,
 		billingCacheService: billingCacheSvc,
 		concurrencyHelper:   concurrencyHelper,
@@ -283,10 +290,11 @@ func TestGatewayHandlerMessages_InterceptWarmup_AntigravityAccount_MixedScheduli
 
 	require.Equal(t, 200, rec.Code)
 
-	// 断言：确实选中了 antigravity 账号（不是纯函数测试，而是从 Handler 里验证调度结果）
-	selected, ok := c.Get(opsAccountIDKey)
-	require.True(t, ok)
-	require.Equal(t, accountID, selected)
+	// 与上游断言相反，这是**有意**的分叉：预热拦截已提前到账号选择之前，
+	// 命中时不排并发队列、不占账号槽，因此不会有账号被选中。断言仍留在这里，
+	// 是为了在有人把拦截点挪回选号之后时立刻失败。
+	_, ok := c.Get(opsAccountIDKey)
+	require.False(t, ok, "预热请求不得占用账号")
 
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
@@ -373,9 +381,9 @@ func TestGatewayHandlerMessages_InterceptWarmup_AntigravityAccount_ForcePlatform
 
 	require.Equal(t, 200, rec.Code)
 
-	selected, ok := c.Get(opsAccountIDKey)
-	require.True(t, ok)
-	require.Equal(t, accountID, selected)
+	// 同上：拦截发生在选号之前，不占账号槽。
+	_, ok := c.Get(opsAccountIDKey)
+	require.False(t, ok, "预热请求不得占用账号")
 
 	var resp map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))

@@ -85,3 +85,9 @@ func (c *taintRecorder) ClaimGrokVideoBilled(context.Context, string, time.Durat
 	return false, nil
 }
 func (c *taintRecorder) ReleaseGrokVideoBilled(context.Context, string) error { return nil }
+func (c *taintRecorder) SetReasoningContent(context.Context, string, string, time.Duration) error {
+	return nil
+}
+func (c *taintRecorder) GetReasoningContent(context.Context, string) (string, error) {
+	return "", ErrReasoningContentNotFound
+}
