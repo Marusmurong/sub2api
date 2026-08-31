@@ -366,6 +366,58 @@ func TestApplyClaudeCodeOAuthMimicryToBody_HaikuRewritesSystem(t *testing.T) {
 	require.Equal(t, "claude-haiku-4-5-20251001", gjson.GetBytes(out, "model").String())
 }
 
+func TestApplyClaudeCodeOAuthMimicryToBody_FableOmitsRefusedExpansion(t *testing.T) {
+	account := &Account{ID: 406, Platform: PlatformAnthropic, Type: AccountTypeOAuth}
+	body := []byte(`{"model":"claude-fable-5","system":"Project instructions","messages":[{"role":"user","content":"hello"}]}`)
+	svc := &GatewayService{cfg: &config.Config{}}
+
+	out := svc.applyClaudeCodeOAuthMimicryToBody(
+		context.Background(), nil, account, body, "Project instructions", "claude-fable-5",
+	)
+
+	// 本用例锁的是「上游 Fable 块配置」与「我们的 system 尾块」合取后的契约。
+	//
+	// 上游原版断言 2 块 + messages 里出现 [System Instructions] / "Understood. I will
+	// follow these instructions." 的伪造指令对——那是我们在 252fdbb83 撤掉的行为
+	// （伪造的 user/assistant 对是真实 CLI 从不产生的特征，等于给请求盖第三方印）。
+	// 上游那条断言与紧邻的 _HaikuRewritesSystem 直接对立，此处以我们的形态为准。
+	//
+	// 上游真正有价值、我们原先没有的部分保留了：Fable **无条件**不发扩充段。
+	// 我们自己的 skipExpansion 只在调用方自带 system 时生效，盖不住
+	// 「Fable + 调用方无 system」——那种情况会被上游以 stop_reason=refusal 拒掉。
+	system := gjson.GetBytes(out, "system").Array()
+	require.Len(t, system, 3, "[billing, 身份块, 调用方 system]")
+	require.Contains(t, system[0].Get("text").String(), "x-anthropic-billing-header:")
+	require.Equal(t, claudeCodeSystemPrompt, system[1].Get("text").String())
+	require.Equal(t, "Project instructions", system[2].Get("text").String())
+	require.NotContains(t, string(out), claudeCodeSystemPromptExpansion)
+
+	// messages 原样保留，不得出现伪造指令对
+	require.Len(t, gjson.GetBytes(out, "messages").Array(), 1)
+	require.Equal(t, "hello", gjson.GetBytes(out, "messages.0.content").String())
+	require.NotContains(t, string(out), "Understood. I will follow these instructions.")
+}
+
+// Fable 且调用方**没有** system：这是上游 Fable 块配置的独有价值所在——
+// 我们自己的 skipExpansion 在这种输入下不触发，若无上游那层按模型选块，
+// 扩充段会被注入并招致 Fable 的 refusal。
+func TestApplyClaudeCodeOAuthMimicryToBody_FableWithoutClientSystemStillOmitsExpansion(t *testing.T) {
+	account := &Account{ID: 407, Platform: PlatformAnthropic, Type: AccountTypeOAuth}
+	body := []byte(`{"model":"claude-fable-5","messages":[{"role":"user","content":"hello"}]}`)
+	svc := &GatewayService{cfg: &config.Config{}}
+
+	out := svc.applyClaudeCodeOAuthMimicryToBody(
+		context.Background(), nil, account, body, "", "claude-fable-5",
+	)
+
+	system := gjson.GetBytes(out, "system").Array()
+	require.Len(t, system, 2, "无调用方 system 时只剩 [billing, 身份块]")
+	require.Contains(t, system[0].Get("text").String(), "x-anthropic-billing-header:")
+	require.Equal(t, claudeCodeSystemPrompt, system[1].Get("text").String())
+	require.NotContains(t, string(out), claudeCodeSystemPromptExpansion,
+		"Fable 无条件不发扩充段，否则上游 stop_reason=refusal、零输出")
+}
+
 // ============================================================================
 // passthrough 集成测试：buildUpstreamRequest-
 // AnthropicAPIKeyPassthrough 与 buildCountTokensRequestAnthropicAPIKeyPassthrough
