@@ -109,10 +109,17 @@ func extractFirstUserText(body []byte) string {
 //
 //	x-anthropic-billing-header: cc_version=2.1.161.{fp}; cc_entrypoint=cli;
 //
-// 注意：新版 Claude Code CLI 已不再发送 cch=... 签名字段（见 issue #3358）。我们
-// 随之去掉了 cch 段——继续注入它反而会让伪装请求偏离真实 CLI 流量。cc_version +
-// cc_entrypoint=cli 仍保留：它们是客户端识别（claude_code_validator）与 Anthropic
-// 第一方判定都依赖的稳定信号。
+// 关于 cch 段：**本函数刻意不注入**，但最终出口是带的。
+//
+// 它由 gateway_billing_header.go 的 ensureBillingHeaderCCH 在转发前统一补齐，
+// 这样 mimic 与透传两条路径共用同一处收口，不会各写一份而漂移。
+// 在这里看不到 cch 不等于我们不发——查 cch 是否在位请看
+// billingHeaderCCHSegment 与 ensureBillingHeaderCCH，不要 grep 本文件。
+//
+// （曾有注释断言「新版 CLI 已不再发送 cch（issue #3358）」，那是误读。
+//  2026-09-02 从 2.1.257 原生二进制抽取的构造函数原文：
+//    C = s==="firstParty" && ii() || s==="vertex" ? " cch=00000;" : ""
+//  字段一直都在，只是值固定为常量 00000。）
 //
 // 此 block 不带 cache_control（与真实 CLI 一致；cache breakpoint 由后续的
 // Claude Code prompt block 承担）。
