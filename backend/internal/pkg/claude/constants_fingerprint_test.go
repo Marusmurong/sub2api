@@ -17,7 +17,7 @@ func TestDefaultHeadersMimicAPlausibleEnvironment(t *testing.T) {
 		"X-Stainless-OS":   "MacOS",
 		"X-Stainless-Arch": "arm64",
 		// Held at v24.3.0 to match the TLS profile in pkg/tlsfingerprint, which
-		// was captured from Node.js 24.x. Real 2.1.220 clients report v26.3.0,
+		// was captured from Node.js 24.x. Real 2.1.257 clients report v26.3.0,
 		// so this is knowingly inconsistent with them — but consistent with our
 		// own ClientHello, which is the comparison upstream can actually make.
 		// Change it only together with a re-captured TLS profile.

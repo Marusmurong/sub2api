@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/tidwall/gjson"
 )
 
@@ -71,10 +72,10 @@ func TestRewriteSystemKeepsFingerprintConsistentWithFinalBody(t *testing.T) {
 		body, "You are a helpful translation assistant.", "", "")
 
 	// 按最终 body 重算的 fp，应与 block 里已写入的一致
-	want := computeClaudeCodeFingerprint(out, "2.1.220")
+	want := computeClaudeCodeFingerprint(out, claude.CLICurrentVersion)
 	billing := gjson.GetBytes(out, "system.0.text").String()
 
-	if !strings.Contains(billing, "cc_version=2.1.220."+want) {
+	if !strings.Contains(billing, "cc_version="+claude.CLICurrentVersion+"."+want) {
 		t.Errorf("billing block 的 fp 与最终 body 不一致\n block = %q\n want fp = %s", billing, want)
 	}
 }

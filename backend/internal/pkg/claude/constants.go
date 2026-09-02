@@ -68,7 +68,7 @@ const DefaultCacheControlTTL = "5m"
 // CLICurrentVersion 是 sub2api 当前对外伪装的 Claude Code CLI 版本号（三段 semver）。
 // 用于 billing attribution block 中的 cc_version=X.Y.Z.{fp} 前缀以及 fingerprint 计算。
 // 必须与 DefaultHeaders["User-Agent"] 中的版本号严格一致；不一致会被 Anthropic 判第三方。
-const CLICurrentVersion = "2.1.220"
+const CLICurrentVersion = "2.1.257"
 
 // FullClaudeCodeMimicryBetas 返回最"像"真实 Claude Code CLI 的完整 beta 列表，
 // 用于 OAuth 账号伪装成 Claude Code 时使用。
@@ -173,7 +173,7 @@ var DefaultHeaders = map[string]string{
 	// the opposite of what mimicry is for.
 	"X-Stainless-OS":   "MacOS",
 	"X-Stainless-Arch": "arm64",
-	// Left at v24.3.0 on purpose, even though real 2.1.220 clients report
+	// Left at v24.3.0 on purpose, even though real 2.1.257 clients report
 	// v26.3.0: the TLS profile in pkg/tlsfingerprint was captured from Node.js
 	// 24.x, so claiming v26 here would make the HTTP layer contradict the
 	// ClientHello. An unusual-but-consistent runtime beats a self-contradicting
