@@ -2623,8 +2623,21 @@ func TestRepeatSmallProbeConfig_DefaultsAndValidate(t *testing.T) {
 	if sp.NormalizedMode() != RepeatPayloadGuardModeObserve {
 		t.Fatalf("small_probe.mode 默认应为 observe，实际 %q", sp.Mode)
 	}
-	if sp.MaxBodyBytes != 4096 || sp.Threshold != 5 {
-		t.Fatalf("small_probe 默认 max_body_bytes=4096 threshold=5，实际 %+v", sp)
+	if sp.MaxBodyBytes != 4096 || sp.Threshold != 5 || sp.WindowMinutes != 0 {
+		t.Fatalf("small_probe 默认 max_body_bytes=4096 threshold=5 window_minutes=0(沿用父级)，实际 %+v", sp)
+	}
+	if got := sp.EffectiveWindowMinutes(30); got != 30 {
+		t.Fatalf("window 未配时应沿用父级 30，实际 %d", got)
+	}
+	sp.WindowMinutes = 240
+	if got := sp.EffectiveWindowMinutes(30); got != 240 {
+		t.Fatalf("window 配了应覆盖父级，实际 %d", got)
+	}
+	neg := cfg.Gateway.RepeatPayloadGuard
+	neg.SmallProbe.Mode = RepeatPayloadGuardModeBlock
+	neg.SmallProbe.WindowMinutes = -1
+	if err := neg.validate(); err == nil {
+		t.Fatal("window_minutes<0 应校验失败")
 	}
 
 	bad := cfg.Gateway.RepeatPayloadGuard

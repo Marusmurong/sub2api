@@ -21,20 +21,22 @@ import (
 
 // fakeRepeatPayloadCache 用内存计数替代 Redis，可注入错误以验证 fail-open。
 type fakeRepeatPayloadCache struct {
-	mu     sync.Mutex
-	counts map[string]int64
-	err    error
-	calls  int
+	mu         sync.Mutex
+	counts     map[string]int64
+	err        error
+	calls      int
+	lastWindow time.Duration
 }
 
 func newFakeRepeatPayloadCache() *fakeRepeatPayloadCache {
 	return &fakeRepeatPayloadCache{counts: map[string]int64{}}
 }
 
-func (f *fakeRepeatPayloadCache) IncrementRepeatCount(_ context.Context, scope service.RepeatPayloadScope, apiKeyID int64, fingerprint string, _ time.Duration) (int64, error) {
+func (f *fakeRepeatPayloadCache) IncrementRepeatCount(_ context.Context, scope service.RepeatPayloadScope, apiKeyID int64, fingerprint string, window time.Duration) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
+	f.lastWindow = window
 	if f.err != nil {
 		return 0, f.err
 	}

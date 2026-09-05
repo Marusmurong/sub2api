@@ -66,7 +66,8 @@ func (h *GatewayHandler) interceptRepeatSmallProbe(
 	if h.repeatPayloadCache == nil {
 		return false
 	}
-	window := time.Duration(guard.WindowMinutes) * time.Minute
+	windowMinutes := sp.EffectiveWindowMinutes(guard.WindowMinutes)
+	window := time.Duration(windowMinutes) * time.Minute
 	count, err := h.repeatPayloadCache.IncrementRepeatCount(c.Request.Context(),
 		service.RepeatPayloadScopeSmallProbe, apiKeyID, fingerprint, window)
 	if err != nil {
@@ -88,7 +89,7 @@ func (h *GatewayHandler) interceptRepeatSmallProbe(
 			zap.String("fingerprint", fingerprint),
 			zap.Int64("repeat_count", count),
 			zap.Int("threshold", sp.Threshold),
-			zap.Int("window_minutes", guard.WindowMinutes),
+			zap.Int("window_minutes", windowMinutes),
 			zap.Int("body_bytes", parsed.Body.Len()),
 			zap.String("model", model),
 			zap.Bool("stream", stream),

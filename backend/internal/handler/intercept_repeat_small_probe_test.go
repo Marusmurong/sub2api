@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -175,6 +176,34 @@ func TestInterceptRepeatSmallProbe_Isolation(t *testing.T) {
 	c, _ := newGuardContext()
 	if h.interceptRepeatSmallProbe(c, parsed, body, "claude-opus-4-7", true, 64, nil) {
 		t.Fatal("另一个 api_key 不应受影响")
+	}
+}
+
+// 窗口：small_probe.window_minutes 配了就用自己的，没配（0）沿用父级。
+func TestInterceptRepeatSmallProbe_WindowOverridesParent(t *testing.T) {
+	cases := []struct {
+		name   string
+		own    int
+		parent int
+		want   time.Duration
+	}{
+		{"沿用父级", 0, 30, 30 * time.Minute},
+		{"自己覆盖", 240, 30, 240 * time.Minute},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cache := newFakeRepeatPayloadCache()
+			cfg := smallProbeConfig(config.RepeatPayloadGuardModeBlock)
+			cfg.Gateway.RepeatPayloadGuard.WindowMinutes = tc.parent
+			cfg.Gateway.RepeatPayloadGuard.SmallProbe.WindowMinutes = tc.own
+			h := &GatewayHandler{cfg: cfg, repeatPayloadCache: cache}
+			parsed, body := pingBody(t, "", true)
+			c, _ := newGuardContext()
+			h.interceptRepeatSmallProbe(c, parsed, body, "claude-opus-4-7", true, 63, nil)
+			if cache.lastWindow != tc.want {
+				t.Fatalf("窗口 = %v，期望 %v", cache.lastWindow, tc.want)
+			}
+		})
 	}
 }
 

@@ -1255,8 +1255,22 @@ type RepeatSmallProbeConfig struct {
 	Mode string `mapstructure:"mode"`
 	// MaxBodyBytes: 高于此体积的请求不归这里管（那是 min_body_bytes 那套的事）。
 	MaxBodyBytes int `mapstructure:"max_body_bytes"`
-	// Threshold: 同一指纹在 window_minutes（与父配置共用）内允许出现的次数。
+	// Threshold: 同一指纹在窗口内允许出现的次数。
 	Threshold int `mapstructure:"threshold"`
+	// WindowMinutes: 计数窗口。0 = 沿用父级 repeat_payload_guard.window_minutes。
+	//
+	// 为什么要独立：拦截率的杠杆在窗口不在阈值——窗口内放行次数恒等于阈值，
+	// 窗口越长那几次被摊得越薄（30 分钟 ≈ 50%，4 小时 ≈ 94%，每 3 分钟一发的探活）。
+	// 而父级窗口服务的是大请求刷号，30 分钟是它的合理值，不该被这里牵着改。
+	WindowMinutes int `mapstructure:"window_minutes"`
+}
+
+// EffectiveWindowMinutes 返回实际生效的窗口：自己配了用自己的，否则沿用父级。
+func (c RepeatSmallProbeConfig) EffectiveWindowMinutes(parent int) int {
+	if c.WindowMinutes > 0 {
+		return c.WindowMinutes
+	}
+	return parent
 }
 
 // NormalizedMode 同 RepeatPayloadGuardConfig.NormalizedMode：拼错按 off。
@@ -1285,6 +1299,9 @@ func (c RepeatSmallProbeConfig) validate() error {
 	}
 	if c.Threshold <= 0 {
 		return fmt.Errorf("gateway.repeat_payload_guard.small_probe.threshold must be positive")
+	}
+	if c.WindowMinutes < 0 {
+		return fmt.Errorf("gateway.repeat_payload_guard.small_probe.window_minutes must not be negative")
 	}
 	return nil
 }
@@ -1321,7 +1338,7 @@ func (c RepeatPayloadGuardConfig) validate() error {
 	if err := c.SmallProbe.validate(); err != nil {
 		return err
 	}
-	if c.SmallProbe.NormalizedMode() != RepeatPayloadGuardModeOff && c.WindowMinutes <= 0 {
+	if c.SmallProbe.NormalizedMode() != RepeatPayloadGuardModeOff && c.SmallProbe.EffectiveWindowMinutes(c.WindowMinutes) <= 0 {
 		return fmt.Errorf("gateway.repeat_payload_guard.window_minutes must be positive")
 	}
 	if c.NormalizedMode() == RepeatPayloadGuardModeOff {
@@ -2596,6 +2613,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.repeat_payload_guard.small_probe.mode", RepeatPayloadGuardModeObserve)
 	viper.SetDefault("gateway.repeat_payload_guard.small_probe.max_body_bytes", 4096)
 	viper.SetDefault("gateway.repeat_payload_guard.small_probe.threshold", 5)
+	viper.SetDefault("gateway.repeat_payload_guard.small_probe.window_minutes", 0)
 	viper.SetDefault("gateway.max_account_switches", 10)
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
 	viper.SetDefault("gateway.force_codex_cli", false)
