@@ -21,6 +21,21 @@ var ccVersionInBillingRe = regexp.MustCompile(`cc_version=\d+\.\d+\.\d+`)
 // 用于按最终 body 重算 fp（见 normalizeBillingHeaderBlock）。
 var ccVersionFingerprintInBillingRe = regexp.MustCompile(`(cc_version=\d+\.\d+\.\d+)\.[0-9a-f]{3}`)
 
+// effectiveBillingUserAgent 决定 billing block 的版本同步该以哪个 UA 为准。
+//
+// 采自上游 v0.2.1。OAuth mimic 路径在套完账号指纹之后会强制使用内置 UA，
+// 因此此时必须读 claude.DefaultHeaders 而不是指纹里的 UA，否则 body 里的
+// cc_version 会停留在指纹的旧版本、与实际发出的 UA 不一致。
+func effectiveBillingUserAgent(tokenType string, mimicClaudeCode bool, fingerprint *Fingerprint) string {
+	if tokenType == "oauth" && mimicClaudeCode {
+		return claude.DefaultHeaders["User-Agent"]
+	}
+	if fingerprint == nil {
+		return ""
+	}
+	return fingerprint.UserAgent
+}
+
 // ccEntrypointSegmentRe 匹配 "cc_entrypoint=<值>;" 整段，用于在其后插入 cch 段。
 var ccEntrypointSegmentRe = regexp.MustCompile(`(cc_entrypoint=[^;]*;)`)
 

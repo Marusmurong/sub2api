@@ -276,6 +276,8 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 	if err != nil {
 		setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(err.Error()), "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			ProxyID:            opsUpstreamProxyID(account),
+			ProxyName:          opsUpstreamProxyName(account),
 			Platform:           account.Platform,
 			AccountID:          account.ID,
 			AccountName:        account.Name,
@@ -330,6 +332,8 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 		}
 		setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			ProxyID:            opsUpstreamProxyID(account),
+			ProxyName:          opsUpstreamProxyName(account),
 			Platform:           account.Platform,
 			AccountID:          account.ID,
 			AccountName:        account.Name,
@@ -495,10 +499,14 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	// 与 buildUpstreamRequest 保持同一形态与同一门槛（只看 tokenType），避免同一账号
 	// 在 messages 与 count_tokens 两类请求上呈现不一致的 billing block。
 	if tokenType == "oauth" {
-		userAgent := ""
-		if ctFingerprint != nil && ctEnableFP {
-			userAgent = ctFingerprint.UserAgent
+		// 同 buildUpstreamRequest：走 effectiveBillingUserAgent，避免 OAuth mimic
+		// 强制覆盖 UA 后 body 里的 cc_version 停留在指纹的旧版本。
+		// 指纹统一开关关闭时传 nil，让 helper 只按 mimic 路径决定。
+		var billingFingerprint *Fingerprint
+		if ctEnableFP {
+			billingFingerprint = ctFingerprint
 		}
+		userAgent := effectiveBillingUserAgent(tokenType, mimicClaudeCode, billingFingerprint)
 		// count_tokens 不产生 assistant 响应，因此不参与 parent-link：
 		// 既不注入 cc_prev_req（真实 CLI 的 count_tokens 同样没有上一轮 assistant
 		// 条目可指），也不记录本轮 id。

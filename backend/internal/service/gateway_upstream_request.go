@@ -111,10 +111,10 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// enable_fingerprint_unification 开关无关；挂在 fingerprint 下会导致该开关关闭时
 	// 整个 block 不被归一化。UA 缺失时 normalizeBillingHeaderBlock 会跳过版本同步。
 	if tokenType == "oauth" {
-		userAgent := ""
-		if fingerprint != nil {
-			userAgent = fingerprint.UserAgent
-		}
+		// UA 取值走 effectiveBillingUserAgent（采自上游 v0.2.1）：OAuth mimic 路径
+		// 会在套完指纹后强制使用内置 UA，裸读 fingerprint.UserAgent 会拿到指纹里的
+		// 旧版本，导致 body 的 cc_version 与实际发出的 UA 不一致。
+		userAgent := effectiveBillingUserAgent(tokenType, mimicClaudeCode, fingerprint)
 		// parent-link：取本会话在本账号上的上一轮 upstream request id。
 		// 会话标识同时暂存到 gin.Context，供响应侧落存本轮 id 时复用。
 		sessionID := ccPrevReqSessionID(body)

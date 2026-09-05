@@ -140,6 +140,8 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 				respBody, _ := s.readUpstreamErrorBody(resp)
 				_ = resp.Body.Close()
 				appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+					ProxyID:            opsUpstreamProxyID(account),
+					ProxyName:          opsUpstreamProxyName(account),
 					Platform:           account.Platform,
 					AccountID:          account.ID,
 					AccountName:        account.Name,
@@ -184,6 +186,8 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 
 			s.handleRetryExhaustedSideEffects(ctx, resp, account)
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+				ProxyID:            opsUpstreamProxyID(account),
+				ProxyName:          opsUpstreamProxyName(account),
 				Platform:           account.Platform,
 				AccountID:          account.ID,
 				AccountName:        account.Name,
@@ -218,6 +222,8 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 
 		s.handleFailoverSideEffects(ctx, resp, account, input.RequestModel)
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+			ProxyID:            opsUpstreamProxyID(account),
+			ProxyName:          opsUpstreamProxyName(account),
 			Platform:           account.Platform,
 			AccountID:          account.ID,
 			AccountName:        account.Name,
@@ -274,6 +280,8 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		// 同 gateway_forward.go：RequestID 必须走 upstreamRequestID（Anthropic 的头名是
 		// request-id，x-request-id 实测恒为空），同时保留上游新增的响应模型审计字段。
 		RequestID:                     upstreamRequestID(resp.Header),
+		// UpstreamHeaders 采自上游 v0.2.1。
+		UpstreamHeaders:               resp.Header,
 		Usage:                         *usage,
 		Model:                         input.OriginalModel,
 		UpstreamModel:                 input.RequestModel,
