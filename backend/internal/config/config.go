@@ -1229,6 +1229,64 @@ type RepeatPayloadGuardConfig struct {
 	// Claude Code 会为同一份会话状态**合法地**重复调用 count_tokens，body 同样很大，
 	// 且该路径不消耗账号额度。与 messages 共用阈值会误伤。
 	CountTokensThreshold int `mapstructure:"count_tokens_threshold"`
+
+	// SmallProbe: 小请求重复探活拦截，与上面的大请求刷号拦截互补、独立配置。
+	SmallProbe RepeatSmallProbeConfig `mapstructure:"small_probe"`
+}
+
+// RepeatSmallProbeConfig 拦截「同一 key 反复发同一份小请求」的中转探活。
+//
+// 背景（2026-09-06）：key 63「中转用」每 2~5 分钟发一次 500 字节的固定请求
+// （opus、input 37 / output 15、带 claude-cli UA 与 session_id），48 小时 240 次，
+// 每次落到不同账号。它既不在 probe_liveness 的固定文案名单里，又带 session 走了
+// 严格档；体积又远低于 min_body_bytes，大请求那套根本不看它。三层之间正好是这条缝。
+//
+// 判定：body ≤ max_body_bytes、无 tools、单条 user 消息、同一 key 同一 messages
+// 指纹在 window 内出现 > threshold 次。命中后**本地回一句问候（200）**而不是拒绝——
+// 对方在测活，回错误它会把我们标为不可用；回正常问候它继续用我们，但不再花上游。
+//
+// 阈值依据（2026-09-06 实测 7 天，≤~4KB、输出 ≤20 token 的请求按 key+input 分组）：
+// 269 组里 208 组只出现 1 次、30 组 2 次、14 组 3~4 次；重复 >20 的 10 组全是探活
+// （最高 292 次）。阈值 5 零误伤，且高于客户端标准重试上限（1+3=4）。
+// max_body_bytes 4096：这条 ping 500 字节，8 月那批 Go-http-client 探活 500~2000
+// token；真实 Claude Code 首轮带完整 system+tools 通常 20KB 以上。
+type RepeatSmallProbeConfig struct {
+	// Mode: off | observe | block。block 的含义是「本地回问候」，不是报错。
+	Mode string `mapstructure:"mode"`
+	// MaxBodyBytes: 高于此体积的请求不归这里管（那是 min_body_bytes 那套的事）。
+	MaxBodyBytes int `mapstructure:"max_body_bytes"`
+	// Threshold: 同一指纹在 window_minutes（与父配置共用）内允许出现的次数。
+	Threshold int `mapstructure:"threshold"`
+}
+
+// NormalizedMode 同 RepeatPayloadGuardConfig.NormalizedMode：拼错按 off。
+func (c RepeatSmallProbeConfig) NormalizedMode() string {
+	switch strings.ToLower(strings.TrimSpace(c.Mode)) {
+	case RepeatPayloadGuardModeObserve:
+		return RepeatPayloadGuardModeObserve
+	case RepeatPayloadGuardModeBlock:
+		return RepeatPayloadGuardModeBlock
+	default:
+		return RepeatPayloadGuardModeOff
+	}
+}
+
+func (c RepeatSmallProbeConfig) validate() error {
+	switch strings.ToLower(strings.TrimSpace(c.Mode)) {
+	case RepeatPayloadGuardModeOff, RepeatPayloadGuardModeObserve, RepeatPayloadGuardModeBlock:
+	default:
+		return fmt.Errorf("gateway.repeat_payload_guard.small_probe.mode must be one of off/observe/block, got %q", c.Mode)
+	}
+	if c.NormalizedMode() == RepeatPayloadGuardModeOff {
+		return nil
+	}
+	if c.MaxBodyBytes <= 0 {
+		return fmt.Errorf("gateway.repeat_payload_guard.small_probe.max_body_bytes must be positive")
+	}
+	if c.Threshold <= 0 {
+		return fmt.Errorf("gateway.repeat_payload_guard.small_probe.threshold must be positive")
+	}
+	return nil
 }
 
 // 重复 payload 拦截的模式取值。
@@ -1257,6 +1315,14 @@ func (c RepeatPayloadGuardConfig) validate() error {
 	case RepeatPayloadGuardModeOff, RepeatPayloadGuardModeObserve, RepeatPayloadGuardModeBlock:
 	default:
 		return fmt.Errorf("gateway.repeat_payload_guard.mode must be one of off/observe/block, got %q", c.Mode)
+	}
+	// 小探针子配置独立校验：父级 off 不代表它也 off，两套开关互不牵连。
+	// 它与父级共用 window_minutes，所以只要任一方开着，窗口就必须为正。
+	if err := c.SmallProbe.validate(); err != nil {
+		return err
+	}
+	if c.SmallProbe.NormalizedMode() != RepeatPayloadGuardModeOff && c.WindowMinutes <= 0 {
+		return fmt.Errorf("gateway.repeat_payload_guard.window_minutes must be positive")
 	}
 	if c.NormalizedMode() == RepeatPayloadGuardModeOff {
 		// 关闭时不校验其余参数，避免历史配置因为没填这些字段而启动失败。
@@ -2526,6 +2592,10 @@ func setDefaults() {
 	viper.SetDefault("gateway.repeat_payload_guard.window_minutes", 30)
 	viper.SetDefault("gateway.repeat_payload_guard.messages_threshold", 8)
 	viper.SetDefault("gateway.repeat_payload_guard.count_tokens_threshold", 40)
+	// 小请求重复探活。默认 observe：先在真实流量上看日志再切 block（见 RepeatSmallProbeConfig）。
+	viper.SetDefault("gateway.repeat_payload_guard.small_probe.mode", RepeatPayloadGuardModeObserve)
+	viper.SetDefault("gateway.repeat_payload_guard.small_probe.max_body_bytes", 4096)
+	viper.SetDefault("gateway.repeat_payload_guard.small_probe.threshold", 5)
 	viper.SetDefault("gateway.max_account_switches", 10)
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
 	viper.SetDefault("gateway.force_codex_cli", false)

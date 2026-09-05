@@ -29,6 +29,11 @@ const (
 	// 单独一个命名空间是必须的：Claude Code 会为同一份会话状态合法地重复调用
 	// count_tokens，若与 messages 共用计数，正常客户端会把 messages 的额度耗光。
 	RepeatPayloadScopeCountTokens RepeatPayloadScope = "ct"
+	// RepeatPayloadScopeSmallProbe 对应小请求重复探活（config.RepeatSmallProbeConfig）。
+	//
+	// 独立命名空间：它和 msg 看的是同一个 messages 指纹，但门槛方向相反
+	// （≤4KB vs ≥200KB），阈值也不同，混在一起任一方的计数都不再反映自己的事实。
+	RepeatPayloadScopeSmallProbe RepeatPayloadScope = "small"
 )
 
 // RepeatPayloadFingerprint 由请求的 messages 数组算出指纹，第二个返回值表示是否可用。

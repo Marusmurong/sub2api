@@ -239,6 +239,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 
+	// 小请求重复探活：按内容判不出来的探活（不在文案名单、带 session 走了严格档），
+	// 按重复次数兜底。同样在并发槽与账号选择之前，命中后本地回问候、不发上游。
+	// 位置约束与下面 rejectRepeatPayload 相同：只统计确实会打到上游的流量。
+	if h.interceptRepeatSmallProbe(c, parsedReq, body, reqModel, reqStream, apiKey.ID, reqLog) {
+		return
+	}
+
 	// 重复 payload 拦截：同一 key 反复提交同一份大 payload 时就地拒绝。
 	// 仍在用户并发槽与账号选择之前——命中后不发上游、不占账号槽、不消耗订阅额度。
 	//

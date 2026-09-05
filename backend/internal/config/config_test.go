@@ -2610,3 +2610,41 @@ func TestLoad_DefaultGatewayImageStreamConfig(t *testing.T) {
 		t.Fatalf("image stream timeout = %d, want greater than ordinary stream timeout %d", cfg.Gateway.ImageStreamDataIntervalTimeout, cfg.Gateway.StreamDataIntervalTimeout)
 	}
 }
+
+// 小请求重复探活拦截：默认 observe（先看日志再切 block），阈值与体积上限有默认值，
+// 且校验在 mode != off 时拒绝非正数。
+func TestRepeatSmallProbeConfig_DefaultsAndValidate(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	sp := cfg.Gateway.RepeatPayloadGuard.SmallProbe
+	if sp.NormalizedMode() != RepeatPayloadGuardModeObserve {
+		t.Fatalf("small_probe.mode 默认应为 observe，实际 %q", sp.Mode)
+	}
+	if sp.MaxBodyBytes != 4096 || sp.Threshold != 5 {
+		t.Fatalf("small_probe 默认 max_body_bytes=4096 threshold=5，实际 %+v", sp)
+	}
+
+	bad := cfg.Gateway.RepeatPayloadGuard
+	bad.SmallProbe.Mode = RepeatPayloadGuardModeBlock
+	bad.SmallProbe.Threshold = 0
+	if err := bad.validate(); err == nil {
+		t.Fatal("threshold=0 且 mode=block 应校验失败")
+	}
+	bad.SmallProbe.Threshold = 5
+	bad.SmallProbe.MaxBodyBytes = 0
+	if err := bad.validate(); err == nil {
+		t.Fatal("max_body_bytes=0 且 mode=block 应校验失败")
+	}
+	bad.SmallProbe.Mode = "typo"
+	if err := bad.validate(); err == nil {
+		t.Fatal("非法 mode 应校验失败")
+	}
+	off := cfg.Gateway.RepeatPayloadGuard
+	off.SmallProbe = RepeatSmallProbeConfig{Mode: RepeatPayloadGuardModeOff}
+	if err := off.validate(); err != nil {
+		t.Fatalf("off 时不校验其余字段，实际 %v", err)
+	}
+}
