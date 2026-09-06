@@ -215,7 +215,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// OAuth + mimic Claude Code：强制注入 CLI 指纹相关 header
 	// （user-agent/x-stainless-*/x-app/Accept/x-stainless-helper-method/x-client-request-id）
 	if tokenType == "oauth" && mimicClaudeCode {
-		applyClaudeCodeMimicHeaders(req, reqStream)
+		applyClaudeCodeMimicHeaders(ctx, req, reqStream)
 	}
 
 	// 写入最终 anthropic-beta header
@@ -226,14 +226,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		setHeaderRaw(req.Header, "anthropic-beta", finalBetaHeader)
 	}
 
-	// 同步 X-Claude-Code-Session-Id 头：取 body 中已处理的 metadata.user_id 的 session_id 覆盖
-	if sessionHeader := getHeaderRaw(req.Header, "X-Claude-Code-Session-Id"); sessionHeader != "" {
-		if uid := gjson.GetBytes(body, "metadata.user_id").String(); uid != "" {
-			if parsed := ParseMetadataUserID(uid); parsed != nil {
-				setHeaderRaw(req.Header, "X-Claude-Code-Session-Id", parsed.SessionID)
-			}
-		}
-	}
+	syncClaudeCodeSessionIDHeader(req, body, tokenType == "oauth" && mimicClaudeCode)
 
 	// 账号级请求头覆写（仅 anthropic/openai api_key 账号启用时生效；OAuth 路径 no-op）。
 	// 放在所有 header 逻辑之后，确保配置值对同名头拥有最终决定权。
@@ -576,7 +569,7 @@ func (s *GatewayService) computeBaseAnthropicBeta(
 			// 否则等于放行全部客户端 beta，集合大小又会随下游变化。
 			// 所有模型（含 Haiku）都走这一份，避免 Haiku 被单独识别为第三方客户端。
 			return mergeAnthropicBetaDropping(
-				claude.MimicryBetasWithClientFeatures(clientBeta), "", effectiveDropSet), true
+				claude.MimicryBetasForRequest(clientBeta, bodyRequestsFastMode(body)), "", effectiveDropSet), true
 		}
 		// 非 OAuth-mimic 的兜底（当前 OAuth 已恒为 mimic，此分支主要留给未来的非 OAuth 场景）
 		return stripBetaTokensWithSet(s.getBetaHeader(modelID, clientBeta), effectiveDropSet), true
@@ -926,7 +919,7 @@ var defaultDroppedBetasSet = buildBetaTokenSet(claude.DroppedBetas)
 // applyClaudeCodeMimicHeaders forces "Claude Code-like" request headers.
 // This mirrors opencode-anthropic-auth behavior: do not trust downstream
 // headers when using Claude Code-scoped OAuth credentials.
-func applyClaudeCodeMimicHeaders(req *http.Request, isStream bool) {
+func applyClaudeCodeMimicHeaders(ctx context.Context, req *http.Request, isStream bool) {
 	if req == nil {
 		return
 	}
@@ -945,11 +938,51 @@ func applyClaudeCodeMimicHeaders(req *http.Request, isStream bool) {
 	if isStream {
 		setHeaderRaw(req.Header, "x-stainless-helper-method", "stream")
 	}
+	// 重试计数跟着尝试序号走：DefaultHeaders 里写死的 "0" 只对首次请求正确，
+	// 真实 SDK 第 n 次重试发 n（审计 H-4）。
+	if attempt := upstreamAttemptFromContext(ctx); attempt > 1 {
+		setHeaderRaw(req.Header, "X-Stainless-Retry-Count", strconv.Itoa(attempt-1))
+	}
 	// Real Claude CLI 每个请求都会生成一个新的 UUID 放在 x-client-request-id。
 	// 上游会以此作为会话/请求指纹的一部分，缺失或重复都可能触发第三方判定。
 	if getHeaderRaw(req.Header, "x-client-request-id") == "" {
 		setHeaderRaw(req.Header, "x-client-request-id", uuid.NewString())
 	}
+}
+
+// bodyRequestsFastMode 判断请求体是否要求 fast 档（与 ParsedRequest.Speed 同口径：
+// 去空白、小写后等于 "fast"）。
+func bodyRequestsFastMode(body []byte) bool {
+	if len(body) == 0 {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(gjson.GetBytes(body, "speed").String()), "fast")
+}
+
+// syncClaudeCodeSessionIDHeader 让 X-Claude-Code-Session-Id 与 body 里
+// metadata.user_id.session_id 保持一致。
+//
+// 真实 CLI 两处取同一个 `kt()`（EGRESS_SPEC §6 / §5），每个请求都带这个头。伪装路径
+// 把下游头全部丢弃、DefaultHeaders 里又没有它，此前从不发送——一个自称 2.1.257 的
+// CLI 缺一个 2.1.87 起必发的头（审计 H-2）。force 为真（OAuth 伪装）时总是从 body 取值
+// 写入；否则沿用旧语义，只在客户端已经带了这个头时才同步。body 里没有 session 时
+// 不凭空造：头与 body 不一致比缺头更糟。
+func syncClaudeCodeSessionIDHeader(req *http.Request, body []byte, force bool) {
+	if req == nil {
+		return
+	}
+	if !force && getHeaderRaw(req.Header, "X-Claude-Code-Session-Id") == "" {
+		return
+	}
+	uid := gjson.GetBytes(body, "metadata.user_id").String()
+	if uid == "" {
+		return
+	}
+	parsed := ParseMetadataUserID(uid)
+	if parsed == nil || parsed.SessionID == "" {
+		return
+	}
+	setHeaderRaw(req.Header, "X-Claude-Code-Session-Id", parsed.SessionID)
 }
 
 func truncateForLog(b []byte, maxBytes int) string {

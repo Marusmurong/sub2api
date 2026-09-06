@@ -41,6 +41,11 @@ const (
 	// AccountSwitchCount 表示请求过程中发生的账号切换次数
 	AccountSwitchCount Key = "ctx_account_switch_count"
 
+	// UpstreamAttempt 是同一账号上本次上游请求的尝试序号（从 1 起）。
+	// 只在 service 内部的重试循环与 buildUpstreamRequest 之间传递，用来让
+	// X-Stainless-Retry-Count 像真实 SDK 一样随重试递增。
+	UpstreamAttempt Key = "ctx_upstream_attempt"
+
 	// IsClaudeCodeClient 标识当前请求是否来自 Claude Code 客户端
 	IsClaudeCodeClient Key = "ctx_is_claude_code_client"
 

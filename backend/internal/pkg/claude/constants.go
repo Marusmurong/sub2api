@@ -137,6 +137,10 @@ var canonicalBetaOrder = []string{
 	BetaEffort,
 	BetaContextManagement,
 	BetaExtendedCacheTTL,
+	// fast-mode 只在 body 带 speed:"fast" 时出现（见 MimicryBetasForRequest）。
+	// 排在末尾：EGRESS_SPEC §8 只验证了 token 存在，未验证顺序；spec 的枚举顺序里它是
+	// 最后一个，且它是按请求触发的能力开关而非身份标记，放在固定身份集合之后最自洽。
+	BetaFastMode,
 }
 
 // MimicryBetasWithClientFeatures 返回伪装路径的出口 beta 列表：
@@ -144,9 +148,21 @@ var canonicalBetaOrder = []string{
 //
 // clientBeta 为客户端原始 anthropic-beta 头（逗号分隔，可为空）。白名单之外的一律丢弃。
 func MimicryBetasWithClientFeatures(clientBeta string) []string {
+	return MimicryBetasForRequest(clientBeta, false)
+}
+
+// MimicryBetasForRequest 在 MimicryBetasWithClientFeatures 的基础上，按 body 触发的
+// 能力开关补 beta。当前只有 fastMode：body 带 speed:"fast" 时真实 CLI 一定带
+// fast-mode beta，而 speed 字段又是原生透传的，只补 beta 不剥字段（审计 M-3）。
+// 不能把 fast-mode 放进 featureBetaAllowlist——那条路径看的是客户端头，而这里要
+// 修的正是「客户端只发了字段没发头」的形态。
+func MimicryBetasForRequest(clientBeta string, fastMode bool) []string {
 	want := make(map[string]struct{}, len(canonicalBetaOrder))
 	for _, b := range FullClaudeCodeMimicryBetas() {
 		want[b] = struct{}{}
+	}
+	if fastMode {
+		want[BetaFastMode] = struct{}{}
 	}
 	for _, p := range strings.Split(clientBeta, ",") {
 		p = strings.TrimSpace(p)
