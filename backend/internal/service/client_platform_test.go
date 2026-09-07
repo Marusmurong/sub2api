@@ -4,6 +4,7 @@ package service
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -80,6 +81,14 @@ func TestClassifyClientPlatform(t *testing.T) {
 			h:    hdr(),
 			body: `{"system":[{"type":"text","text":"Working directory: /x\nPlatform: darwin\nShell: zsh"}]}`,
 			want: ClientPlatformObservation{Platform: ClientPlatformMacOSArm64, OS: "darwin", Arch: "arm64", Source: ClientPlatformSourceEnvBlock},
+		},
+		{
+			// 2.1.26x 真实形态：环境信息在主 system 提示词末尾的「# Environment」段，
+			// 列表项写法，前面还有几十 KB 的正文。
+			name: "2.1.26x 的 # Environment 列表项形态，且位于长提示词末尾",
+			h:    hdr("X-Stainless-OS", "MacOS", "X-Stainless-Arch", "arm64"),
+			body: `{"system":[{"type":"text","text":"billing"},{"type":"text","text":` + jsonStr(strings.Repeat("You are Claude Code. ", 3000)+"\n# Environment\nYou have been invoked in the following environment: \n - Primary working directory: /Users/x/proj\n - Is a git repository: true\n - Platform: win32\n - Shell: powershell\n - OS Version: Windows 11\n") + `}]}`,
+			want: ClientPlatformObservation{Platform: ClientPlatformWindowsArm64, OS: "win32", Arch: "arm64", Source: ClientPlatformSourceEnvBlock},
 		},
 		{
 			name: "Intel Mac",

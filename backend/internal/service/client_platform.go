@@ -57,8 +57,11 @@ type ClientPlatformStatsCache interface {
 }
 
 var (
-	envBlockRe     = regexp.MustCompile(`(?s)<env>(.*?)</env>`)
-	platformLineRe = regexp.MustCompile(`(?m)^\s*Platform:\s*(darwin|win32|linux)\s*$`)
+	envBlockRe = regexp.MustCompile(`(?s)<env>(.*?)</env>`)
+	// 两种线上形态都要认：
+	//   旧：<env> 块里的 "Platform: darwin"
+	//   新（2.1.26x）：system 末尾「# Environment」段下的列表项 " - Platform: darwin"
+	platformLineRe = regexp.MustCompile(`(?m)^\s*(?:[-*]\s+)?Platform:\s*(darwin|win32|linux)\s*$`)
 )
 
 // ClassifyClientPlatform 判定请求来自哪个平台。见 ClientPlatform 的说明。
@@ -87,7 +90,8 @@ func ClassifyClientPlatform(headers http.Header, body []byte) ClientPlatformObse
 // platformFromEnvBlock 只看 system（string 或 text 块数组），不看 messages：
 // messages 里的 system-reminder / 用户文本可能引用 "Platform: win32" 这样的字样
 // （比如用户在讨论这份代码），按全文匹配会误判——沿用「只解析确定位置」的纪律。
-// 优先取 <env>…</env> 内的行，没有 <env> 标签时退化为 system 文本内的整行匹配。
+// 优先取 <env>…</env> 内的行（旧形态），没有 <env> 标签时退化为 system 文本内的整行匹配
+// （2.1.26x 的「# Environment」列表项形态就靠这一步命中）。
 func platformFromEnvBlock(body []byte) string {
 	if len(body) == 0 {
 		return ""
@@ -125,10 +129,11 @@ func platformFromEnvBlock(body []byte) string {
 	return ""
 }
 
-// clientPlatformScanLimit 是每个 system 文本块参与扫描的上限。真实 CLI 的 <env> 块
-// 总在 system 靠前的位置（抓包样本里位于第 3 块的前几百字节），扫前 16KB 足够；
-// 上限存在的意义是这个钩子跑在每个请求的热路径上，不能被一个巨大的 system 拖慢。
-const clientPlatformScanLimit = 16 * 1024
+// clientPlatformScanLimit 是每个 system 文本块参与扫描的上限。2.1.26x 把环境信息放在
+// 主 system 提示词**末尾**的「# Environment」段（主提示词本身几十 KB），所以上限不能小；
+// 512KB 对 RE2 是毫秒级，上限存在的意义只是防一个病态巨大的 system 拖慢热路径。
+// （09-07 上线首版设 16KB，线上零条 env_block 命中，就是被这条截掉的。）
+const clientPlatformScanLimit = 512 * 1024
 
 func boundedScanText(s string) string {
 	if len(s) <= clientPlatformScanLimit {
