@@ -28,6 +28,22 @@ func TestClientPlatformStatsCache_IncrAndExpire(t *testing.T) {
 	require.NoError(t, cache.IncrClientPlatformStat(ctx, "2026-09-07", ""))
 }
 
+func TestClientPlatformStatsCache_ReadStats(t *testing.T) {
+	cache, _ := newRepeatPayloadCacheForTest(t)
+	ctx := context.Background()
+	require.NoError(t, cache.IncrClientPlatformStat(ctx, "2026-09-08", "windows-x64|env_block|cc"))
+	require.NoError(t, cache.IncrClientPlatformStat(ctx, "2026-09-08", "windows-x64|env_block|cc"))
+	require.NoError(t, cache.IncrClientPlatformStat(ctx, "2026-09-08", "macos-arm64|header|cc"))
+
+	got, err := cache.ReadClientPlatformStats(ctx, "2026-09-08")
+	require.NoError(t, err)
+	require.Equal(t, map[string]int64{"windows-x64|env_block|cc": 2, "macos-arm64|header|cc": 1}, got)
+
+	empty, err := cache.ReadClientPlatformStats(ctx, "1999-01-01")
+	require.NoError(t, err)
+	require.Empty(t, empty)
+}
+
 func TestClientPlatformStatsCache_IdentityIncr(t *testing.T) {
 	cache, mr := newRepeatPayloadCacheForTest(t)
 	ctx := context.Background()

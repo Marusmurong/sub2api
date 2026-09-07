@@ -39,6 +39,10 @@ func (f *fakePlatformStatsCache) IncrClientIdentityStat(_ context.Context, day, 
 	return nil
 }
 
+func (f *fakePlatformStatsCache) ReadClientPlatformStats(_ context.Context, _ string) (map[string]int64, error) {
+	return map[string]int64{}, nil
+}
+
 func (f *fakePlatformStatsCache) RecordSessionClientPlatform(_ context.Context, sessionHash, platform string, _ time.Duration) (string, error) {
 	if prev, ok := f.sessions[sessionHash]; ok {
 		return prev, nil
@@ -101,6 +105,32 @@ func TestObserveClientPlatform_CountsSessionFlip(t *testing.T) {
 	h.observeClientPlatform(newPlatformTestContext(t, "Linux", "x64"), []byte(`{}`), "sess-x", true, zap.NewNop())
 	require.Equal(t, 1, cache.incr[day+"/flip|macos-arm64->linux-x64"])
 	require.Equal(t, "macos-arm64", cache.sessions["sess-x"], "首次判定不被覆盖")
+}
+
+// 判定结果要落到请求上下文供调度层读取；会话已有首次判定时以首次为准。
+func TestObserveClientPlatform_WritesPlatformIntoRequestContext(t *testing.T) {
+	cache := newFakePlatformStatsCache()
+	h := &GatewayHandler{repeatPayloadCache: cache}
+
+	c1 := newPlatformTestContext(t, "MacOS", "arm64")
+	h.observeClientPlatform(c1, []byte(`{}`), "sess-ctx", true, zap.NewNop())
+	require.Equal(t, service.ClientPlatformMacOSArm64, service.ClientPlatformFromContext(c1.Request.Context()))
+
+	// 同一会话后来判成 linux：上下文里仍是首次的 macos（会话内不重判）
+	c2 := newPlatformTestContext(t, "Linux", "x64")
+	h.observeClientPlatform(c2, []byte(`{}`), "sess-ctx", true, zap.NewNop())
+	require.Equal(t, service.ClientPlatformMacOSArm64, service.ClientPlatformFromContext(c2.Request.Context()))
+
+	// 未知平台不写上下文
+	c3 := newPlatformTestContext(t, "", "")
+	h.observeClientPlatform(c3, []byte(`{}`), "sess-none", false, zap.NewNop())
+	require.Equal(t, service.ClientPlatformUnknown, service.ClientPlatformFromContext(c3.Request.Context()))
+
+	// 没有计数存储时也要写上下文（分池不依赖观察计数是否可用）
+	h2 := &GatewayHandler{}
+	c4 := newPlatformTestContext(t, "Windows", "x64")
+	h2.observeClientPlatform(c4, []byte(`{}`), "sess-nocache", true, zap.NewNop())
+	require.Equal(t, service.ClientPlatformWindowsX64, service.ClientPlatformFromContext(c4.Request.Context()))
 }
 
 func TestObserveClientPlatform_NoCacheOrNilContextIsSafe(t *testing.T) {

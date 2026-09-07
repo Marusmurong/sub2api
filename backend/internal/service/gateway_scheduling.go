@@ -227,6 +227,12 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	if len(accounts) == 0 {
 		return nil, ErrNoAvailableAccounts
 	}
+	// 按客户端平台分池（开关关闭时原样返回）。放在所有选号层之前：之后的路由 /
+	// 粘性 / 负载层只在这份候选里挑，粘性账号已由过滤器保证保留。
+	accounts = s.applyClientPlatformPool(ctx, accounts, stickyAccountID)
+	if len(accounts) == 0 {
+		return nil, ErrNoAvailableAccounts
+	}
 	ctx = s.withWindowCostPrefetch(ctx, accounts)
 	ctx = s.withRPMPrefetch(ctx, accounts)
 
@@ -1862,6 +1868,9 @@ func shuffleWithinPriority(accounts []*Account) {
 }
 
 // selectAccountForModelWithPlatform 选择单平台账户（完全隔离）
+// 注意：这条 legacy 路径（无并发服务 / load_batch 关闭 / 直接调用 SelectAccountForModel）
+// 刻意不做按客户端平台分池。分池只挂在 SelectAccountWithLoadAwareness，生产走的是那条；
+// 配置校验已要求 client_platform_pool.enabled 时 load_batch_enabled 必须为 true。
 func (s *GatewayService) selectAccountForModelWithPlatform(ctx context.Context, groupID *int64, sessionHash string, requestedModel string, excludedIDs map[int64]struct{}, platform string) (*Account, error) {
 	preferOAuth := platform == PlatformGemini
 	routingAccountIDs := s.routingAccountIDsForRequest(ctx, groupID, requestedModel, platform)

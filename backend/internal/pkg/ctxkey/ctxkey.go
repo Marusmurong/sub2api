@@ -44,6 +44,10 @@ const (
 	// IsClaudeCodeClient 标识当前请求是否来自 Claude Code 客户端
 	IsClaudeCodeClient Key = "ctx_is_claude_code_client"
 
+	// ClientPlatform 是本请求判定出的下游客户端平台（macos-arm64 / windows-x64 …），
+	// 由 handler 的观察钩子写入，调度层按平台分池时读取。
+	ClientPlatform Key = "ctx_client_platform"
+
 	// ThinkingEnabled 标识当前请求是否开启 thinking（用于 Antigravity 最终模型名推导与模型维度限流）
 	ThinkingEnabled Key = "ctx_thinking_enabled"
 

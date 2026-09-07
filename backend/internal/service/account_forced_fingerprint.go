@@ -51,7 +51,9 @@ func (a *Account) HasForcedFingerprint() bool {
 	if fpMap := a.rawFingerprintMap(); len(fpMap) > 0 {
 		return true
 	}
-	return a.IsTLSFingerprintEnabled()
+	// 与 resolveForcedFingerprintSpec 保持同一判据：按平台定型的账号也是「强制身份」，
+	// 否则 persistFingerprintClientID 会把它当 legacy 路径，ClientID 不落库。
+	return a.IsTLSFingerprintEnabled() || a.ClientPlatform() != ClientPlatformUnknown
 }
 
 func (a *Account) rawFingerprintMap() map[string]any {
@@ -85,20 +87,30 @@ func (a *Account) resolveForcedFingerprintSpec() *forcedFingerprintSpec {
 	}
 	fpMap := a.rawFingerprintMap()
 	tlsOn := a.IsTLSFingerprintEnabled()
-	if len(fpMap) == 0 && !tlsOn {
+	clientPlatform := a.ClientPlatform()
+	if len(fpMap) == 0 && !tlsOn && clientPlatform == ClientPlatformUnknown {
 		return nil
 	}
 
-	// Base defaults: if TLS is on, align with our Node24 macOS profiles (all current
-	// production templates). Otherwise start from claude.DefaultHeaders.
+	// Base defaults: if TLS is on, align with the Claude Code 2.1.257–2.1.263 capture
+	// (profile 6 / built-in default). Otherwise start from claude.DefaultHeaders.
 	base := defaultsForTLSAlignedIdentity()
 	if !tlsOn {
 		base = defaultsFromClaudeDefaultHeaders()
 	}
-	if len(fpMap) > 0 {
+	switch {
+	case len(fpMap) > 0:
 		base.Source = "extra"
-	} else {
+	case clientPlatform != ClientPlatformUnknown:
+		base.Source = "client_platform"
+	default:
 		base.Source = "tls_profile"
+	}
+
+	// 按平台分池：账号定型后 OS / Arch 跟平台走（Runtime / Package / TLS 全平台相同，
+	// 见 ClientPlatformIdentity）。显式 fingerprint 字段仍可在下面覆盖它。
+	if os, arch, ok := ClientPlatformIdentity(clientPlatform); ok {
+		base.OS, base.Arch = os, arch
 	}
 
 	if v := mapString(fpMap, "os", "OS", "stainless_os"); v != "" {

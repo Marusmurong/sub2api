@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/tidwall/gjson"
 )
 
@@ -56,6 +57,82 @@ type ClientPlatformStatsCache interface {
 	RecordSessionClientPlatform(ctx context.Context, sessionHash, platform string, ttl time.Duration) (previous string, err error)
 	// IncrClientIdentityStat 给当天的 HTTP 身份组合计数 +1。field 见 ClientIdentityStatField。
 	IncrClientIdentityStat(ctx context.Context, day, field string) error
+	// ReadClientPlatformStats 读回某天的平台计数（field → 次数），分池按它算目标占比。
+	ReadClientPlatformStats(ctx context.Context, day string) (map[string]int64, error)
+}
+
+// WithClientPlatform 把本请求判定出的平台放进 context，供调度层分池读取。
+func WithClientPlatform(ctx context.Context, p ClientPlatform) context.Context {
+	if p == ClientPlatformUnknown {
+		return ctx
+	}
+	return context.WithValue(ctx, ctxkey.ClientPlatform, p)
+}
+
+// ClientPlatformFromContext 读出本请求的平台；没有则返回 Unknown。
+func ClientPlatformFromContext(ctx context.Context) ClientPlatform {
+	if ctx == nil {
+		return ClientPlatformUnknown
+	}
+	if p, ok := ctx.Value(ctxkey.ClientPlatform).(ClientPlatform); ok {
+		return p
+	}
+	return ClientPlatformUnknown
+}
+
+// ParseClientPlatform 把配置 / 账号 extra 里的字符串规范成 ClientPlatform；不认识返回 Unknown。
+func ParseClientPlatform(s string) ClientPlatform {
+	switch ClientPlatform(strings.ToLower(strings.TrimSpace(s))) {
+	case ClientPlatformMacOSArm64:
+		return ClientPlatformMacOSArm64
+	case ClientPlatformMacOSX64:
+		return ClientPlatformMacOSX64
+	case ClientPlatformWindowsX64:
+		return ClientPlatformWindowsX64
+	case ClientPlatformWindowsArm64:
+		return ClientPlatformWindowsArm64
+	case ClientPlatformLinuxX64:
+		return ClientPlatformLinuxX64
+	case ClientPlatformLinuxArm64:
+		return ClientPlatformLinuxArm64
+	default:
+		return ClientPlatformUnknown
+	}
+}
+
+// accountClientPlatformKey 是账号 extra 里的定型字段。空 = 未定型。
+const accountClientPlatformKey = "client_platform"
+
+// ClientPlatform 返回账号定型的客户端平台；未定型返回 Unknown。
+func (a *Account) ClientPlatform() ClientPlatform {
+	if a == nil || a.Extra == nil {
+		return ClientPlatformUnknown
+	}
+	v, _ := a.Extra[accountClientPlatformKey].(string)
+	return ParseClientPlatform(v)
+}
+
+// ClientPlatformIdentity 是平台 → 出站 stainless 头 (OS, Arch) 的表。
+//
+// 2026-09-07 的证据：Windows 客户抓样 + 线上身份计数都表明 Runtime / Runtime-Version /
+// Package-Version 与 TLS 握手（Bun 静态链接 BoringSSL）跟操作系统无关，各平台只有
+// OS / Arch 两个头不同，TLS 全平台复用 profile 6。所以表里只需要这两项。
+func ClientPlatformIdentity(p ClientPlatform) (os, arch string, ok bool) {
+	switch p {
+	case ClientPlatformMacOSArm64:
+		return "MacOS", "arm64", true
+	case ClientPlatformMacOSX64:
+		return "MacOS", "x64", true
+	case ClientPlatformWindowsX64, ClientPlatformWindowsArm64:
+		// coerceOSArch 会把 Windows 强制为 x64，与此一致。
+		return "Windows", "x64", true
+	case ClientPlatformLinuxX64:
+		return "Linux", "x64", true
+	case ClientPlatformLinuxArm64:
+		return "Linux", "arm64", true
+	default:
+		return "", "", false
+	}
 }
 
 var (

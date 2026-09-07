@@ -116,6 +116,10 @@ func ProvideGatewayHandler(
 		errorPassthroughService, contentModerationService, userMsgQueueService, cfg, settingService)
 	h.securityAuditCoordinator = coordinator
 	h.repeatPayloadCache = repeatPayloadCache
+	// 按平台分池的观察计数存储挂在同一个 Redis 结构上，调度层按目标占比时要读它。
+	if stats, ok := repeatPayloadCache.(service.ClientPlatformStatsCache); ok {
+		gatewayService.SetClientPlatformStatsCache(stats)
+	}
 	return h
 }
 

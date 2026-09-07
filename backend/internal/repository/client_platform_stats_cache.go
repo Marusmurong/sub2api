@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -63,6 +64,26 @@ func (c *repeatPayloadCache) IncrClientIdentityStat(ctx context.Context, day, fi
 		return fmt.Errorf("incr client identity stat: %w", err)
 	}
 	return nil
+}
+
+// ReadClientPlatformStats 读回某天的平台计数哈希；键不存在返回空 map。
+func (c *repeatPayloadCache) ReadClientPlatformStats(ctx context.Context, day string) (map[string]int64, error) {
+	if c == nil || c.rdb == nil || day == "" {
+		return map[string]int64{}, nil
+	}
+	raw, err := c.rdb.HGetAll(ctx, clientPlatformStatsPrefix+day).Result()
+	if err != nil {
+		return nil, fmt.Errorf("read client platform stats: %w", err)
+	}
+	out := make(map[string]int64, len(raw))
+	for k, v := range raw {
+		n, perr := strconv.ParseInt(v, 10, 64)
+		if perr != nil {
+			continue
+		}
+		out[k] = n
+	}
+	return out, nil
 }
 
 func (c *repeatPayloadCache) RecordSessionClientPlatform(ctx context.Context, sessionHash, platform string, ttl time.Duration) (string, error) {

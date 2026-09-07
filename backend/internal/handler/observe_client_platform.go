@@ -40,6 +40,15 @@ func (h *GatewayHandler) observeClientPlatform(c *gin.Context, body []byte, sess
 		)
 	}
 
+	// 分池用的「本请求平台」：默认取本次判定；下面若发现会话已有首次判定，以首次为准
+	// （会话内不重判，绝不因平台在中途换号）。开关关闭时调度层不读它，写入无副作用。
+	effective := obs.Platform
+	defer func() {
+		if effective != service.ClientPlatformUnknown {
+			c.Request = c.Request.WithContext(service.WithClientPlatform(c.Request.Context(), effective))
+		}
+	}()
+
 	// 断言失败即未注入（或实现不支持）；typed-nil 的情况由实现自身的 nil 守卫兜住。
 	stats, ok := h.repeatPayloadCache.(service.ClientPlatformStatsCache)
 	if !ok {
@@ -71,9 +80,15 @@ func (h *GatewayHandler) observeClientPlatform(c *gin.Context, body []byte, sess
 		}
 		return
 	}
-	if prev != "" && prev != string(obs.Platform) {
-		// 同一会话内判定变了：分池后这会是一次「因平台换号」的风险点，观察期先数清楚。
-		_ = stats.IncrClientPlatformStat(ctx, day, "flip|"+prev+"->"+string(obs.Platform))
+	if prev != "" {
+		// 会话内以首次判定为准。
+		if p := service.ParseClientPlatform(prev); p != service.ClientPlatformUnknown {
+			effective = p
+		}
+		if prev != string(obs.Platform) {
+			// 同一会话内判定变了：分池后这会是一次「因平台换号」的风险点，先数清楚。
+			_ = stats.IncrClientPlatformStat(ctx, day, "flip|"+prev+"->"+string(obs.Platform))
+		}
 	}
 }
 

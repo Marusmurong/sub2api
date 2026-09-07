@@ -1130,6 +1130,9 @@ type GatewayConfig struct {
 	// RepeatPayloadGuard: 重复 payload 拦截（反复提交同一份大请求刷号）。
 	RepeatPayloadGuard RepeatPayloadGuardConfig `mapstructure:"repeat_payload_guard"`
 
+	// ClientPlatformPool: 按下游客户端平台分池（审计 C-1）。默认关闭；关闭时只做观察计数。
+	ClientPlatformPool ClientPlatformPoolConfig `mapstructure:"client_platform_pool"`
+
 	// 账户切换最大次数（遇到上游错误时切换到其他账户的次数上限）
 	MaxAccountSwitches int `mapstructure:"max_account_switches"`
 	// Gemini 账户切换最大次数（Gemini 平台单独配置，因 API 限制更严格）
@@ -1204,6 +1207,75 @@ type GatewayGrokConfig struct {
 //
 // api_keys.rate_limit_5h 一类的额度封顶只能限制花销，拦不住这个动作本身——
 // 对方完全可以在额度内继续刷，烧的是订阅账号的真实窗口额度与封号风险。
+// ClientPlatformPoolConfig 控制「按下游客户端平台分池」（审计 C-1，方案见报告）。
+//
+//	enabled:            总开关。关闭时调度不看平台、不再定型新号，只保留观察期计数。
+//	                    注意已定型账号的出站 OS/Arch 仍跟 extra.client_platform 走——定型是
+//	                    「这台机器是什么系统」的永久事实，不随开关回退；要撤销只能清字段。
+//	                    只在负载感知选号路径生效（要求 scheduling.load_batch_enabled=true，
+//	                    启动时校验）；OpenAI 兼容 / Gemini 入口没有平台判定，一律归默认池。
+//	mode:               fallback（某平台池没号时退到任意号并告警，客户无感）/
+//	                    strict（直接无可用账号 → 503，绝不发自相矛盾的请求）。
+//	default_platform:   非 CC / 判不出平台的请求归到哪个池；也是永远开放的池。
+//	min_pool_target:    目标占比 × 在用总数 ≥ 此值，该平台才开独立池并允许定型新号；
+//	                    默认 2，避免出现只有 1 个号、没有故障转移的池。
+//	share_window_days:  计算目标占比用最近几天的观察计数（含今天）。
+type ClientPlatformPoolConfig struct {
+	Enabled         bool   `mapstructure:"enabled"`
+	Mode            string `mapstructure:"mode"`
+	DefaultPlatform string `mapstructure:"default_platform"`
+	MinPoolTarget   int    `mapstructure:"min_pool_target"`
+	ShareWindowDays int    `mapstructure:"share_window_days"`
+}
+
+const (
+	ClientPlatformPoolModeFallback = "fallback"
+	ClientPlatformPoolModeStrict   = "strict"
+)
+
+func (c ClientPlatformPoolConfig) NormalizedMode() string {
+	if c.Mode == "" {
+		return ClientPlatformPoolModeFallback
+	}
+	return c.Mode
+}
+
+func (c ClientPlatformPoolConfig) EffectiveDefaultPlatform() string {
+	if c.DefaultPlatform == "" {
+		return "macos-arm64"
+	}
+	return c.DefaultPlatform
+}
+
+func (c ClientPlatformPoolConfig) EffectiveMinPoolTarget() int {
+	if c.MinPoolTarget <= 0 {
+		return 2
+	}
+	return c.MinPoolTarget
+}
+
+func (c ClientPlatformPoolConfig) EffectiveShareWindowDays() int {
+	if c.ShareWindowDays <= 0 {
+		return 2
+	}
+	return c.ShareWindowDays
+}
+
+func (c ClientPlatformPoolConfig) validate() error {
+	switch c.NormalizedMode() {
+	case ClientPlatformPoolModeFallback, ClientPlatformPoolModeStrict:
+	default:
+		return fmt.Errorf("gateway.client_platform_pool.mode must be fallback or strict, got %q", c.Mode)
+	}
+	if c.MinPoolTarget < 0 {
+		return fmt.Errorf("gateway.client_platform_pool.min_pool_target must not be negative")
+	}
+	if c.ShareWindowDays < 0 || c.ShareWindowDays > 30 {
+		return fmt.Errorf("gateway.client_platform_pool.share_window_days must be within 0..30")
+	}
+	return nil
+}
+
 type RepeatPayloadGuardConfig struct {
 	// Mode: off | observe | block。
 	// observe 只记日志放行，用于在真实流量上校准阈值；block 命中即返回 429。
@@ -2613,6 +2685,13 @@ func setDefaults() {
 	viper.SetDefault("gateway.repeat_payload_guard.small_probe.mode", RepeatPayloadGuardModeObserve)
 	viper.SetDefault("gateway.repeat_payload_guard.small_probe.max_body_bytes", 4096)
 	viper.SetDefault("gateway.repeat_payload_guard.small_probe.threshold", 5)
+
+	// 按客户端平台分池（审计 C-1）：默认关闭，只观察计数；打开后 fallback 模式。
+	viper.SetDefault("gateway.client_platform_pool.enabled", false)
+	viper.SetDefault("gateway.client_platform_pool.mode", ClientPlatformPoolModeFallback)
+	viper.SetDefault("gateway.client_platform_pool.default_platform", "macos-arm64")
+	viper.SetDefault("gateway.client_platform_pool.min_pool_target", 2)
+	viper.SetDefault("gateway.client_platform_pool.share_window_days", 2)
 	viper.SetDefault("gateway.repeat_payload_guard.small_probe.window_minutes", 0)
 	viper.SetDefault("gateway.max_account_switches", 10)
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
@@ -3525,6 +3604,13 @@ func (c *Config) Validate() error {
 	}
 	if err := c.Gateway.RepeatPayloadGuard.validate(); err != nil {
 		return err
+	}
+	if err := c.Gateway.ClientPlatformPool.validate(); err != nil {
+		return err
+	}
+	// 分池的过滤点在负载感知选号路径上；关掉 load_batch 会走不到它，等于静默禁用。
+	if c.Gateway.ClientPlatformPool.Enabled && !c.Gateway.Scheduling.LoadBatchEnabled {
+		return fmt.Errorf("gateway.client_platform_pool.enabled requires gateway.scheduling.load_batch_enabled=true")
 	}
 	if c.Gateway.ModelsListReadMaxBytes <= 0 {
 		return fmt.Errorf("gateway.models_list_read_max_bytes must be positive")
