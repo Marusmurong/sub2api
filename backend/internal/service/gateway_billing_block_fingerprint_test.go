@@ -207,9 +207,9 @@ func TestExtractFirstUserTextFallsThroughAllMetaMessage(t *testing.T) {
 // 不会再往后找——线上等价于：跳过 meta 块后遇到 tool_result/空数组就停。
 func TestExtractFirstUserTextStopsAtNonMetaMessageWithoutText(t *testing.T) {
 	cases := map[string]string{
-		"tool_result 消息":     `{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"x","content":"ok"}]},{"role":"assistant","content":[{"type":"text","text":"..."}]},{"role":"user","content":[{"type":"text","text":"later"}]}]}`,
+		"tool_result 消息":      `{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"x","content":"ok"}]},{"role":"assistant","content":[{"type":"text","text":"..."}]},{"role":"user","content":[{"type":"text","text":"later"}]}]}`,
 		"meta 后跟 tool_result": `{"messages":[{"role":"user","content":[{"type":"text","text":"<system-reminder>x</system-reminder>"},{"type":"tool_result","tool_use_id":"x","content":"ok"}]},{"role":"user","content":[{"type":"text","text":"later"}]}]}`,
-		"空数组":                `{"messages":[{"role":"user","content":[]},{"role":"user","content":[{"type":"text","text":"later"}]}]}`,
+		"空数组":                 `{"messages":[{"role":"user","content":[]},{"role":"user","content":[{"type":"text","text":"later"}]}]}`,
 	}
 	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {

@@ -912,6 +912,26 @@ func removeThinkingDependentContextStrategies(body []byte) []byte {
 // claude package 的该常量含义。
 const anthropicBetaContextManagementToken = "context-management-2025-06-27"
 
+// stripFallbackFieldsForMimic 在伪装路径上无条件删掉 body.fallbacks 与
+// body.fallback_credit_token。sanitizeAnthropicBodyForBetaTokens 是「beta 里有就留」，
+// 而账号门控打开 fallback-credit beta 后，下游塞进来的 token 会被留下——那等于让
+// 下游替我们的账号消费信用。伪装路径的账号是我们的，这两个字段永远不该来自下游。
+func stripFallbackFieldsForMimic(body []byte) ([]byte, bool) {
+	if len(body) == 0 {
+		return body, false
+	}
+	changed := false
+	for _, field := range []string{"fallbacks", "fallback_credit_token"} {
+		if !gjson.GetBytes(body, field).Exists() {
+			continue
+		}
+		if b, err := sjson.DeleteBytes(body, field); err == nil {
+			body, changed = b, true
+		}
+	}
+	return body, changed
+}
+
 // sanitizeAnthropicBodyForBetaTokens 是对 Anthropic 直连路径上 body↔beta header
 // **能力维度**对称约束的统一实现，与 Bedrock 路径的
 // `sanitizeBedrockFieldsForBetaTokens` 对称。
@@ -933,9 +953,10 @@ const anthropicBetaContextManagementToken = "context-management-2025-06-27"
 //     （fallback_credit_token 额外接受 credit beta，见下）
 //   - 缺 token 时上游 Pydantic extra='forbid' 拒收：
 //     "fallbacks: Extra inputs are not permitted"
-//   - 本仓不写入该字段，全部来自客户端透传；OAuth mimic 用
-//     FullClaudeCodeMimicryBetas 覆盖客户端 beta（该列表不含 fallback beta），
-//     若不 strip，body 字段与 header 不对称 → 所有模型 400
+//   - 本仓不写入该字段，全部来自客户端透传；OAuth mimic 的 beta 由
+//     MimicryBetasForModel 决定，默认不含 fallback beta（账号门控打开时会带
+//     fallback-credit）。缺 beta 而不 strip → body 与 header 不对称 → 400；
+//     带 beta 时伪装路径另由 stripFallbackFieldsForMimic 无条件剥掉（管钱）
 //
 // 本函数按最终发送的 anthropic-beta header 决定是否保留 body 中的上述字段：
 // 缺对应 beta token → strip；客户端 header 已带对应 beta → 保留（不过度删除）。

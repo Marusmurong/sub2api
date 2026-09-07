@@ -516,8 +516,8 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===
 	// 顺序约束同 buildUpstreamRequest。
 	ctEffectiveDropSet := mergeDropSets(s.getBetaPolicyFilterSet(ctx, c, account, modelID))
-	finalBetaHeader, finalBetaShouldSet := s.computeFinalCountTokensAnthropicBeta(
-		tokenType, mimicClaudeCode, modelID, clientHeaders, body, ctEffectiveDropSet,
+	finalBetaHeader, finalBetaShouldSet := s.computeFinalCountTokensAnthropicBetaWithGates(
+		tokenType, mimicClaudeCode, modelID, clientHeaders, body, ctEffectiveDropSet, account.MimicryBetaGates(),
 	)
 
 	// 账号覆写了 anthropic-beta 时，覆写值即最终上游值：净化以覆写值为准
@@ -528,6 +528,13 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 	// 能力维度 body sanitize：与最终 anthropic-beta header 对称
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, finalBetaHeader); changed {
 		body = sanitized
+	}
+	// 伪装路径硬规则（与 buildUpstreamRequest 同款）：账号门控可能让 beta 带上
+	// fallback-credit，此时对称 sanitize 会保留下游塞进来的 fallback 字段；这里无条件剥掉。
+	if mimicClaudeCode {
+		if stripped, changed := stripFallbackFieldsForMimic(body); changed {
+			body = stripped
+		}
 	}
 
 	body = sanitizeCountTokensRequestBody(body)

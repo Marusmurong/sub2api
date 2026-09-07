@@ -179,9 +179,10 @@ func extractFirstUserText(body []byte) string {
 // billingHeaderCCHSegment 与 ensureBillingHeaderCCH，不要 grep 本文件。
 //
 // （曾有注释断言「新版 CLI 已不再发送 cch（issue #3358）」，那是误读。
-//  2026-09-02 从 2.1.257 原生二进制抽取的构造函数原文：
-//    C = s==="firstParty" && ii() || s==="vertex" ? " cch=00000;" : ""
-//  字段一直都在，只是值固定为常量 00000。）
+//
+//	2026-09-02 从 2.1.257 原生二进制抽取的构造函数原文：
+//	  C = s==="firstParty" && ii() || s==="vertex" ? " cch=00000;" : ""
+//	字段一直都在，只是值固定为常量 00000。）
 //
 // 此 block 不带 cache_control（与真实 CLI 一致；cache breakpoint 由后续的
 // Claude Code prompt block 承担）。

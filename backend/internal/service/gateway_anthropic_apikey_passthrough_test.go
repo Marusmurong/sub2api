@@ -909,9 +909,8 @@ func TestGatewayService_AnthropicOAuthMimic_RewritesSystemWithBillingBlock(t *te
 			require.NotNil(t, upstream.lastReq)
 			require.Equal(t, "Bearer oauth-token", getHeaderRaw(upstream.lastReq.Header, "authorization"))
 			finalBeta := getHeaderRaw(upstream.lastReq.Header, "anthropic-beta")
-			for _, beta := range claude.FullClaudeCodeMimicryBetas() {
-				require.Truef(t, anthropicBetaTokensContains(finalBeta, beta), "missing mimic beta %s", beta)
-			}
+			// beta 集合按模型族取模板（haiku 与 sonnet/opus 不同），逐项对齐真实 2.1.263。
+			require.Equal(t, strings.Join(claude.MimicryBetasForModel(parsed.Model, "", false, claude.MimicryBetaGates{}), ","), finalBeta)
 			require.False(t, anthropicBetaTokensContains(finalBeta, "client-only-beta"))
 			for key, value := range claude.DefaultHeaders {
 				require.Equal(t, value, getHeaderRaw(upstream.lastReq.Header, key), "mimic fingerprint header %s", key)
@@ -1024,9 +1023,9 @@ func TestGatewayService_AnthropicOAuthRealClaudeCode_UsesUnifiedIdentity(t *test
 	require.Equal(t, claude.DefaultHeaders["User-Agent"], getHeaderRaw(upstream.lastReq.Header, "User-Agent"))
 	require.NotEqual(t, "real-client-package", getHeaderRaw(upstream.lastReq.Header, "X-Stainless-Package-Version"),
 		"客户端自报的包版本是机器特征，不得外泄")
-	require.Equal(t, strings.Join(claude.FullClaudeCodeMimicryBetas(), ","),
+	require.Equal(t, strings.Join(claude.MimicryBetasForModel(parsed.Model, "", false, claude.MimicryBetaGates{}), ","),
 		getHeaderRaw(upstream.lastReq.Header, "anthropic-beta"),
-		"beta 集合固定，不随客户端变化")
+		"beta 集合只由模型族与账号门控决定，不随客户端变化")
 	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "x-client-request-id"),
 		"既不沿用客户端的也不自造：真实 2.1.257 不发 x-client-request-id（2026-09-07 本机抓包）")
 

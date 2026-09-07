@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
@@ -2372,6 +2373,40 @@ func (a *Account) IsTLSFingerprintEnabled() bool {
 		}
 	}
 	return false
+}
+
+// MimicryBetaGates 读取账号级门控 beta 的开关（账号 extra）：
+//
+//	mimic_beta_context_1m:      true → 出口 beta 加 context-1m-2025-08-07
+//	mimic_beta_fallback_credit: true → 出口 beta 加 fallback-credit-2026-06-01
+//
+// 默认都关。真实 CLI 只在账号具备对应权限时才发这两个 beta，所以要按号打标，
+// 打标前先用该号探测一次（发了号没有的门控 beta 会被上游拒或记为形态异常）。
+// 只对 Anthropic OAuth/SetupToken 账号有意义。
+func (a *Account) MimicryBetaGates() claude.MimicryBetaGates {
+	if a == nil || a.Extra == nil || !a.IsAnthropicOAuthOrSetupToken() {
+		return claude.MimicryBetaGates{}
+	}
+	return claude.MimicryBetaGates{
+		Context1M:      a.extraBool("mimic_beta_context_1m"),
+		FallbackCredit: a.extraBool("mimic_beta_fallback_credit"),
+	}
+}
+
+// extraBool 读取 extra 里的布尔标记；bool 与字符串 "true" 都算开。
+func (a *Account) extraBool(key string) bool {
+	v, ok := a.Extra[key]
+	if !ok {
+		return false
+	}
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		return strings.EqualFold(strings.TrimSpace(t), "true")
+	default:
+		return false
+	}
 }
 
 // GetTLSFingerprintProfileID 获取账号绑定的 TLS 指纹模板 ID

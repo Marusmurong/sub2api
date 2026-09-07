@@ -137,8 +137,8 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	//   5) 透传白名单 / fingerprint / mimic header / 写入 finalBeta
 	policyFilterSet := s.getBetaPolicyFilterSet(ctx, c, account, modelID)
 	effectiveDropSet := mergeDropSets(policyFilterSet)
-	finalBetaHeader, finalBetaShouldSet := s.computeFinalAnthropicBeta(
-		tokenType, mimicClaudeCode, modelID, clientHeaders, body, effectiveDropSet,
+	finalBetaHeader, finalBetaShouldSet := s.computeFinalAnthropicBetaWithGates(
+		tokenType, mimicClaudeCode, modelID, clientHeaders, body, effectiveDropSet, account.MimicryBetaGates(),
 	)
 
 	// 账号覆写了 anthropic-beta 时，覆写值即最终上游值（由下方 ApplyHeaderOverrides 写入）：
@@ -150,6 +150,15 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// 能力维度 body sanitize：与最终 anthropic-beta header 对称
 	if sanitized, changed := sanitizeAnthropicBodyForBetaTokens(body, finalBetaHeader); changed {
 		body = sanitized
+	}
+	// 伪装路径硬规则：无论 beta 里有没有 fallback-credit（账号门控可能打开），
+	// 下游的 fallbacks / fallback_credit_token 一律不透传——否则下游能替我们的号
+	// 触发 server-side fallback / 信用消费。与 beta 对称的 sanitize 只管 400，
+	// 这里管的是钱。
+	if mimicClaudeCode {
+		if stripped, changed := stripFallbackFieldsForMimic(body); changed {
+			body = stripped
+		}
 	}
 
 	// 模型维度 body sanitize：
@@ -532,7 +541,21 @@ func (s *GatewayService) computeFinalAnthropicBeta(
 	body []byte,
 	effectiveDropSet map[string]struct{},
 ) (string, bool) {
-	value, shouldSet := s.computeBaseAnthropicBeta(tokenType, mimicClaudeCode, modelID, clientHeaders, body, effectiveDropSet)
+	return s.computeFinalAnthropicBetaWithGates(tokenType, mimicClaudeCode, modelID, clientHeaders, body, effectiveDropSet, claude.MimicryBetaGates{})
+}
+
+// computeFinalAnthropicBetaWithGates 在 computeFinalAnthropicBeta 之上带入账号级门控
+// beta（context-1m / fallback-credit），见 Account.MimicryBetaGates。
+func (s *GatewayService) computeFinalAnthropicBetaWithGates(
+	tokenType string,
+	mimicClaudeCode bool,
+	modelID string,
+	clientHeaders http.Header,
+	body []byte,
+	effectiveDropSet map[string]struct{},
+	gates claude.MimicryBetaGates,
+) (string, bool) {
+	value, shouldSet := s.computeBaseAnthropicBetaWithGates(tokenType, mimicClaudeCode, modelID, clientHeaders, body, effectiveDropSet, gates)
 
 	// 能力补齐：body 用到了某个需要 beta 才被上游 schema 承认的能力（当前是
 	// computer-use 工具），但 header 没带对应 token 时补上。缺这一步会得到
@@ -556,6 +579,18 @@ func (s *GatewayService) computeBaseAnthropicBeta(
 	body []byte,
 	effectiveDropSet map[string]struct{},
 ) (string, bool) {
+	return s.computeBaseAnthropicBetaWithGates(tokenType, mimicClaudeCode, modelID, clientHeaders, body, effectiveDropSet, claude.MimicryBetaGates{})
+}
+
+func (s *GatewayService) computeBaseAnthropicBetaWithGates(
+	tokenType string,
+	mimicClaudeCode bool,
+	modelID string,
+	clientHeaders http.Header,
+	body []byte,
+	effectiveDropSet map[string]struct{},
+	gates claude.MimicryBetaGates,
+) (string, bool) {
 	clientBeta := ""
 	if clientHeaders != nil {
 		clientBeta = getHeaderRaw(clientHeaders, "anthropic-beta")
@@ -563,12 +598,12 @@ func (s *GatewayService) computeBaseAnthropicBeta(
 
 	if tokenType == "oauth" {
 		if mimicClaudeCode {
-			// 固定身份集合 + 白名单内的功能 beta（见 claude.MimicryBetasWithClientFeatures）。
-			// incoming 传空：客户端 beta 已在白名单函数里筛过，不能再从这里二次并入，
-			// 否则等于放行全部客户端 beta，集合大小又会随下游变化。
-			// 所有模型（含 Haiku）都走这一份，避免 Haiku 被单独识别为第三方客户端。
+			// 按模型族取真实 CLI 的 beta 模板 + 账号门控 + 白名单内的功能 beta
+			//（见 claude.MimicryBetasForModel）。incoming 传空：客户端 beta 已在白名单
+			// 函数里筛过，不能再从这里二次并入，否则等于放行全部客户端 beta，集合大小
+			// 又会随下游变化。Haiku 走它自己的模板（真实 CLI 对 haiku 发 8 个，顺序不同）。
 			return mergeAnthropicBetaDropping(
-				claude.MimicryBetasForRequest(clientBeta, bodyRequestsFastMode(body)), "", effectiveDropSet), true
+				claude.MimicryBetasForModel(modelID, clientBeta, bodyRequestsFastMode(body), gates), "", effectiveDropSet), true
 		}
 		// 非 OAuth-mimic 的兜底（当前 OAuth 已恒为 mimic，此分支主要留给未来的非 OAuth 场景）
 		return stripBetaTokensWithSet(s.getBetaHeader(modelID, clientBeta), effectiveDropSet), true
@@ -606,6 +641,18 @@ func (s *GatewayService) computeFinalCountTokensAnthropicBeta(
 	body []byte,
 	effectiveDropSet map[string]struct{},
 ) (string, bool) {
+	return s.computeFinalCountTokensAnthropicBetaWithGates(tokenType, mimicClaudeCode, modelID, clientHeaders, body, effectiveDropSet, claude.MimicryBetaGates{})
+}
+
+func (s *GatewayService) computeFinalCountTokensAnthropicBetaWithGates(
+	tokenType string,
+	mimicClaudeCode bool,
+	modelID string,
+	clientHeaders http.Header,
+	body []byte,
+	effectiveDropSet map[string]struct{},
+	gates claude.MimicryBetaGates,
+) (string, bool) {
 	clientBeta := ""
 	if clientHeaders != nil {
 		clientBeta = getHeaderRaw(clientHeaders, "anthropic-beta")
@@ -619,7 +666,7 @@ func (s *GatewayService) computeFinalCountTokensAnthropicBeta(
 			// 原实现把 clientBeta 整个并进来（因为当时 count_tokens 的表头透传循环也没有
 			// mimic 守卫，两处行为是配套的）。现在守卫已补齐，这里也必须同步收窄，
 			// 否则 count_tokens 仍会把客户端 beta 集合原样带给上游。
-			requiredBetas := append(claude.MimicryBetasWithClientFeatures(clientBeta), claude.BetaTokenCounting)
+			requiredBetas := append(claude.MimicryBetasForModel(modelID, clientBeta, false, gates), claude.BetaTokenCounting)
 			return mergeAnthropicBetaDropping(requiredBetas, "", effectiveDropSet), true
 		}
 		if clientBeta == "" {

@@ -182,6 +182,46 @@ func TestBuildUpstreamRequest_OAuthMimicHaiku_StripsFallbacksEndToEnd(t *testing
 		"mimic beta 集合本身不受影响")
 }
 
+// 账号门控打开 fallback-credit 后，beta 对称 sanitize 会保留下游的 fallback_credit_token；
+// messages 与 count_tokens 两条伪装路径都必须无条件剥掉它（账号是我们的，信用不能由下游花）。
+func TestOAuthMimic_FallbackCreditGateOn_StillStripsFallbackFieldsOnBothPaths(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	account := &Account{ID: 602, Platform: PlatformAnthropic, Type: AccountTypeOAuth,
+		Credentials: map[string]any{"access_token": "oauth-tok"},
+		Status:      StatusActive,
+		Schedulable: true,
+		Extra:       map[string]any{"mimic_beta_fallback_credit": true},
+	}
+	body := []byte(`{"model":"claude-opus-5","fallbacks":"default","fallback_credit_token":"tok","messages":[{"role":"user","content":"hi"}]}`)
+	svc := &GatewayService{cfg: &config.Config{}}
+
+	t.Run("messages", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+		req, _, err := svc.buildUpstreamRequest(context.Background(), c, account, body, "oauth-tok", "oauth", "claude-opus-5", false, true)
+		require.NoError(t, err)
+		outBody := readUpstreamBodyForTest(t, req)
+		outBeta := getHeaderRaw(req.Header, "anthropic-beta")
+		require.True(t, anthropicBetaTokensContains(outBeta, claude.BetaFallbackCreditLegacy), "门控打开后 beta 带 fallback-credit")
+		require.False(t, gjson.GetBytes(outBody, "fallback_credit_token").Exists(), "但下游的 fallback_credit_token 必须剥掉")
+		require.False(t, gjson.GetBytes(outBody, "fallbacks").Exists())
+	})
+
+	t.Run("count_tokens", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", nil)
+		req, _, err := svc.buildCountTokensRequest(context.Background(), c, account, body, "oauth-tok", "oauth", "claude-opus-5", true)
+		require.NoError(t, err)
+		outBody := readUpstreamBodyForTest(t, req)
+		outBeta := getHeaderRaw(req.Header, "anthropic-beta")
+		require.True(t, anthropicBetaTokensContains(outBeta, claude.BetaFallbackCreditLegacy), "count_tokens 同样带门控 beta")
+		require.False(t, gjson.GetBytes(outBody, "fallback_credit_token").Exists(), "count_tokens 路径也必须剥掉")
+		require.False(t, gjson.GetBytes(outBody, "fallbacks").Exists())
+	})
+}
+
 // API-key passthrough + 客户端 header 未带 fallback beta → strip
 func TestBuildUpstreamRequestAnthropicAPIKeyPassthrough_StripsFallbacksWhenClientHeaderMissingBeta(t *testing.T) {
 	gin.SetMode(gin.TestMode)

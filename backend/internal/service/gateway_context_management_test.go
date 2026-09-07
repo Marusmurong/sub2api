@@ -151,10 +151,13 @@ func TestComputeFinalAnthropicBeta_OAuthMimic_Haiku_IncludesFullClaudeCodeBetas(
 	s := newTestGatewayServiceForBeta(false)
 	final, ok := s.computeFinalAnthropicBeta("oauth", true, "claude-haiku-4-5", http.Header{}, []byte(`{}`), nil)
 	require.True(t, ok)
-	require.Equal(t, strings.Join(claude.FullClaudeCodeMimicryBetas(), ","), final)
-	for _, beta := range claude.FullClaudeCodeMimicryBetas() {
+	// haiku 走它自己的模板（真实 2.1.263 对 haiku 发 8 个、claude-code 排第 6），
+	// 不再与 opus 族共用一份。
+	haikuBetas := claude.MimicryBetasForModel("claude-haiku-4-5", "", false, claude.MimicryBetaGates{})
+	require.Equal(t, strings.Join(haikuBetas, ","), final)
+	for _, beta := range []string{claude.BetaClaudeCode, claude.BetaOAuth, claude.BetaContextManagement} {
 		require.Truef(t, anthropicBetaTokensContains(final, beta),
-			"OAuth mimic Haiku 必须包含完整 Claude Code beta 集合，缺少 %s", beta)
+			"OAuth mimic Haiku 必须包含 Claude Code 身份 beta，缺少 %s", beta)
 	}
 }
 
@@ -242,7 +245,8 @@ func TestComputeFinalCountTokensAnthropicBeta_OAuthMimic_DropsClientIdentityBeta
 	s := newTestGatewayServiceForBeta(false)
 	hdr := http.Header{}
 	hdr.Set("anthropic-beta", "custom-experimental-beta,context-1m-2025-08-07")
-	final, ok := s.computeFinalCountTokensAnthropicBeta("oauth", true, "claude-haiku-4-5", hdr, []byte(`{}`), nil)
+	// 用 sonnet-5：haiku 模板没有 context-1m 槽位（真实 CLI 对 haiku 从不发 1M）。
+	final, ok := s.computeFinalCountTokensAnthropicBeta("oauth", true, "claude-sonnet-5", hdr, []byte(`{}`), nil)
 	require.True(t, ok)
 	require.False(t, anthropicBetaTokensContains(final, "custom-experimental-beta"),
 		"白名单外的客户端 beta 必须丢弃，否则集合大小仍随下游变化")

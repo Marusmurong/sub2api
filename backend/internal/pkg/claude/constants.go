@@ -28,6 +28,12 @@ const (
 	BetaContextManagement  = "context-management-2025-06-27"
 	BetaExtendedCacheTTL   = "extended-cache-ttl-2025-04-11"
 
+	// 2026-09-07 本机真实 2.1.263 抓包新增（三族都发的 / 仅 opus 族发的见模板）
+	BetaThinkingTokenCount    = "thinking-token-count-2026-05-13"
+	BetaMidConversationSystem = "mid-conversation-system-2026-04-07"
+	BetaPerTurnControl        = "per-turn-control-2026-07-01"
+	BetaAdvisorTool           = "advisor-tool-2026-03-01"
+
 	// server-side refusal fallback beta 字段族（beta Messages API 专有）。
 	// 客户端（Claude Code / SDK / OpenCode 等）会默认透传 body.fallbacks /
 	// body.fallback_credit_token，上游仅在 anthropic-beta 携带对应 token 时接受；
@@ -90,30 +96,74 @@ const DefaultCacheControlTTL = "5m"
 // 2026-09-07 抬到 2.1.263（当时 npm latest，下游真实用户占比 46%）：本机原生
 // 二进制抓样与 2.1.257 相比，UA 之外的 HTTP 头、Runtime/Package 版本、TLS
 // ClientHello（JA3/JA4）全部相同，只有 opus/fable 的 beta 多了
-// per-turn-control-2026-07-01（beta 集合另见 M-6，未随本次一起改）。
+// per-turn-control-2026-07-01（beta 集合已按三族模板对齐，见 mimicryBetaTemplate*）。
 // 抬版本前必须重抓样本核对头与 TLS，方法见 tlsfingerprint/claudecode_clienthello_test.go。
 const CLICurrentVersion = "2.1.263"
 
-// FullClaudeCodeMimicryBetas 返回最"像"真实 Claude Code CLI 的完整 beta 列表，
-// 用于 OAuth 账号伪装成 Claude Code 时使用。
-// 顺序与真实 CLI 抓包一致。
+// MimicryBetaGates 是账号级门控的 beta 开关。真实 CLI 只在账号具备对应权限时
+// 才发这些 beta，所以不能按模型无脑发：发了号没有的门控 beta，形态反而不对。
+// 取值来源见 Account.MimicryBetaGates()（账号 extra 里的标记）。
+type MimicryBetaGates struct {
+	Context1M      bool // 1M 上下文权限（context-1m-2025-08-07）
+	FallbackCredit bool // 额外用量信用（fallback-credit-2026-06-01）
+}
+
+// 按模型族的出口 beta 模板（2026-09-07 本机真实 2.1.263 抓包，顺序照抄线上头）。
 //
-// 使用建议：
-//   - OAuth mimic：所有模型（包括 Haiku）都使用这整份列表。
-//   - OAuth 真实客户端透传：保留客户端 beta；未提供时使用模型对应默认值。
-//   - API-key 账号：不要使用本函数，参见 APIKeyBetaHeader。
-//   - 不默认加入 redact-thinking，避免上游抹除 thinking 内容；客户端显式传入时由合并逻辑保留。
-func FullClaudeCodeMimicryBetas() []string {
-	return []string{
+// 三族的成分与顺序都不同：haiku 把 claude-code 排在第 6 位，sonnet 没有
+// per-turn-control，只有 opus/fable 族带 fallback-credit。模板里带 * 的是条件项：
+// context-1m / fallback-credit 由账号门控决定，fast-mode 由 body.speed 决定。
+// 抬 CLI 版本时先重抓三族各一次，对着这三张表核，有出入才改。
+var (
+	mimicryBetaTemplateOpus = []string{
 		BetaClaudeCode,
 		BetaOAuth,
+		BetaContext1M, // * 门控；位置取自 2.1.257 抓包
 		BetaInterleavedThinking,
-		BetaPromptCachingScope,
-		BetaEffort,
+		BetaThinkingTokenCount,
 		BetaContextManagement,
+		BetaPromptCachingScope,
+		BetaMidConversationSystem,
+		BetaPerTurnControl,
+		BetaAdvisorTool,
+		BetaEffort,
+		BetaFallbackCreditLegacy, // * 门控；2.1.263 发的是 2026-06-01 这个 id
 		BetaExtendedCacheTTL,
+		BetaFastMode, // * body.speed=fast
 	}
-}
+	mimicryBetaTemplateSonnet = []string{
+		BetaClaudeCode,
+		BetaOAuth,
+		BetaContext1M, // * 门控
+		BetaInterleavedThinking,
+		BetaThinkingTokenCount,
+		BetaContextManagement,
+		BetaPromptCachingScope,
+		BetaMidConversationSystem,
+		BetaAdvisorTool,
+		BetaEffort,
+		BetaExtendedCacheTTL,
+		BetaFastMode, // *
+	}
+	mimicryBetaTemplateHaiku = []string{
+		BetaOAuth,
+		BetaInterleavedThinking,
+		BetaThinkingTokenCount,
+		BetaContextManagement,
+		BetaPromptCachingScope,
+		BetaClaudeCode,
+		BetaAdvisorTool,
+		BetaExtendedCacheTTL,
+		BetaFastMode, // *
+	}
+
+	// conditionalMimicryBetas 是模板里的条件项；不在这里的模板项一律发。
+	conditionalMimicryBetas = map[string]struct{}{
+		BetaContext1M:            {},
+		BetaFallbackCreditLegacy: {},
+		BetaFastMode:             {},
+	}
+)
 
 // featureBetaAllowlist 是唯一允许从客户端透传上去的 beta。
 //
@@ -124,50 +174,41 @@ func FullClaudeCodeMimicryBetas() []string {
 //
 // 加新条目前先自问：它是"客户端是谁"还是"这次请求要什么能力"。只有后者才能进。
 var featureBetaAllowlist = map[string]struct{}{
-	// 1M 上下文：仅 sonnet-5 系列支持，丢掉会让长上下文请求直接超限失败。
+	// 1M 上下文：丢掉会让长上下文请求直接超限失败。按模型的放行/过滤仍由 beta
+	// policy（getBetaPolicyFilterSet）决定，这里只决定是否进入候选集合。
 	BetaContext1M: {},
 }
 
-// canonicalBetaOrder 决定出口 beta 的排列顺序。
+// mimicryBetaTemplateForModel 按模型名归族。bedrock/vertex 形式的模型名也含族名。
+// 未知模型按 opus 族——那是集合最大的一族，也是当前主力模型所在族。
 //
-// 顺序本身也是指纹，所以不能按客户端到达顺序拼接。这里的相对次序取自真实 CLI 抓包：
-// context-1m 出现在 oauth 之后、interleaved-thinking 之前；其余各项维持
-// FullClaudeCodeMimicryBetas 既有次序不动。
-var canonicalBetaOrder = []string{
-	BetaClaudeCode,
-	BetaOAuth,
-	BetaContext1M,
-	BetaInterleavedThinking,
-	BetaPromptCachingScope,
-	BetaEffort,
-	BetaContextManagement,
-	BetaExtendedCacheTTL,
-	// fast-mode 只在 body 带 speed:"fast" 时出现（见 MimicryBetasForRequest）。
-	// 排在末尾：EGRESS_SPEC §8 只验证了 token 存在，未验证顺序；spec 的枚举顺序里它是
-	// 最后一个，且它是按请求触发的能力开关而非身份标记，放在固定身份集合之后最自洽。
-	BetaFastMode,
-}
-
-// MimicryBetasWithClientFeatures 返回伪装路径的出口 beta 列表：
-// 固定身份集合 ∪（客户端请求了的、且在功能白名单内的 beta），按 canonicalBetaOrder 排列。
-//
-// clientBeta 为客户端原始 anthropic-beta 头（逗号分隔，可为空）。白名单之外的一律丢弃。
-func MimicryBetasWithClientFeatures(clientBeta string) []string {
-	return MimicryBetasForRequest(clientBeta, false)
-}
-
-// MimicryBetasForRequest 在 MimicryBetasWithClientFeatures 的基础上，按 body 触发的
-// 能力开关补 beta。当前只有 fastMode：body 带 speed:"fast" 时真实 CLI 一定带
-// fast-mode beta，而 speed 字段又是原生透传的，只补 beta 不剥字段（审计 M-3）。
-// 不能把 fast-mode 放进 featureBetaAllowlist——那条路径看的是客户端头，而这里要
-// 修的正是「客户端只发了字段没发头」的形态。
-func MimicryBetasForRequest(clientBeta string, fastMode bool) []string {
-	want := make(map[string]struct{}, len(canonicalBetaOrder))
-	for _, b := range FullClaudeCodeMimicryBetas() {
-		want[b] = struct{}{}
+// 注意这比旧的固定 7 项集合"激进"：opus 模板含 per-turn-control / mid-conversation-system
+// 等，若上游将来发布一个名字里既无 sonnet 也无 haiku 的新族且不支持这些 beta，会 400。
+// 抬 CLI 版本重抓样本时，顺带确认线上出现的模型名都能落进正确的族（看 usage_logs.model）。
+func mimicryBetaTemplateForModel(model string) []string {
+	m := strings.ToLower(model)
+	switch {
+	case strings.Contains(m, "haiku"):
+		return mimicryBetaTemplateHaiku
+	case strings.Contains(m, "sonnet"):
+		return mimicryBetaTemplateSonnet
+	default:
+		return mimicryBetaTemplateOpus
 	}
-	if fastMode {
-		want[BetaFastMode] = struct{}{}
+}
+
+// MimicryBetasForModel 返回伪装路径的出口 beta 列表：按模型族取模板，条件项按
+// 账号门控 / 客户端功能白名单 / body 能力开关决定，顺序即模板顺序。
+//
+// clientBeta 为客户端原始 anthropic-beta 头（逗号分隔，可为空），只有
+// featureBetaAllowlist 内的会被采纳，其余一律丢弃。fastMode 为 body 带
+// speed:"fast"（真实 CLI 那时一定带 fast-mode，而 speed 字段是原生透传的，只补 beta
+// 不剥字段，审计 M-3）。
+func MimicryBetasForModel(model, clientBeta string, fastMode bool, gates MimicryBetaGates) []string {
+	enabled := map[string]bool{
+		BetaContext1M:            gates.Context1M,
+		BetaFallbackCreditLegacy: gates.FallbackCredit,
+		BetaFastMode:             fastMode,
 	}
 	for _, p := range strings.Split(clientBeta, ",") {
 		p = strings.TrimSpace(p)
@@ -175,26 +216,34 @@ func MimicryBetasForRequest(clientBeta string, fastMode bool) []string {
 			continue
 		}
 		if _, ok := featureBetaAllowlist[p]; ok {
-			want[p] = struct{}{}
+			enabled[p] = true
 		}
 	}
-
-	out := make([]string, 0, len(want))
-	for _, b := range canonicalBetaOrder {
-		if _, ok := want[b]; ok {
-			out = append(out, b)
-			delete(want, b)
+	template := mimicryBetaTemplateForModel(model)
+	out := make([]string, 0, len(template))
+	for _, b := range template {
+		if _, conditional := conditionalMimicryBetas[b]; conditional && !enabled[b] {
+			continue
 		}
-	}
-	// canonicalBetaOrder 未覆盖到的（将来往固定集合里加了新 beta 却忘了排序表）
-	// 兜底追加，保证不会被静默丢掉。
-	for _, b := range FullClaudeCodeMimicryBetas() {
-		if _, ok := want[b]; ok {
-			out = append(out, b)
-			delete(want, b)
-		}
+		out = append(out, b)
 	}
 	return out
+}
+
+// FullClaudeCodeMimicryBetas 返回 opus 族的无条件集合（不含门控与 fast-mode）。
+// 保留给不知道模型的调用方与测试；知道模型时用 MimicryBetasForModel。
+func FullClaudeCodeMimicryBetas() []string {
+	return MimicryBetasForModel("", "", false, MimicryBetaGates{})
+}
+
+// MimicryBetasWithClientFeatures / MimicryBetasForRequest 是不带模型信息的旧入口，
+// 等价于 opus 族、无账号门控。
+func MimicryBetasWithClientFeatures(clientBeta string) []string {
+	return MimicryBetasForRequest(clientBeta, false)
+}
+
+func MimicryBetasForRequest(clientBeta string, fastMode bool) []string {
+	return MimicryBetasForModel("", clientBeta, fastMode, MimicryBetaGates{})
 }
 
 // DefaultHeaders 是 Claude Code 客户端默认请求头。
