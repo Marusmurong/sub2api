@@ -34,6 +34,11 @@ func (f *fakePlatformStatsCache) IncrClientPlatformStat(_ context.Context, day, 
 	return nil
 }
 
+func (f *fakePlatformStatsCache) IncrClientIdentityStat(_ context.Context, day, field string) error {
+	f.incr[day+"/identity/"+field]++
+	return nil
+}
+
 func (f *fakePlatformStatsCache) RecordSessionClientPlatform(_ context.Context, sessionHash, platform string, _ time.Duration) (string, error) {
 	if prev, ok := f.sessions[sessionHash]; ok {
 		return prev, nil
@@ -62,11 +67,23 @@ func TestObserveClientPlatform_CountsByPlatformSourceAndClient(t *testing.T) {
 	day := time.Now().UTC().Format("2006-01-02")
 
 	body := []byte(`{"system":"<env>\nPlatform: win32\n</env>"}`)
-	h.observeClientPlatform(newPlatformTestContext(t, "Windows", "x64"), body, "sess-a", true, zap.NewNop())
+	winCtx := newPlatformTestContext(t, "Windows", "x64")
+	winCtx.Request.Header.Set("User-Agent", "claude-cli/2.1.263 (external, cli)")
+	winCtx.Request.Header.Set("X-Stainless-Runtime", "node")
+	winCtx.Request.Header.Set("X-Stainless-Runtime-Version", "v26.3.0")
+	winCtx.Request.Header.Set("X-Stainless-Package-Version", "0.112.1")
+	h.observeClientPlatform(winCtx, body, "sess-a", true, zap.NewNop())
 	h.observeClientPlatform(newPlatformTestContext(t, "", ""), []byte(`{"system":"plain"}`), "sess-b", false, zap.NewNop())
+	// 非 CC 但头里有 OS：平台计数记，身份组合不记
+	h.observeClientPlatform(newPlatformTestContext(t, "Linux", "x64"), []byte(`{}`), "sess-c", false, zap.NewNop())
 
 	require.Equal(t, 1, cache.incr[day+"/windows-x64|env_block|cc"])
 	require.Equal(t, 1, cache.incr[day+"/unknown|none|other"])
+	require.Equal(t, 1, cache.incr[day+"/identity/windows-x64|node|v26.3.0|0.112.1|2.1.263"], "真 CC 的头身份组合要记下来")
+	require.Equal(t, 1, cache.incr[day+"/linux-x64|header|other"])
+	for k := range cache.incr {
+		require.NotContains(t, k, "/identity/linux-x64", "非 CC 客户端不记身份组合")
+	}
 	require.Equal(t, "windows-x64", cache.sessions["sess-a"])
 	_, recorded := cache.sessions["sess-b"]
 	require.False(t, recorded, "未知平台不记会话")

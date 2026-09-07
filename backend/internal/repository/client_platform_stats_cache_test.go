@@ -28,6 +28,18 @@ func TestClientPlatformStatsCache_IncrAndExpire(t *testing.T) {
 	require.NoError(t, cache.IncrClientPlatformStat(ctx, "2026-09-07", ""))
 }
 
+func TestClientPlatformStatsCache_IdentityIncr(t *testing.T) {
+	cache, mr := newRepeatPayloadCacheForTest(t)
+	ctx := context.Background()
+	field := "windows-x64|node|v26.3.0|0.112.1|2.1.263"
+	require.NoError(t, cache.IncrClientIdentityStat(ctx, "2026-09-07", field))
+	require.NoError(t, cache.IncrClientIdentityStat(ctx, "2026-09-07", field))
+	key := "client_platform:identity:2026-09-07"
+	require.Equal(t, "2", mr.HGet(key, field))
+	require.Greater(t, mr.TTL(key), time.Duration(0))
+	require.NoError(t, cache.IncrClientIdentityStat(ctx, "2026-09-07", ""))
+}
+
 func TestClientPlatformStatsCache_SessionWriteOnce(t *testing.T) {
 	cache, mr := newRepeatPayloadCacheForTest(t)
 	ctx := context.Background()

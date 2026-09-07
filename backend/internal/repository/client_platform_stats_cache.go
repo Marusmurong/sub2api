@@ -16,9 +16,10 @@ import (
 //	client_platform:stats:{YYYY-MM-DD}   HASH  field={平台}|{来源}|{cc|other} → 次数，30 天过期
 //	client_platform:session:{sessionHash} STRING 会话首次判定的平台，只写一次（NX），TTL 由调用方给
 const (
-	clientPlatformStatsPrefix   = "client_platform:stats:"
-	clientPlatformSessionPrefix = "client_platform:session:"
-	clientPlatformStatsTTL      = 30 * 24 * time.Hour
+	clientPlatformStatsPrefix    = "client_platform:stats:"
+	clientPlatformIdentityPrefix = "client_platform:identity:"
+	clientPlatformSessionPrefix  = "client_platform:session:"
+	clientPlatformStatsTTL       = 30 * 24 * time.Hour
 )
 
 var clientPlatformStatsIncrScript = redis.NewScript(`
@@ -48,6 +49,18 @@ func (c *repeatPayloadCache) IncrClientPlatformStat(ctx context.Context, day, fi
 	key := clientPlatformStatsPrefix + day
 	if err := clientPlatformStatsIncrScript.Run(ctx, c.rdb, []string{key}, field, int64(clientPlatformStatsTTL.Seconds())).Err(); err != nil {
 		return fmt.Errorf("incr client platform stat: %w", err)
+	}
+	return nil
+}
+
+// IncrClientIdentityStat 记 HTTP 身份组合：client_platform:identity:{day}，30 天过期。
+func (c *repeatPayloadCache) IncrClientIdentityStat(ctx context.Context, day, field string) error {
+	if c == nil || c.rdb == nil || day == "" || field == "" {
+		return nil
+	}
+	key := clientPlatformIdentityPrefix + day
+	if err := clientPlatformStatsIncrScript.Run(ctx, c.rdb, []string{key}, field, int64(clientPlatformStatsTTL.Seconds())).Err(); err != nil {
+		return fmt.Errorf("incr client identity stat: %w", err)
 	}
 	return nil
 }

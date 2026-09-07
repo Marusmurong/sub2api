@@ -110,6 +110,18 @@ func TestClassifyClientPlatform(t *testing.T) {
 	}
 }
 
+func TestClientIdentityStatField(t *testing.T) {
+	h := hdr("User-Agent", "claude-cli/2.1.263 (external, cli)", "X-Stainless-Runtime", "node",
+		"X-Stainless-Runtime-Version", "v26.3.0", "X-Stainless-Package-Version", "0.112.1")
+	require.Equal(t, "windows-x64|node|v26.3.0|0.112.1|2.1.263", ClientIdentityStatField(h, ClientPlatformWindowsX64))
+
+	// 缺头补 "-"；脏字符与超长被清洗；未知平台返回空
+	dirty := hdr("User-Agent", "curl/8", "X-Stainless-Runtime", "no|de x", "X-Stainless-Runtime-Version", strings.Repeat("v", 50))
+	require.Equal(t, "linux-x64|nodex|"+strings.Repeat("v", 32)+"|-|-", ClientIdentityStatField(dirty, ClientPlatformLinuxX64))
+	require.Equal(t, "", ClientIdentityStatField(h, ClientPlatformUnknown))
+	require.Equal(t, "", ClientIdentityStatField(nil, ClientPlatformWindowsX64))
+}
+
 func TestClientPlatformStatField(t *testing.T) {
 	require.Equal(t, "macos-arm64|env_block|cc",
 		ClientPlatformStatField(ClientPlatformObservation{Platform: ClientPlatformMacOSArm64, Source: ClientPlatformSourceEnvBlock}, true))

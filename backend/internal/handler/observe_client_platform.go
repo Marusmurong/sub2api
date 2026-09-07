@@ -51,7 +51,17 @@ func (h *GatewayHandler) observeClientPlatform(c *gin.Context, body []byte, sess
 		reqLog.Debug("gateway.client_platform_stat_failed", zap.Error(err))
 		return
 	}
-	if sessionHash == "" || obs.Platform == service.ClientPlatformUnknown {
+	if obs.Platform == service.ClientPlatformUnknown {
+		return
+	}
+	// 真 CC 的请求头里就有各平台的 stainless 身份组合，顺手记下来：分池第二阶段给
+	// Windows / Linux 账号配头时直接用，不必在对应系统上跑客户端。只记头，不记正文。
+	if isClaudeCode {
+		if field := service.ClientIdentityStatField(c.Request.Header, obs.Platform); field != "" {
+			_ = stats.IncrClientIdentityStat(ctx, day, field)
+		}
+	}
+	if sessionHash == "" {
 		return
 	}
 	prev, err := stats.RecordSessionClientPlatform(ctx, sessionHash, string(obs.Platform), clientPlatformSessionTTL)

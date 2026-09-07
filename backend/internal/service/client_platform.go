@@ -54,6 +54,8 @@ type ClientPlatformStatsCache interface {
 	// RecordSessionClientPlatform 记录会话首次判定的平台（只写一次），返回之前记录的值；
 	// 首次记录返回空串。用来度量同一会话内判定是否稳定。
 	RecordSessionClientPlatform(ctx context.Context, sessionHash, platform string, ttl time.Duration) (previous string, err error)
+	// IncrClientIdentityStat 给当天的 HTTP 身份组合计数 +1。field 见 ClientIdentityStatField。
+	IncrClientIdentityStat(ctx context.Context, day, field string) error
 }
 
 var (
@@ -210,6 +212,49 @@ func headerValue(h http.Header, key string) string {
 		return ""
 	}
 	return h.Get(key)
+}
+
+// ClientIdentityStatField 是观察期「HTTP 身份」计数的字段名：
+//
+//	{平台}|{runtime}|{runtime_version}|{package_version}|{cli_version}
+//
+// 用来从真实下游 CC 的请求头里收集各平台的 stainless 身份组合（分池第二阶段要给
+// Windows / Linux 账号配的头，就是这里看到的值），不需要在对应系统上跑客户端。
+// 只记头不记正文；值来自客户端，每段做长度与字符清洗，避免脏字段撑爆哈希。
+func ClientIdentityStatField(headers http.Header, platform ClientPlatform) string {
+	if headers == nil || platform == ClientPlatformUnknown {
+		return ""
+	}
+	cli := ""
+	if m := claudeCLIVersionRe.FindStringSubmatch(headers.Get("User-Agent")); len(m) == 2 {
+		cli = m[1]
+	}
+	parts := []string{
+		string(platform),
+		sanitizeStatSegment(headers.Get("X-Stainless-Runtime")),
+		sanitizeStatSegment(headers.Get("X-Stainless-Runtime-Version")),
+		sanitizeStatSegment(headers.Get("X-Stainless-Package-Version")),
+		sanitizeStatSegment(cli),
+	}
+	return strings.Join(parts, "|")
+}
+
+var (
+	claudeCLIVersionRe = regexp.MustCompile(`^claude-cli/(\d+\.\d+\.\d+)`)
+	statSegmentBadRe   = regexp.MustCompile(`[^A-Za-z0-9._-]`)
+)
+
+const statSegmentMaxLen = 32
+
+func sanitizeStatSegment(v string) string {
+	v = statSegmentBadRe.ReplaceAllString(strings.TrimSpace(v), "")
+	if v == "" {
+		return "-"
+	}
+	if len(v) > statSegmentMaxLen {
+		v = v[:statSegmentMaxLen]
+	}
+	return v
 }
 
 // ClientPlatformStatField 是观察期计数的字段名：{平台|unknown}|{来源}|{cc|other}。
