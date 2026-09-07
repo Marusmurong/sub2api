@@ -87,7 +87,12 @@ const DefaultCacheControlTTL = "5m"
 // claude-fable-5-1 要求 >= 2.1.251，用 2.1.220 会被上游以
 // "Claude Code X.Y.Z does not support this model" 直接拒掉。
 // 2.1.257 的出口面已按 docs/CC_2.1.220_EGRESS_SPEC.md §3 复核（2026-09-02）。
-const CLICurrentVersion = "2.1.257"
+// 2026-09-07 抬到 2.1.263（当时 npm latest，下游真实用户占比 46%）：本机原生
+// 二进制抓样与 2.1.257 相比，UA 之外的 HTTP 头、Runtime/Package 版本、TLS
+// ClientHello（JA3/JA4）全部相同，只有 opus/fable 的 beta 多了
+// per-turn-control-2026-07-01（beta 集合另见 M-6，未随本次一起改）。
+// 抬版本前必须重抓样本核对头与 TLS，方法见 tlsfingerprint/claudecode_clienthello_test.go。
+const CLICurrentVersion = "2.1.263"
 
 // FullClaudeCodeMimicryBetas 返回最"像"真实 Claude Code CLI 的完整 beta 列表，
 // 用于 OAuth 账号伪装成 Claude Code 时使用。

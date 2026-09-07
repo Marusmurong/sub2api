@@ -71,8 +71,51 @@ func computeClaudeCodeFingerprint(body []byte, version string) string {
 	return hex.EncodeToString(sum[:])[:3]
 }
 
-// extractFirstUserText 提取 messages 中第一条 user 消息的首段 text 内容。
-// 兼容 string 和 []block 两种 content 格式。
+// metaUserTextPrefixes 是 CLI 内部 isMeta=true 的 user 消息在线上形态里的开头标记。
+//
+// 2.1.263 二进制里 isMeta:!0 出现的上下文只有这几种标签：CLAUDE.md / hooks /
+// 记忆等上下文注入（system-reminder）、斜杠命令展开（command-message /
+// command-name）、本地命令输出（local-command-stdout）。真实用户输入不会以
+// 这些标签开头，所以按前缀判定不会误伤。
+var metaUserTextPrefixes = []string{
+	"<system-reminder>",
+	"<command-message>",
+	"<command-name>",
+	"<local-command-stdout>",
+	"<local-command-caveat>",
+}
+
+func isMetaUserText(text string) bool {
+	trimmed := strings.TrimLeft(text, " \t\r\n")
+	for _, p := range metaUserTextPrefixes {
+		if strings.HasPrefix(trimmed, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// extractFirstUserText 提取真实 CLI 用于 cc_version 指纹取样的那段文本。
+//
+// 真实 CLI（2.1.263 原文）：
+//
+//	e.find(o => o.type==="user" && !o.isMeta)   // 第一条非 meta 的 user 消息
+//	→ content 为 string 直接用；为数组取首个 text 块
+//
+// CLI 的 meta 消息（system-reminder 等）在发到线上时会与紧随其后的真实用户
+// 输入合并成同一条 user 消息、排在前面的 text 块。所以线上等价语义是：
+// 按顺序扫 user 消息，跳过 meta 开头的 text 块，取到的第一个非 meta text 块
+// 就是取样文本；某条 user 消息里全是 meta 块则继续看下一条。
+//
+// 但 find 一旦命中一条非 meta 消息就不再往后找，哪怕它没有 text 块（比如
+// 只有 tool_result）——那时 CLI 返回空串。线上对应：跳过 meta 块后，若该
+// 消息里还有非 meta 的其它块（tool_result / image…）却没有 text，或者内容
+// 是空数组，就在这里停下返回空串，不能再去看后面的 user 消息。
+//
+// 2026-09-07 之前这里取的是「第一条 user 消息的首个 text 块」，凡是带
+// CLAUDE.md / rules / hooks 的会话首块都是 <system-reminder>，算出的后缀与
+// 真实 CLI 不同；上游持有 messages 与 cc_version 可以确定性复算，这是一条
+// 逐请求可查的差异。
 func extractFirstUserText(body []byte) string {
 	messages := gjson.GetBytes(body, "messages")
 	if !messages.IsArray() {
@@ -85,20 +128,39 @@ func extractFirstUserText(body []byte) string {
 		}
 		content := msg.Get("content")
 		if content.Type == gjson.String {
+			if isMetaUserText(content.String()) {
+				return true
+			}
 			first = content.String()
 			return false
 		}
-		if content.IsArray() {
-			content.ForEach(func(_, block gjson.Result) bool {
-				if block.Get("type").String() == "text" {
-					first = block.Get("text").String()
-					return false
-				}
+		if !content.IsArray() {
+			return true
+		}
+		found := false
+		sawNonMetaBlock := false
+		content.ForEach(func(_, block gjson.Result) bool {
+			if block.Get("type").String() != "text" {
+				sawNonMetaBlock = true
 				return true
-			})
+			}
+			text := block.Get("text").String()
+			if isMetaUserText(text) {
+				return true
+			}
+			first = text
+			found = true
+			return false
+		})
+		if found {
 			return false
 		}
-		return false
+		// 非 meta 消息但没有 text 块（tool_result 等）或空数组：find 已命中，停。
+		if sawNonMetaBlock || len(content.Array()) == 0 {
+			return false
+		}
+		// 全是 meta 块：继续看下一条 user 消息。
+		return true
 	})
 	return first
 }

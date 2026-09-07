@@ -147,3 +147,75 @@ func marshalFingerprintTestBody(firstUserText string) ([]byte, error) {
 	}
 	return json.Marshal(payload{Messages: []message{{Role: "user", Content: firstUserText}}})
 }
+
+// 真实 CLI 取样的是「第一条 非 meta 的 user 消息」的首个 text 块
+// （2.1.263 二进制原文：e.find(o => o.type==="user" && !o.isMeta)）。
+// meta 消息在线上形态里是 <system-reminder>/<command-*>/<local-command-stdout>
+// 开头的 text 块，与真正的用户输入合并在同一条 user 消息里、排在前面。
+// 期望值 ed3 / e10 来自 2026-09-07 本机真实 2.1.263 抓包（-p 模式，
+// messages[0].content = [system-reminder 块, 用户输入块]）。
+func TestExtractFirstUserTextSkipsMetaBlocksLikeRealCLI(t *testing.T) {
+	sysReminder := "<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# claudeMd\n...\n</system-reminder>\n\n"
+	mk := func(blocks ...string) []byte {
+		content := make([]map[string]string, 0, len(blocks))
+		for _, b := range blocks {
+			content = append(content, map[string]string{"type": "text", "text": b})
+		}
+		body, _ := json.Marshal(map[string]any{"messages": []map[string]any{{"role": "user", "content": content}}})
+		return body
+	}
+
+	cases := []struct {
+		name     string
+		body     []byte
+		wantText string
+		wantFP   string
+	}{
+		{"system-reminder 在前，取用户输入 hi", mk(sysReminder, "hi"), "hi", "ed3"},
+		{"system-reminder 在前，取较长提示词", mk(sysReminder, "please summarize the theory of relativity in three sentences for a curious teenager"), "please summarize the theory of relativity in three sentences for a curious teenager", "e10"},
+		{"没有 meta 块时行为不变", mk("hi"), "hi", "ed3"},
+		{"多个 meta 块都跳过", mk(sysReminder, "<local-command-stdout>ok</local-command-stdout>", sysReminder, "hi"), "hi", "ed3"},
+		{"斜杠命令展开块是 meta", mk("<command-message>review is running…</command-message>\n<command-name>/review</command-name>", "hi"), "hi", "ed3"},
+		{"字符串 content 直接取", []byte(`{"messages":[{"role":"user","content":"hi"}]}`), "hi", "ed3"},
+		{"标签前有空白也算 meta", mk("\n  \t<system-reminder>x</system-reminder>", "hi"), "hi", "ed3"},
+		{"非 meta 消息里 text 前有 image 块，取 text", []byte(`{"messages":[{"role":"user","content":[{"type":"text","text":"<system-reminder>x</system-reminder>"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AA=="}},{"type":"text","text":"hi"}]}]}`), "hi", "ed3"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := extractFirstUserText(tc.body); got != tc.wantText {
+				t.Fatalf("extractFirstUserText = %q, want %q", got, tc.wantText)
+			}
+			if got := computeClaudeCodeFingerprint(tc.body, "2.1.263"); got != tc.wantFP {
+				t.Fatalf("fingerprint = %q, want %q（真实 2.1.263 抓包值）", got, tc.wantFP)
+			}
+		})
+	}
+}
+
+// 第一条 user 消息只有 meta 块时，继续找下一条 user 消息（镜像 CLI 的 find 语义）。
+func TestExtractFirstUserTextFallsThroughAllMetaMessage(t *testing.T) {
+	body := []byte(`{"messages":[
+		{"role":"user","content":[{"type":"text","text":"<system-reminder>x</system-reminder>"}]},
+		{"role":"assistant","content":[{"type":"text","text":"ok"}]},
+		{"role":"user","content":[{"type":"text","text":"second prompt"}]}]}`)
+	if got := extractFirstUserText(body); got != "second prompt" {
+		t.Fatalf("got %q, want %q", got, "second prompt")
+	}
+}
+
+// 第一条非 meta 的 user 消息没有 text 块时，CLI 的 find 已经命中它并返回空串，
+// 不会再往后找——线上等价于：跳过 meta 块后遇到 tool_result/空数组就停。
+func TestExtractFirstUserTextStopsAtNonMetaMessageWithoutText(t *testing.T) {
+	cases := map[string]string{
+		"tool_result 消息":     `{"messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"x","content":"ok"}]},{"role":"assistant","content":[{"type":"text","text":"..."}]},{"role":"user","content":[{"type":"text","text":"later"}]}]}`,
+		"meta 后跟 tool_result": `{"messages":[{"role":"user","content":[{"type":"text","text":"<system-reminder>x</system-reminder>"},{"type":"tool_result","tool_use_id":"x","content":"ok"}]},{"role":"user","content":[{"type":"text","text":"later"}]}]}`,
+		"空数组":                `{"messages":[{"role":"user","content":[]},{"role":"user","content":[{"type":"text","text":"later"}]}]}`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := extractFirstUserText([]byte(body)); got != "" {
+				t.Fatalf("got %q, want empty (CLI find 命中无 text 的消息即停止)", got)
+			}
+		})
+	}
+}

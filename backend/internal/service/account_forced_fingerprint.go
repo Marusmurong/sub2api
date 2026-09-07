@@ -136,6 +136,7 @@ func (a *Account) resolveForcedFingerprintSpec() *forcedFingerprintSpec {
 
 func defaultsForTLSAlignedIdentity() forcedFingerprintSpec {
 	// The TLS side is a macOS arm64 Claude Code 2.1.257 native binary
+	// (re-captured on 2.1.263, 2026-09-07: identical ClientHello and headers)
 	// (Bun 1.4 / BoringSSL): the production tls_fingerprint_profiles row every
 	// active account binds (id=6) and the dialer's built-in fallback are both
 	// that capture (2026-09-07). The HTTP identity below is what that same
