@@ -321,6 +321,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		zap.String("metadata_user_id_raw", parsedReq.MetadataUserID),
 	)
 
+	// 按平台分池（审计 C-1）观察期：只判定、只计数，不参与选号。
+	h.observeClientPlatform(c, body, sessionHash, isClaudeCodeClient, reqLog)
+
 	// 获取平台：优先使用强制平台（/antigravity 路由），其次使用 composite 解析出的目标平台，否则使用分组平台
 	platform := ""
 	if forcePlatform, ok := middleware2.GetForcePlatformFromContext(c); ok {
