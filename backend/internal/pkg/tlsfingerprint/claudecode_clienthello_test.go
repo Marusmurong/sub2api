@@ -105,6 +105,7 @@ type parsedHello struct {
 	ciphers    []uint16
 	extensions []uint16
 	curves     []uint16
+	keyShares  []uint16 // key_share(51) 里各 entry 的 group，按出现顺序
 	alpn       []string
 }
 
@@ -148,6 +149,12 @@ func parseHello(t *testing.T, payload []byte) parsedHello {
 				out.alpn = append(out.alpn, string(data[q+1:q+1+ln]))
 				q += 1 + ln
 			}
+		case 51: // key_share: u16 总长，然后若干 (group u16, len u16, data)
+			q := 2
+			for q+4 <= len(data) {
+				out.keyShares = append(out.keyShares, binary.BigEndian.Uint16(data[q:q+2]))
+				q += 4 + int(binary.BigEndian.Uint16(data[q+2:q+4]))
+			}
 		}
 	}
 	return out
@@ -180,4 +187,60 @@ func TestClientHelloMatchesRealClaudeCode(t *testing.T) {
 	if !reflect.DeepEqual(hello.alpn, []string{"http/1.1"}) {
 		t.Errorf("ALPN 不一致：实际 %v，期望 [http/1.1]（Claude Code 未开启 allowH2）", hello.alpn)
 	}
+}
+
+// 真实 Claude Code 2.1.257 的 ClientHello 基准值（2026-09-07 本机采集，方法同上）。
+//
+// 与 2.1.220 相比：密码套件不变；supported_groups 与 key_share 前置了
+// X25519MLKEM768(0x11ec, 4588)，因此 ClientHello 足够长，BoringSSL 不再追加
+// padding(21)——扩展从 14 个变成 13 个。不带 GREASE，也没有 ECH(65037)。
+// JA3 1523504b38f0fae0d881d4b6554aac1b，JA4 t13d1713h1_5b57614c22b0_6a3d802a7139。
+// 生产库 tls_fingerprint_profiles id=6 与之一致，当前两个在用账号都绑它。
+var (
+	claudeCode2_1_257Extensions = []uint16{0, 23, 65281, 10, 11, 35, 16, 5, 13, 18, 51, 45, 43}
+	claudeCode2_1_257Curves     = []uint16{4588, 29, 23, 24}
+	claudeCode2_1_257KeyShares  = []uint16{4588, 29}
+)
+
+func assertHelloMatches2_1_257(t *testing.T, label string, hello parsedHello) {
+	t.Helper()
+	if !reflect.DeepEqual(hello.ciphers, claudeCode2_1_220Ciphers) {
+		t.Errorf("[%s] 密码套件不一致\n实际 %v\n期望 %v", label, hello.ciphers, claudeCode2_1_220Ciphers)
+	}
+	if !reflect.DeepEqual(hello.extensions, claudeCode2_1_257Extensions) {
+		t.Errorf("[%s] 扩展序列不一致（JA3/JA4 对顺序敏感）\n实际 %v\n期望 %v", label, hello.extensions, claudeCode2_1_257Extensions)
+	}
+	if !reflect.DeepEqual(hello.curves, claudeCode2_1_257Curves) {
+		t.Errorf("[%s] 曲线不一致\n实际 %v\n期望 %v", label, hello.curves, claudeCode2_1_257Curves)
+	}
+	if !reflect.DeepEqual(hello.keyShares, claudeCode2_1_257KeyShares) {
+		t.Errorf("[%s] key_share 分组不一致\n实际 %v\n期望 %v", label, hello.keyShares, claudeCode2_1_257KeyShares)
+	}
+	if !reflect.DeepEqual(hello.alpn, []string{"http/1.1"}) {
+		t.Errorf("[%s] ALPN 不一致：实际 %v，期望 [http/1.1]", label, hello.alpn)
+	}
+}
+
+// 内置默认（账号开了 TLS 指纹但没绑 profile 时的回退）必须等于真实 2.1.257。
+//
+// 这条保护的是一致性：HTTP 层 UA/Runtime-Version 已按 2.1.257 报（Bun/BoringSSL），
+// 回退 ClientHello 若还是老的 Node 24 形态，同一条连接就会自相矛盾。
+func TestBuiltInDefaultMatchesRealClaudeCode2_1_257(t *testing.T) {
+	assertHelloMatches2_1_257(t, "built-in default", parseHello(t, captureClientHello(t, nil)))
+}
+
+// 显式 profile（镜像生产库 id=6）也必须逐字节复现 2.1.257。
+func TestProfile6MatchesRealClaudeCode2_1_257(t *testing.T) {
+	profile := &Profile{
+		Name:              "ClaudeCode_2.1.257_macOS_arm64_Bun",
+		CipherSuites:      append([]uint16(nil), claudeCode2_1_220Ciphers...),
+		Curves:            append([]uint16(nil), claudeCode2_1_257Curves...),
+		PointFormats:      []uint16{0},
+		EnableGREASE:      false,
+		ALPNProtocols:     []string{"http/1.1"},
+		SupportedVersions: []uint16{0x0304, 0x0303},
+		KeyShareGroups:    append([]uint16(nil), claudeCode2_1_257KeyShares...),
+		Extensions:        append([]uint16(nil), claudeCode2_1_257Extensions...),
+	}
+	assertHelloMatches2_1_257(t, "profile 6", parseHello(t, captureClientHello(t, profile)))
 }

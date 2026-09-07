@@ -34,7 +34,8 @@ var headerWireCasing = map[string]string{
 	"content-type":                              "content-type",
 	"accept-language":                           "accept-language",
 	"sec-fetch-mode":                            "sec-fetch-mode",
-	"accept-encoding":                           "accept-encoding",
+	"accept-encoding":                           "Accept-Encoding",
+	"connection":                                "Connection",
 	"authorization":                             "authorization",
 
 	// Claude Code 2.1.87+ 新增 header

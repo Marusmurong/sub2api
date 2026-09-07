@@ -118,7 +118,7 @@ func TestGetOrCreateFingerprint_TLSEnabledWithoutExtraFingerprintAlignsMacOS(t *
 	require.NoError(t, err)
 	require.Equal(t, "MacOS", fp.StainlessOS)
 	require.Equal(t, "arm64", fp.StainlessArch)
-	require.Equal(t, "v24.3.0", fp.StainlessRuntimeVersion)
+	require.Equal(t, "v26.3.0", fp.StainlessRuntimeVersion)
 	require.NotEmpty(t, fp.ClientID)
 }
 

@@ -12,7 +12,6 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
-	"github.com/google/uuid"
 	"github.com/tidwall/gjson"
 
 	"github.com/gin-gonic/gin"
@@ -213,9 +212,9 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	}
 
 	// OAuth + mimic Claude Code：强制注入 CLI 指纹相关 header
-	// （user-agent/x-stainless-*/x-app/Accept/x-stainless-helper-method/x-client-request-id）
+	// （user-agent/x-stainless-*/x-app/Accept/Accept-Encoding/Connection/x-stainless-helper-method）
 	if tokenType == "oauth" && mimicClaudeCode {
-		applyClaudeCodeMimicHeaders(ctx, req, reqStream)
+		applyClaudeCodeMimicHeaders(req, reqStream)
 	}
 
 	// 写入最终 anthropic-beta header
@@ -919,7 +918,7 @@ var defaultDroppedBetasSet = buildBetaTokenSet(claude.DroppedBetas)
 // applyClaudeCodeMimicHeaders forces "Claude Code-like" request headers.
 // This mirrors opencode-anthropic-auth behavior: do not trust downstream
 // headers when using Claude Code-scoped OAuth credentials.
-func applyClaudeCodeMimicHeaders(ctx context.Context, req *http.Request, isStream bool) {
+func applyClaudeCodeMimicHeaders(req *http.Request, isStream bool) {
 	if req == nil {
 		return
 	}
@@ -938,16 +937,10 @@ func applyClaudeCodeMimicHeaders(ctx context.Context, req *http.Request, isStrea
 	if isStream {
 		setHeaderRaw(req.Header, "x-stainless-helper-method", "stream")
 	}
-	// 重试计数跟着尝试序号走：DefaultHeaders 里写死的 "0" 只对首次请求正确，
-	// 真实 SDK 第 n 次重试发 n（审计 H-4）。
-	if attempt := upstreamAttemptFromContext(ctx); attempt > 1 {
-		setHeaderRaw(req.Header, "X-Stainless-Retry-Count", strconv.Itoa(attempt-1))
-	}
-	// Real Claude CLI 每个请求都会生成一个新的 UUID 放在 x-client-request-id。
-	// 上游会以此作为会话/请求指纹的一部分，缺失或重复都可能触发第三方判定。
-	if getHeaderRaw(req.Header, "x-client-request-id") == "" {
-		setHeaderRaw(req.Header, "x-client-request-id", uuid.NewString())
-	}
+	// 刻意不发 x-client-request-id：2026-09-07 本机抓包证实真实 2.1.257 的 defaultHeaders 与
+	// SDK 核心头里都没有它（旧注释"每个请求生成一个 UUID"不成立），多发一个头就是多一个指纹。
+	// X-Stainless-Retry-Count 同样保持 DefaultHeaders 的 "0"，见 constants.go 注释。
+	deleteHeaderAllForms(req.Header, "x-client-request-id")
 }
 
 // bodyRequestsFastMode 判断请求体是否要求 fast 档（与 ParsedRequest.Speed 同口径：

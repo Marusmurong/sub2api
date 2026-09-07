@@ -18,8 +18,8 @@ import (
 //	  "os": "MacOS",
 //	  "arch": "arm64",
 //	  "runtime": "node",
-//	  "runtime_version": "v24.3.0",
-//	  "package_version": "0.94.0",
+//	  "runtime_version": "v26.3.0",
+//	  "package_version": "0.112.1",
 //	  "cli_version": "2.1.220",
 //	  "ua_suffix": "(external, cli)",
 //	  "lang": "js",
@@ -135,14 +135,18 @@ func (a *Account) resolveForcedFingerprintSpec() *forcedFingerprintSpec {
 }
 
 func defaultsForTLSAlignedIdentity() forcedFingerprintSpec {
-	// All production tls_fingerprint_profiles today are macOS arm64 Node 24.x
-	// captures. HTTP stainless must match that machine.
+	// The TLS side is a macOS arm64 Claude Code 2.1.257 native binary
+	// (Bun 1.4 / BoringSSL): the production tls_fingerprint_profiles row every
+	// active account binds (id=6) and the dialer's built-in fallback are both
+	// that capture (2026-09-07). The HTTP identity below is what that same
+	// binary reports — the stainless runtime string is still "node" even
+	// though the process is Bun. Keep these two sides in lockstep.
 	return forcedFingerprintSpec{
 		OS:             "MacOS",
 		Arch:           "arm64",
 		Runtime:        "node",
-		RuntimeVersion: "v24.3.0",
-		PackageVersion: "0.94.0",
+		RuntimeVersion: "v26.3.0",
+		PackageVersion: "0.112.1",
 		CLIVersion:     claude.CLICurrentVersion,
 		UASuffix:       "(external, cli)",
 		Lang:           "js",
@@ -174,11 +178,11 @@ func (s *forcedFingerprintSpec) toFingerprint() *Fingerprint {
 		ClientID:                s.ClientID,
 		UserAgent:               strings.TrimSpace(ua),
 		StainlessLang:           firstNonEmptyFingerprint(s.Lang, "js"),
-		StainlessPackageVersion: firstNonEmptyFingerprint(s.PackageVersion, "0.94.0"),
+		StainlessPackageVersion: firstNonEmptyFingerprint(s.PackageVersion, "0.112.1"),
 		StainlessOS:             firstNonEmptyFingerprint(s.OS, "MacOS"),
 		StainlessArch:           firstNonEmptyFingerprint(s.Arch, "arm64"),
 		StainlessRuntime:        firstNonEmptyFingerprint(s.Runtime, "node"),
-		StainlessRuntimeVersion: firstNonEmptyFingerprint(s.RuntimeVersion, "v24.3.0"),
+		StainlessRuntimeVersion: firstNonEmptyFingerprint(s.RuntimeVersion, "v26.3.0"),
 	}
 }
 

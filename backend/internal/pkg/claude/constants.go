@@ -199,27 +199,34 @@ var DefaultHeaders = map[string]string{
 	// 版本参考：对齐 Parrot (src/transform/cc_mimicry.py:49) 的 CLI_USER_AGENT。
 	// CLIVersion() 而非 CLICurrentVersion：前者叠加 SUB2API_CLAUDE_CLI_VERSION
 	// 覆盖，后者只是内置基线。两处若不一致，UA 与 body 里的 cc_version 会互相矛盾。
-	"User-Agent":                  "claude-cli/" + CLIVersion() + " (external, cli)",
-	"X-Stainless-Lang":            "js",
-	"X-Stainless-Package-Version": "0.94.0",
+	"User-Agent":       "claude-cli/" + CLIVersion() + " (external, cli)",
+	"X-Stainless-Lang": "js",
+	// 2026-09-07 本机抓包（2.1.257 Bun 原生 arm64 → 本机假端点，OAuth/API-key 两种模式
+	// 头集合一致）实测：Package-Version 0.112.1、Runtime-Version v26.3.0、
+	// Accept-Encoding "gzip, deflate, br, zstd"、显式 Connection: keep-alive。线上 TLS
+	// profile 6 与该客户端 ClientHello 逐字段一致（17 cipher / 13 ext 同序 / ALPN 仅
+	// http/1.1 / 无 GREASE），所以 HTTP 层可以直接照抄，不必再为旧的 Node 24 profile 压低
+	// 版本。改任何一项必须重新抓包，见 docs/UPSTREAM_EXPOSURE_AUDIT_2026-09-07.html 附录。
+	"X-Stainless-Package-Version": "0.112.1",
 	// MacOS/arm64 rather than Linux/arm64. Measured against the fingerprints
 	// real clients present to this gateway: of 23 samples, 20 reported
 	// Windows/x64 and 3 MacOS/arm64 — not one reported Linux/arm64. Mimicking a
 	// combination no real user reports puts every account served through
 	// mimicry alone in its cell of the (version x os x arch) space, which is
 	// the opposite of what mimicry is for.
-	"X-Stainless-OS":   "MacOS",
-	"X-Stainless-Arch": "arm64",
-	// Left at v24.3.0 on purpose, even though real 2.1.257 clients report
-	// v26.3.0: the TLS profile in pkg/tlsfingerprint was captured from Node.js
-	// 24.x, so claiming v26 here would make the HTTP layer contradict the
-	// ClientHello. An unusual-but-consistent runtime beats a self-contradicting
-	// one — revisit together with the TLS profile, not on its own.
-	"X-Stainless-Runtime":                       "node",
-	"X-Stainless-Runtime-Version":               "v24.3.0",
-	"X-Stainless-Retry-Count":                   "0",
-	"X-Stainless-Timeout":                       "600",
-	"X-App":                                     "cli",
+	"X-Stainless-OS":              "MacOS",
+	"X-Stainless-Arch":            "arm64",
+	"X-Stainless-Runtime":         "node",
+	"X-Stainless-Runtime-Version": "v26.3.0",
+	// 恒为 0：真实 CLI 主查询建 SDK 时 maxRetries:0，重试由 CLI 自己的循环发起全新调用，
+	// 头永远不递增（本机对假 529 端点连发 3 次实测）。不要按尝试序号改它。
+	"X-Stainless-Retry-Count": "0",
+	// Go 的 transport 默认只发 gzip 且不发 Connection；真实客户端两者都显式发。
+	// 响应侧 repository/http_upstream.go 的 decompressResponseBody 已支持 gzip/deflate/br/zstd。
+	"Accept-Encoding":     "gzip, deflate, br, zstd",
+	"Connection":          "keep-alive",
+	"X-Stainless-Timeout": "600",
+	"X-App":               "cli",
 	"Anthropic-Dangerous-Direct-Browser-Access": "true",
 }
 

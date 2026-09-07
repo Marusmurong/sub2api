@@ -27,9 +27,9 @@ type Profile struct {
 	SignatureAlgorithms []uint16 // Empty uses defaultSignatureAlgorithms
 	ALPNProtocols       []string // Empty uses ["http/1.1"]
 	SupportedVersions   []uint16 // Empty uses [TLS1.3, TLS1.2]
-	KeyShareGroups      []uint16 // Empty uses [X25519]
+	KeyShareGroups      []uint16 // Empty uses [X25519MLKEM768, X25519]
 	PSKModes            []uint16 // Empty uses [psk_dhe_ke]
-	Extensions          []uint16 // Extension type IDs in order; empty uses default Node.js 24.x order
+	Extensions          []uint16 // Extension type IDs in order; empty uses the Claude Code 2.1.257 order
 }
 
 // Dialer creates TLS connections with custom fingerprints.
@@ -52,12 +52,21 @@ type SOCKS5ProxyDialer struct {
 	proxyURL *url.URL
 }
 
-// Default TLS fingerprint values captured from Claude Code (Node.js 24.x)
-// Captured via tls-fingerprint-web capture server
-// JA3 Hash: 44f88fca027f27bab4bb08d4af15f23e
-// JA4:      t13d1714h1_5b57614c22b0_7baf387fc6ff
+// Default TLS fingerprint values captured from the real Claude Code 2.1.257
+// native binary (macOS arm64, Bun 1.4 / BoringSSL), 2026-09-07, via a local
+// TCP sink reading the first record (see claudecode_clienthello_test.go).
+// JA3 Hash: 1523504b38f0fae0d881d4b6554aac1b
+// JA4:      t13d1713h1_5b57614c22b0_6a3d802a7139
+//
+// These defaults are the fallback when an account has TLS fingerprinting
+// enabled but no profile bound. They MUST stay in lockstep with the HTTP
+// identity defaults (claude.DefaultHeaders / defaultsForTLSAlignedIdentity),
+// otherwise one connection claims two different client builds.
+// Earlier values (Node.js 24.x capture, JA3 44f88fca…, JA4 t13d1714h1_…)
+// differed only by: ECH GREASE (65037) present, no X25519MLKEM768 group/key
+// share, and a trailing padding(21) on the shorter hello.
 var (
-	// defaultCipherSuites contains the 17 cipher suites from Node.js 24.x
+	// defaultCipherSuites contains the 17 cipher suites from Claude Code 2.1.257 (unchanged since the Node.js 24.x capture)
 	// Order is critical for JA3 fingerprint matching
 	defaultCipherSuites = []uint16{
 		// TLS 1.3 cipher suites
@@ -90,19 +99,21 @@ var (
 		0x0035, // TLS_RSA_WITH_AES_256_CBC_SHA
 	}
 
-	// defaultCurves contains the 3 supported groups from Node.js 24.x
+	// defaultCurves contains the 4 supported groups from Claude Code 2.1.257
+	// (BoringSSL enables the post-quantum hybrid first).
 	defaultCurves = []utls.CurveID{
-		utls.X25519,    // 0x001d
-		utls.CurveP256, // 0x0017 (secp256r1)
-		utls.CurveP384, // 0x0018 (secp384r1)
+		utls.X25519MLKEM768, // 0x11ec
+		utls.X25519,         // 0x001d
+		utls.CurveP256,      // 0x0017 (secp256r1)
+		utls.CurveP384,      // 0x0018 (secp384r1)
 	}
 
-	// defaultPointFormats contains point formats from Node.js 24.x
+	// defaultPointFormats contains point formats from Claude Code 2.1.257 (unchanged since the Node.js 24.x capture)
 	defaultPointFormats = []uint16{
 		0, // uncompressed
 	}
 
-	// defaultSignatureAlgorithms contains the 9 signature algorithms from Node.js 24.x
+	// defaultSignatureAlgorithms contains the 9 signature algorithms from Claude Code 2.1.257 (unchanged since the Node.js 24.x capture)
 	defaultSignatureAlgorithms = []utls.SignatureScheme{
 		0x0403, // ecdsa_secp256r1_sha256
 		0x0804, // rsa_pss_rsae_sha256
@@ -307,11 +318,11 @@ func toUTLSCurves(curves []uint16) []utls.CurveID {
 	return result
 }
 
-// defaultExtensionOrder is the Node.js 24.x extension order.
-// Used when Profile.Extensions is empty.
+// defaultExtensionOrder is the Claude Code 2.1.257 (BoringSSL) extension order.
+// Used when Profile.Extensions is empty. 13 extensions: no GREASE, no ECH,
+// and no padding(21) — the MLKEM key share already makes the hello long.
 var defaultExtensionOrder = []uint16{
 	0,     // server_name
-	65037, // encrypted_client_hello
 	23,    // extended_master_secret
 	65281, // renegotiation_info
 	10,    // supported_groups
@@ -368,7 +379,7 @@ func buildClientHelloSpecFromProfile(profile *Profile) *utls.ClientHelloSpec {
 		supportedVersions = profile.SupportedVersions
 	}
 
-	keyShareGroups := []utls.CurveID{utls.X25519}
+	keyShareGroups := []utls.CurveID{utls.X25519MLKEM768, utls.X25519}
 	if profile != nil && len(profile.KeyShareGroups) > 0 {
 		keyShareGroups = toUTLSCurves(profile.KeyShareGroups)
 	}

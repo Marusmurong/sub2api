@@ -93,46 +93,61 @@ func TestMimicHeaders_NonMimicPathKeepsOldSyncBehaviour(t *testing.T) {
 	require.Empty(t, getHeaderRaw(req.Header, "X-Claude-Code-Session-Id"))
 }
 
-// ===== H-4 =====
-
-func TestMimicHeaders_RetryCountFollowsUpstreamAttempt(t *testing.T) {
+// ===== H-4（2026-09-07 本机抓包后反转）=====
+//
+// 真实 2.1.257 主查询客户端建 SDK 时 `maxRetries:0`（KF({maxRetries:0,...source:querySource})），
+// 重试由 CLI 自己的循环发起全新 SDK 调用，因此 X-Stainless-Retry-Count 恒为 "0"——
+// 对本机假 529 端点连发 3 次，全部 retry-count=0、body 逐字节相同。此前按尝试序号递增
+// 的实现反而让我们不像真实客户端，故回退：任何情况下都发 "0"。
+func TestMimicHeaders_RetryCountIsAlwaysZero(t *testing.T) {
 	svc := newUnifiedIdentityService()
 	body := []byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":"hi"}]}`)
-
-	cases := []struct {
-		name string
-		ctx  context.Context
-		want string
-	}{
-		{"未标注尝试序号 → 首次请求", context.Background(), "0"},
-		{"第 1 次尝试", WithUpstreamAttempt(context.Background(), 1), "0"},
-		{"第 3 次尝试 → 第 2 次重试", WithUpstreamAttempt(context.Background(), 3), "2"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			c := newMimicGapContext(t)
-			req, _, err := svc.buildUpstreamRequest(tc.ctx, c, newUnifiedIdentityAccount(),
-				body, "tok", "oauth", "claude-opus-4-8", true, true)
-			require.NoError(t, err)
-			require.Equal(t, tc.want, getHeaderRaw(req.Header, "x-stainless-retry-count"))
-		})
+	for i := 0; i < 3; i++ {
+		c := newMimicGapContext(t)
+		req, _, err := svc.buildUpstreamRequest(context.Background(), c, newUnifiedIdentityAccount(),
+			body, "tok", "oauth", "claude-opus-4-8", true, true)
+		require.NoError(t, err)
+		require.Equal(t, "0", getHeaderRaw(req.Header, "x-stainless-retry-count"),
+			"第 %d 次构建：真实 CLI 主查询 maxRetries=0，重试头永远是 0", i+1)
 	}
 }
 
-// 循环内的补救重发也必须计数：五处出站都经 nextUpstreamAttemptCtx，序号按调用递增，
-// 每个派生 ctx 读回的都是自己那一次的序号（而不是最后一次）。
-func TestNextUpstreamAttemptCtx_IncrementsPerWireRequest(t *testing.T) {
-	base := context.Background()
-	n := 0
-	c1 := nextUpstreamAttemptCtx(base, &n)
-	c2 := nextUpstreamAttemptCtx(base, &n)
-	c3 := nextUpstreamAttemptCtx(base, &n)
-	require.Equal(t, 3, n)
-	require.Equal(t, 1, upstreamAttemptFromContext(c1))
-	require.Equal(t, 2, upstreamAttemptFromContext(c2))
-	require.Equal(t, 3, upstreamAttemptFromContext(c3))
-	require.Equal(t, 1, upstreamAttemptFromContext(base), "未打标的 ctx 视为首次")
-	require.Equal(t, 1, upstreamAttemptFromContext(nextUpstreamAttemptCtx(base, nil)), "nil 计数器退化为首次，不能 panic")
+// ===== 本机抓包对齐（docs/UPSTREAM_EXPOSURE_AUDIT_2026-09-07.html 附录）=====
+//
+// 样本：~/.npm-global 下 2.1.257 Bun 原生 arm64 二进制，直连本机假端点，
+// OAuth（钥匙串 Max 登录）与 API-key 两种模式各抓一份，头集合一致。
+func TestMimicHeaders_MatchRealClaudeCode2_1_257Capture(t *testing.T) {
+	svc := newUnifiedIdentityService()
+	c := newMimicGapContext(t)
+	req, _, err := svc.buildUpstreamRequest(context.Background(), c, newUnifiedIdentityAccount(),
+		[]byte(mimicGapSessionBody), "tok", "oauth", "claude-opus-4-8", true, true)
+	require.NoError(t, err)
+
+	want := map[string]string{
+		"X-Stainless-Package-Version": "0.112.1",
+		"X-Stainless-Runtime-Version": "v26.3.0",
+		"X-Stainless-Runtime":         "node",
+		"X-Stainless-OS":              "MacOS",
+		"X-Stainless-Arch":            "arm64",
+		"X-Stainless-Lang":            "js",
+		"X-Stainless-Timeout":         "600",
+		"X-Stainless-Retry-Count":     "0",
+		"Accept":                      "application/json",
+		"Accept-Encoding":             "gzip, deflate, br, zstd",
+		"Connection":                  "keep-alive",
+		"x-app":                       "cli",
+		"anthropic-version":           "2023-06-01",
+		"anthropic-dangerous-direct-browser-access": "true",
+	}
+	for k, v := range want {
+		require.Equal(t, v, getHeaderRaw(req.Header, k), "header %s", k)
+		// 线上大小写也要一致：真实客户端就是这个写法
+		_, rawOK := req.Header[k]
+		require.True(t, rawOK, "header %s 的 wire casing 应为 %q", k, k)
+	}
+	require.Empty(t, getHeaderRaw(req.Header, "x-client-request-id"),
+		"真实 2.1.257 不发 x-client-request-id（defaultHeaders 与 SDK 核心头里都没有），多一个头就是多一个指纹")
+	require.True(t, strings.HasPrefix(getHeaderRaw(req.Header, "User-Agent"), "claude-cli/"+claude.CLIVersion()+" (external, cli)"))
 }
 
 // ===== M-3 =====

@@ -16,13 +16,14 @@ func TestDefaultHeadersMimicAPlausibleEnvironment(t *testing.T) {
 		// Not one reported Linux/arm64, which is what upstream ships.
 		"X-Stainless-OS":   "MacOS",
 		"X-Stainless-Arch": "arm64",
-		// Held at v24.3.0 to match the TLS profile in pkg/tlsfingerprint, which
-		// was captured from Node.js 24.x. Real 2.1.257 clients report v26.3.0,
-		// so this is knowingly inconsistent with them — but consistent with our
-		// own ClientHello, which is the comparison upstream can actually make.
-		// Change it only together with a re-captured TLS profile.
+		// 2026-09-07 本机抓包（2.1.257 Bun 原生 arm64 直连假端点）实测值。线上 TLS
+		// profile 6 与该客户端的 ClientHello 逐字段一致，因此 HTTP 层可以直接照抄，
+		// 不再需要为旧的 Node 24 profile 压低版本。改这些值必须重新抓包。
 		"X-Stainless-Runtime":         "node",
-		"X-Stainless-Runtime-Version": "v24.3.0",
+		"X-Stainless-Runtime-Version": "v26.3.0",
+		"X-Stainless-Package-Version": "0.112.1",
+		"Accept-Encoding":             "gzip, deflate, br, zstd",
+		"Connection":                  "keep-alive",
 	}
 	for k, v := range want {
 		if got := DefaultHeaders[k]; got != v {

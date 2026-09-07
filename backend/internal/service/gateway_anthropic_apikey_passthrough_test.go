@@ -916,7 +916,8 @@ func TestGatewayService_AnthropicOAuthMimic_RewritesSystemWithBillingBlock(t *te
 			for key, value := range claude.DefaultHeaders {
 				require.Equal(t, value, getHeaderRaw(upstream.lastReq.Header, key), "mimic fingerprint header %s", key)
 			}
-			require.NotEmpty(t, getHeaderRaw(upstream.lastReq.Header, "x-client-request-id"))
+			require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "x-client-request-id"),
+				"真实 2.1.257 不发 x-client-request-id（2026-09-07 本机抓包），伪装路径不得自造")
 
 			require.Equal(t, tt.wantModel, gjson.GetBytes(upstream.lastBody, "model").String())
 			system := gjson.GetBytes(upstream.lastBody, "system")
@@ -1026,8 +1027,8 @@ func TestGatewayService_AnthropicOAuthRealClaudeCode_UsesUnifiedIdentity(t *test
 	require.Equal(t, strings.Join(claude.FullClaudeCodeMimicryBetas(), ","),
 		getHeaderRaw(upstream.lastReq.Header, "anthropic-beta"),
 		"beta 集合固定，不随客户端变化")
-	require.NotEmpty(t, getHeaderRaw(upstream.lastReq.Header, "x-client-request-id"),
-		"request id 由我们生成，不沿用客户端的")
+	require.Empty(t, getHeaderRaw(upstream.lastReq.Header, "x-client-request-id"),
+		"既不沿用客户端的也不自造：真实 2.1.257 不发 x-client-request-id（2026-09-07 本机抓包）")
 
 	// 内容维度：客户端的指令与对话必须完好
 	require.Equal(t, gjson.GetBytes(body, "messages").Raw, gjson.GetBytes(upstream.lastBody, "messages").Raw,

@@ -71,8 +71,8 @@ func TestUnifiedIdentity_MimicDropsClientIdentityHeaders(t *testing.T) {
 	for _, h := range []string{"accept-language", "sec-fetch-mode"} {
 		require.Empty(t, getHeaderRaw(req.Header, h), "%s 不得透传：这是下游客户的机器特征", h)
 	}
-	require.NotEqual(t, "downstream-customer-request-id", getHeaderRaw(req.Header, "x-client-request-id"),
-		"x-client-request-id 必须由我们生成，不能沿用客户端的")
+	require.Empty(t, getHeaderRaw(req.Header, "x-client-request-id"),
+		"x-client-request-id 不能沿用客户端的，也不能自造：真实 2.1.257 根本不发这个头（2026-09-07 本机抓包）")
 
 	// 平台头必须是我们的固定值，而不是客户端的 Windows/x64/v20.1.0
 	require.Equal(t, claude.DefaultHeaders["X-Stainless-OS"], getHeaderRaw(req.Header, "x-stainless-os"))
@@ -95,7 +95,7 @@ func TestUnifiedIdentity_CountTokensAlsoDropsClientHeaders(t *testing.T) {
 	for _, h := range []string{"accept-language", "sec-fetch-mode"} {
 		require.Empty(t, getHeaderRaw(req.Header, h), "count_tokens 的 %s 同样不得透传", h)
 	}
-	require.NotEqual(t, "downstream-customer-request-id", getHeaderRaw(req.Header, "x-client-request-id"))
+	require.Empty(t, getHeaderRaw(req.Header, "x-client-request-id"))
 }
 
 // ===== A3：beta 固定集合 + 功能白名单 =====
