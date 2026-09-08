@@ -1121,3 +1121,15 @@ func TestBuildSchedulerMetadataAccount_KeepsOpenAIPassthroughForModelGate(t *tes
 		})
 	}
 }
+
+// 按平台分池读的是调度投影里的 extra.client_platform；投影裁掉它会让每个请求都把
+// 已定型的号当未定型重新定型（09-08 线上实录：两个老号每分钟被反复 account_typed）。
+func TestFilterSchedulerExtra_KeepsClientPlatform(t *testing.T) {
+	got := filterSchedulerExtra(map[string]any{"client_platform": "macos-arm64", "unrelated": 1})
+	if got["client_platform"] != "macos-arm64" {
+		t.Fatalf("client_platform 必须保留在调度投影里, got %v", got)
+	}
+	if _, ok := got["unrelated"]; ok {
+		t.Fatalf("非白名单键不应进投影")
+	}
+}

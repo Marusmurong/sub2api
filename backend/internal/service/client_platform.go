@@ -100,8 +100,12 @@ func ParseClientPlatform(s string) ClientPlatform {
 	}
 }
 
-// accountClientPlatformKey 是账号 extra 里的定型字段。空 = 未定型。
-const accountClientPlatformKey = "client_platform"
+// AccountClientPlatformExtraKey 是账号 extra 里的定型字段。空 = 未定型。
+// 导出给 repository 的调度投影白名单（scheduler_cache.go filterSchedulerExtra）使用。
+const AccountClientPlatformExtraKey = "client_platform"
+
+// accountClientPlatformKey 是包内别名。
+const accountClientPlatformKey = AccountClientPlatformExtraKey
 
 // ClientPlatform 返回账号定型的客户端平台；未定型返回 Unknown。
 func (a *Account) ClientPlatform() ClientPlatform {

@@ -1021,6 +1021,9 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"auto_pause_5h_disabled",
 		"auto_pause_7d_disabled",
 		"model_rate_limits",
+		// 按客户端平台分池：applyClientPlatformPool 读的是本投影里的 Account.ClientPlatform()。
+		// 裁掉它，调度层看到的号全是「未定型」，每个请求都会重新定型并反复写库。
+		service.AccountClientPlatformExtraKey,
 		service.UpstreamBillingProbeExtraKey,
 		service.GrokMediaEligibleExtraKey,
 		"grok_billing_snapshot",
