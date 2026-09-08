@@ -95,6 +95,11 @@ export default {
       schedulableDisabled: '调度已关闭',
       failedToToggleSchedulable: '切换调度状态失败',
       groupCountTotal: '共 {count} 个分组',
+      clientPlatform: {
+        untyped: '未定型',
+        untypedTitle: '按客户端平台分池：尚未定型，进池后由第一次需要它的平台自动定型',
+        typedTitle: '按客户端平台分池：此账号只承接 {platform} 客户端的请求，出站身份按该平台'
+      },
       columns: {
         name: '名称',
         id: '账号ID',

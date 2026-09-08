@@ -249,6 +249,13 @@
               >
                 {{ accountDisplayEmail(row) }}
               </span>
+              <span
+                v-if="clientPlatformTag(row)"
+                :class="['mt-0.5 inline-flex w-fit items-center rounded px-1.5 py-0.5 text-[10px] font-medium leading-4', clientPlatformTag(row)!.className]"
+                :title="clientPlatformTag(row)!.title"
+              >
+                {{ clientPlatformTag(row)!.label }}
+              </span>
             </div>
           </template>
           <template #cell-notes="{ value }">
@@ -2531,6 +2538,35 @@ const isExpired = (value: number | null) => {
   return value * 1000 <= Date.now()
 }
 // 所绑定代理的有效期(逻辑同 /admin/proxies,见 utils/proxyExpiry)
+// 按客户端平台分池（gateway.client_platform_pool）：账号 extra.client_platform 是定型结果，
+// 空 = 未定型（进池后由第一次需要它的平台自动定型）。只对 Anthropic OAuth/SetupToken 账号显示。
+type ClientPlatformTag = { label: string; className: string; title: string }
+const CLIENT_PLATFORM_TAG_STYLES: Record<string, { label: string; className: string }> = {
+  'macos-arm64': { label: 'macOS · arm64', className: 'bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-gray-200' },
+  'macos-x64': { label: 'macOS · x64', className: 'bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-gray-200' },
+  'windows-x64': { label: 'Windows · x64', className: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300' },
+  'windows-arm64': { label: 'Windows · arm64', className: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300' },
+  'linux-x64': { label: 'Linux · x64', className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' },
+  'linux-arm64': { label: 'Linux · arm64', className: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300' }
+}
+const clientPlatformTag = (row: any): ClientPlatformTag | null => {
+  if (row?.platform !== 'anthropic' || (row?.type !== 'oauth' && row?.type !== 'setup_token')) return null
+  const raw = String(row?.extra?.client_platform ?? '').trim().toLowerCase()
+  if (!raw) {
+    return {
+      label: t('admin.accounts.clientPlatform.untyped'),
+      className: 'border border-dashed border-gray-300 text-gray-400 dark:border-dark-500 dark:text-dark-400',
+      title: t('admin.accounts.clientPlatform.untypedTitle')
+    }
+  }
+  const style = CLIENT_PLATFORM_TAG_STYLES[raw]
+  return {
+    label: style?.label ?? raw,
+    className: style?.className ?? 'bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-gray-200',
+    title: t('admin.accounts.clientPlatform.typedTitle', { platform: style?.label ?? raw })
+  }
+}
+
 const proxyExpiryBadge = (p: AccountProxy): string => proxyExpiryBadgeClass(p.expires_at, p.status)
 const proxyExpiryText = (p: AccountProxy): string => {
   const { key, params } = proxyExpiryLabelKey(p.expires_at, p.status)

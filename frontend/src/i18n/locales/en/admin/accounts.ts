@@ -199,6 +199,11 @@ export default {
         viewTempUnschedDetails: 'View temp unschedulable details',
         tempUnschedulableUntil: 'Resumes {time}'
       },
+      clientPlatform: {
+        untyped: 'Untyped',
+        untypedTitle: 'Client-platform pooling: not typed yet; the first platform that needs this account will type it automatically',
+        typedTitle: 'Client-platform pooling: this account only serves {platform} clients and presents that platform upstream'
+      },
       columns: {
         name: 'Name',
         id: 'Account ID',
