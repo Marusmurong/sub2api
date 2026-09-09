@@ -322,6 +322,15 @@ func isTrivialGreetingRequest(body []byte) bool {
 	return isGreeting
 }
 
+// bodyHasSubstantiveSystemPrompt 是 hasSubstantiveSystemPrompt 的整体请求版本，
+// 供不引 gjson 的调用方使用（gateway_handler.go 的 max_tokens=1 探针判定）。
+func bodyHasSubstantiveSystemPrompt(body []byte) bool {
+	if len(body) == 0 || !gjson.ValidBytes(body) {
+		return false
+	}
+	return hasSubstantiveSystemPrompt(gjson.GetBytes(body, "system"))
+}
+
 // hasSubstantiveSystemPrompt 判断 system 字段是否含非空白内容。
 // 兼容 Anthropic 的两种写法：纯字符串，或 text block 数组。
 func hasSubstantiveSystemPrompt(system gjson.Result) bool {

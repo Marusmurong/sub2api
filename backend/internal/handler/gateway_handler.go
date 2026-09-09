@@ -2285,6 +2285,30 @@ func isMaxTokensOneHaikuRequest(model string, maxTokens int) bool {
 	return maxTokens == 1 && isHaikuModel(model)
 }
 
+// isMaxTokensOneProbeRequest 判断是否为 Claude Code 的 max_tokens=1 轻量探针。
+//
+// haiku 分支是历史形态：CLI 早期只把这类探测打到 haiku。2.1.26x 起它也会向**当前
+// 模型**发同样的探针（切换模型、刷新上下文用量），上游 4e5d67df3 因此放宽了
+// claude_code_only 校验、让这些请求落到号池当普通 1-token 请求处理。对我们来说那就是
+// 每个上游账号平白多出一批探针：占并发槽、进 RPM 计数、写用量、还会算进"单号今天有
+// 多少台设备在用"这类形态统计里。所以在本地接掉。
+//
+// 形态完全对得上客户端预期：返回 stop_reason=max_tokens + 单字符正文，正是它请求
+// max_tokens=1 时该拿到的东西。
+//
+// 非 haiku 模型额外要求"无实质 system"：真实探针不带 system（上游 #6591 的描述），
+// 而带 system 的 max_tokens=1 更可能是有人真的只想要一个 token，不该被换成 "#"。
+// haiku 分支不加这条，保持既有行为逐字不变。
+func isMaxTokensOneProbeRequest(body []byte, model string, maxTokens int) bool {
+	if maxTokens != 1 {
+		return false
+	}
+	if isHaikuModel(model) {
+		return true
+	}
+	return !bodyHasSubstantiveSystemPrompt(body)
+}
+
 // detectInterceptType 检测请求是否需要拦截，返回拦截类型
 // 参数说明：
 //   - body: 请求体字节
@@ -2292,8 +2316,8 @@ func isMaxTokensOneHaikuRequest(model string, maxTokens int) bool {
 //   - maxTokens: max_tokens 值
 //   - isClaudeCodeClient: 是否已通过 Claude Code 客户端校验
 func detectInterceptType(body []byte, model string, maxTokens int, isClaudeCodeClient bool) InterceptType {
-	// 优先检查 max_tokens=1 + haiku 探测请求（流式/非流式均适用）
-	if isClaudeCodeClient && isMaxTokensOneHaikuRequest(model, maxTokens) {
+	// 优先检查 max_tokens=1 探测请求（流式/非流式均适用）
+	if isClaudeCodeClient && isMaxTokensOneProbeRequest(body, model, maxTokens) {
 		return InterceptTypeMaxTokensOneHaiku
 	}
 
