@@ -61,3 +61,17 @@ func (c *repeatPayloadCache) IncrementRepeatCount(ctx context.Context, scope ser
 	}
 	return count, nil
 }
+
+// ProvideClientPlatformStatsCache 把「按客户端平台的观察计数」这一面从
+// RepeatPayloadCache 上取出来单独提供。
+//
+// 两者共用同一个 Redis 结构（计数只是几个哈希键，没必要再开一份连接与实例），
+// 但消费方不同：网关调度按占比开池要读它，建号时的自动定型也要读它。用一个
+// 独立的 provider 而不是让每个消费方自己做类型断言，是为了让依赖在 wire 图里
+// 显式可见——断言失败会静默退化成 nil，排查时看不出是哪一步断的。
+func ProvideClientPlatformStatsCache(c service.RepeatPayloadCache) service.ClientPlatformStatsCache {
+	if stats, ok := c.(service.ClientPlatformStatsCache); ok {
+		return stats
+	}
+	return nil
+}

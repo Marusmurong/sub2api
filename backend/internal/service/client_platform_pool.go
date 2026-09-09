@@ -57,30 +57,7 @@ func (s *GatewayService) clientPlatformShares(ctx context.Context) map[ClientPla
 		return map[ClientPlatform]float64{}
 	}
 	days := s.clientPlatformPoolConfig().EffectiveShareWindowDays()
-	counts := map[ClientPlatform]int64{}
-	var total int64
-	for i := 0; i < days; i++ {
-		day := now.UTC().AddDate(0, 0, -i).Format("2006-01-02")
-		stats, err := s.clientPlatformStats.ReadClientPlatformStats(ctx, day)
-		if err != nil {
-			slog.Debug("client_platform_pool.read_stats_failed", "day", day, "error", err)
-			continue
-		}
-		for field, n := range stats {
-			p, ok := parseClientPlatformStatField(field)
-			if !ok {
-				continue
-			}
-			counts[p] += n
-			total += n
-		}
-	}
-	shares := make(map[ClientPlatform]float64, len(counts))
-	if total > 0 {
-		for p, n := range counts {
-			shares[p] = float64(n) / float64(total)
-		}
-	}
+	shares := ReadClientPlatformShares(ctx, s.clientPlatformStats, days, now)
 	s.clientPlatformSharesCached = shares
 	s.clientPlatformSharesExpiry = now.Add(clientPlatformSharesTTL)
 	return shares
@@ -317,4 +294,41 @@ func (s *GatewayService) typeAccountClientPlatform(ctx context.Context, candidat
 		return
 	}
 	slog.Info("client_platform_pool.account_typed", "account_id", accountID, "platform", string(platform))
+}
+
+// ReadClientPlatformShares 读最近 days 天（含今天）的观察计数，算出各平台在真 CC
+// 请求里的占比。读不到数据时返回空 map——调用方必须能接受"没有占比"这种情形，
+// 不要把空 map 当成"所有平台占比为 0"去做除法。
+//
+// 从 GatewayService.clientPlatformShares 里抽出来成包级函数，是因为建号时的自动
+// 定型（PickClientPlatformForNewAccount）也要用同一份口径，而它不在网关里。
+func ReadClientPlatformShares(ctx context.Context, cache ClientPlatformStatsCache, days int, now time.Time) map[ClientPlatform]float64 {
+	if cache == nil || days <= 0 {
+		return map[ClientPlatform]float64{}
+	}
+	counts := map[ClientPlatform]int64{}
+	var total int64
+	for i := 0; i < days; i++ {
+		day := now.UTC().AddDate(0, 0, -i).Format("2006-01-02")
+		stats, err := cache.ReadClientPlatformStats(ctx, day)
+		if err != nil {
+			slog.Debug("client_platform.read_stats_failed", "day", day, "error", err)
+			continue
+		}
+		for field, n := range stats {
+			p, ok := parseClientPlatformStatField(field)
+			if !ok {
+				continue
+			}
+			counts[p] += n
+			total += n
+		}
+	}
+	shares := make(map[ClientPlatform]float64, len(counts))
+	if total > 0 {
+		for p, n := range counts {
+			shares[p] = float64(n) / float64(total)
+		}
+	}
+	return shares
 }

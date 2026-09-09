@@ -486,6 +486,10 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 	if err := ValidateUpstreamRequestIDHeaderExtra(accountExtra); err != nil {
 		return nil, err
 	}
+	// 按配额自动定型客户端平台（Anthropic OAuth/SetupToken，且未显式指定时）。
+	// 必须在 buildAccountForCreate 之前：定型要跟着账号一起落库，号才能保证
+	// 从第一条上游请求起就带正确的 X-Stainless-OS/Arch。
+	accountExtra = s.autoTypeNewAnthropicAccount(ctx, input.Platform, input.Type, accountExtra)
 
 	// 绑定分组
 	groupIDs := input.GroupIDs

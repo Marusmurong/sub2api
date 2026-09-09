@@ -713,6 +713,17 @@ type adminServiceImpl struct {
 	compositeResolver    *CompositeRouteResolver
 	// 分组平台变更后用来失效渠道缓存；可为 nil（缓存会在 TTL 到期后自然重建）
 	channelCacheInvalidator ChannelCacheInvalidator
+	// 建号时按配额自动定型要读的观察计数；可为 nil（此时按默认平台定型）。
+	// 与 GatewayService 一样由 handler 构造时注入，免改 wire。
+	clientPlatformStats ClientPlatformStatsCache
+}
+
+// SetClientPlatformStatsCache 注入平台观察计数存储，供建号时的自动定型使用。
+func (s *adminServiceImpl) SetClientPlatformStatsCache(c ClientPlatformStatsCache) {
+	if s == nil {
+		return
+	}
+	s.clientPlatformStats = c
 }
 
 // ChannelCacheInvalidator 失效渠道缓存。
@@ -754,6 +765,7 @@ func NewAdminService(
 	compositeRouteRepo CompositeModelRouteRepository,
 	compositeResolver *CompositeRouteResolver,
 	channelCacheInvalidator ChannelCacheInvalidator,
+	clientPlatformStats ClientPlatformStatsCache,
 ) AdminService {
 	return &adminServiceImpl{
 		cfg:                  cfg,
@@ -784,5 +796,6 @@ func NewAdminService(
 		compositeResolver:    compositeResolver,
 
 		channelCacheInvalidator: channelCacheInvalidator,
+		clientPlatformStats:     clientPlatformStats,
 	}
 }

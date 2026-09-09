@@ -1224,7 +1224,11 @@ type GatewayGrokConfig struct {
 //	                    默认 2，避免出现只有 1 个号、没有故障转移的池。
 //	share_window_days:  计算目标占比用最近几天的观察计数（含今天）。
 type ClientPlatformPoolConfig struct {
-	Enabled         bool   `mapstructure:"enabled"`
+	Enabled bool `mapstructure:"enabled"`
+	// AutoType 独立于 Enabled：Enabled 管的是"谁接谁的流量"（号少时有集中风险），
+	// AutoType 管的是"新号自称什么系统"（零风险）。两件事此前绑在同一个开关上，
+	// 想要身份对齐就被迫连路由一起打开。nil = 未配置，按 true 处理。
+	AutoType        *bool  `mapstructure:"auto_type"`
 	Mode            string `mapstructure:"mode"`
 	DefaultPlatform string `mapstructure:"default_platform"`
 	MinPoolTarget   int    `mapstructure:"min_pool_target"`
@@ -1290,6 +1294,15 @@ const (
 	ClientPlatformPoolModeFallback = "fallback"
 	ClientPlatformPoolModeStrict   = "strict"
 )
+
+// AutoTypeEnabled 报告建号时是否按配额自动定型。默认开：它不改变路由行为，
+// 而不定型的号会退回全池默认身份，那正是分池要消除的形态。
+func (c ClientPlatformPoolConfig) AutoTypeEnabled() bool {
+	if c.AutoType == nil {
+		return true
+	}
+	return *c.AutoType
+}
 
 func (c ClientPlatformPoolConfig) NormalizedMode() string {
 	if c.Mode == "" {
@@ -2748,6 +2761,7 @@ func setDefaults() {
 
 	// 按客户端平台分池（审计 C-1）：默认关闭，只观察计数；打开后 fallback 模式。
 	viper.SetDefault("gateway.client_platform_pool.enabled", false)
+	viper.SetDefault("gateway.client_platform_pool.auto_type", true)
 	viper.SetDefault("gateway.client_platform_pool.mode", ClientPlatformPoolModeFallback)
 	viper.SetDefault("gateway.client_platform_pool.default_platform", "macos-arm64")
 	viper.SetDefault("gateway.client_platform_pool.min_pool_target", 2)
