@@ -352,7 +352,11 @@ func buildClaudeMimicDebugLine(req *http.Request, body []byte, account *Account,
 
 	h := make([]string, 0, len(interesting))
 	for _, k := range interesting {
-		if v := req.Header.Get(k); v != "" {
+		// 必须用 getHeaderRaw：出站头按真实 wire casing 存放（headerWireCasing），
+		// 其中 "X-Stainless-OS" 不是 Go 的 canonical 形式（canonical 是 X-Stainless-Os），
+		// req.Header.Get 直接读不到 —— 这条诊断日志此前一直漏掉最关键的 OS 字段，
+		// 2026-09-09 核对分池出站头时差点据此误判"头没发出去"。
+		if v := getHeaderRaw(req.Header, k); v != "" {
 			h = append(h, fmt.Sprintf("%s=%q", k, safeHeaderValueForLog(k, v)))
 		}
 	}

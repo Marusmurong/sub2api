@@ -3,9 +3,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -127,4 +129,27 @@ func TestForcedIdentityKeepsBillingVersionInSync(t *testing.T) {
 	require.NotNil(t, forced)
 	require.Equal(t, "claude-cli/2.1.250 (external, cli)", forced.UserAgent)
 	require.Equal(t, forced.UserAgent, effectiveBillingUserAgent("oauth", true, fp, forced))
+}
+
+// 最强的回归：把请求序列化成 wire bytes，直接断言线上真正发出去的字节。
+// 只断言 header map 不够——出站头按真实 wire casing 存放，读法一错就会得出
+// 相反的结论（2026-09-09 的 [ClaudeMimicDebug] 日志就是这么漏掉 OS 字段的）。
+func TestClientPlatformWireBytes(t *testing.T) {
+	svc := newWireIdentityService()
+	body := []byte(`{"model":"claude-opus-5","messages":[{"role":"user","content":"hi"}]}`)
+	req, _, err := svc.buildUpstreamRequest(context.Background(), newWireIdentityContext(t),
+		typedAccount("windows-x64"), body, "tok", "oauth", "claude-opus-5", true, true)
+	require.NoError(t, err)
+
+	var buf bytes.Buffer
+	require.NoError(t, req.Write(&buf))
+	wire := buf.String()
+	require.Contains(t, wire, "X-Stainless-OS: Windows\r\n")
+	require.Contains(t, wire, "X-Stainless-Arch: x64\r\n")
+	require.False(t, strings.Contains(wire, "MacOS"), "windows-x64 账号的出站字节里不应出现 MacOS")
+	require.False(t, strings.Contains(wire, "arm64"), "windows-x64 账号的出站字节里不应出现 arm64")
+
+	// 诊断日志必须能看见 OS —— 它是我们核对分池是否生效的唯一线上手段
+	line := buildClaudeMimicDebugLine(req, body, typedAccount("windows-x64"), "oauth", true)
+	require.Contains(t, line, `x-stainless-os="Windows"`)
 }
