@@ -363,7 +363,15 @@ func getHeaderOrDefault(headers http.Header, key, defaultValue string) string {
 // ApplyFingerprint 将指纹应用到请求头（覆盖原有的x-stainless-*头）
 // 使用 setHeaderRaw 保持原始大小写（如 X-Stainless-OS 而非 X-Stainless-Os）
 func (s *IdentityService) ApplyFingerprint(req *http.Request, fp *Fingerprint) {
-	if fp == nil {
+	applyFingerprintHeaders(req, fp)
+}
+
+// applyFingerprintHeaders 把指纹里的身份字段写进请求头。
+//
+// 独立成包级函数是因为伪装路径需要在套完 claude.DefaultHeaders 之后再压一次账号级
+// 身份（见 applyClaudeCodeMimicHeaders），那一步拿不到 IdentityService 实例。
+func applyFingerprintHeaders(req *http.Request, fp *Fingerprint) {
+	if req == nil || fp == nil {
 		return
 	}
 

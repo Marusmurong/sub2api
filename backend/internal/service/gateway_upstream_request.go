@@ -87,6 +87,10 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		}
 	}
 
+	// 账号级强制身份：既决定最终出站头（applyClaudeCodeMimicHeaders），也决定
+	// billing block 里的 cc_version 该同步到哪个 UA——两处必须取同一个值。
+	forcedFingerprint := forcedWireFingerprint(account, fingerprint)
+
 	// 兜底：任何一条消息的 content 都不能是空数组，否则上游直接
 	//   400 messages.N: user messages must have non-empty content
 	//
@@ -113,7 +117,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		// UA 取值走 effectiveBillingUserAgent（采自上游 v0.2.1）：OAuth mimic 路径
 		// 会在套完指纹后强制使用内置 UA，裸读 fingerprint.UserAgent 会拿到指纹里的
 		// 旧版本，导致 body 的 cc_version 与实际发出的 UA 不一致。
-		userAgent := effectiveBillingUserAgent(tokenType, mimicClaudeCode, fingerprint)
+		userAgent := effectiveBillingUserAgent(tokenType, mimicClaudeCode, fingerprint, forcedFingerprint)
 		// parent-link：取本会话在本账号上的上一轮 upstream request id。
 		// 会话标识同时暂存到 gin.Context，供响应侧落存本轮 id 时复用。
 		sessionID := ccPrevReqSessionID(body)
@@ -230,7 +234,7 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// OAuth + mimic Claude Code：强制注入 CLI 指纹相关 header
 	// （user-agent/x-stainless-*/x-app/Accept/Accept-Encoding/Connection/x-stainless-helper-method）
 	if tokenType == "oauth" && mimicClaudeCode {
-		applyClaudeCodeMimicHeaders(req, reqStream)
+		applyClaudeCodeMimicHeaders(req, reqStream, forcedFingerprint)
 	}
 
 	// 写入最终 anthropic-beta header
@@ -972,7 +976,7 @@ var defaultDroppedBetasSet = buildBetaTokenSet(claude.DroppedBetas)
 // applyClaudeCodeMimicHeaders forces "Claude Code-like" request headers.
 // This mirrors opencode-anthropic-auth behavior: do not trust downstream
 // headers when using Claude Code-scoped OAuth credentials.
-func applyClaudeCodeMimicHeaders(req *http.Request, isStream bool) {
+func applyClaudeCodeMimicHeaders(req *http.Request, isStream bool, forced *Fingerprint) {
 	if req == nil {
 		return
 	}
@@ -986,6 +990,17 @@ func applyClaudeCodeMimicHeaders(req *http.Request, isStream bool) {
 		}
 		setHeaderRaw(req.Header, resolveWireCasing(key), value)
 	}
+	// 账号级强制身份压过全池默认值。
+	//
+	// DefaultHeaders 是"全池统一"的基线（UA / runtime / package 各平台相同）；
+	// forced 表达"这个号是哪台机器"，目前唯一有差异的就是 OS / Arch。少了这一步，
+	// 按平台定型的 windows-x64 账号出站仍是 MacOS/arm64，而请求体尾块的
+	// 「# Environment」写着 Platform: win32 与 C:\ 工作目录——两者自相矛盾，
+	// 正是分池要消除的信号（2026-09-08 账号 216 复盘）。
+	//
+	// forced 只可能来自账号级强制身份（见 forcedWireFingerprint），遗留的
+	// 客户端派生指纹传 nil，统一身份的既有行为不变。
+	applyFingerprintHeaders(req, forced)
 	// Real Claude CLI uses Accept: application/json (even for streaming).
 	setHeaderRaw(req.Header, "Accept", "application/json")
 	if isStream {

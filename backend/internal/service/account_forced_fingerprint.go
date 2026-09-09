@@ -267,3 +267,23 @@ func firstNonEmptyFingerprint(values ...string) string {
 	}
 	return ""
 }
+
+// forcedWireFingerprint 返回该账号**必须压过全池默认头**的身份，没有则返回 nil。
+//
+// 为什么需要这层判断：伪装路径最后会用 claude.DefaultHeaders 覆写一遍 UA / x-stainless-*
+// （applyClaudeCodeMimicHeaders），那是"全池统一身份"的基线。账号级强制身份
+// （extra.fingerprint / 启用 TLS 指纹 / 按平台定型）表达的是"这个号是哪台机器"，
+// 必须排在基线之后生效——否则按平台分池算出来的 Windows/x64 永远到不了线上，
+// 上游看到的仍是 MacOS/arm64 头配 win32 环境块，正是分池要消除的矛盾。
+//
+// 遗留路径（指纹从客户端头派生）一律返回 nil：那种指纹会把下游客户的机器特征
+// 带上线，统一身份的既有行为不能因为这次修复被打开。
+func forcedWireFingerprint(account *Account, fp *Fingerprint) *Fingerprint {
+	if account == nil || fp == nil {
+		return nil
+	}
+	if !account.HasForcedFingerprint() {
+		return nil
+	}
+	return fp
+}

@@ -1133,6 +1133,9 @@ type GatewayConfig struct {
 	// ClientPlatformPool: 按下游客户端平台分池（审计 C-1）。默认关闭；关闭时只做观察计数。
 	ClientPlatformPool ClientPlatformPoolConfig `mapstructure:"client_platform_pool"`
 
+	// NewAccountRampup: 新号并发/会话爬坡。默认开启。
+	NewAccountRampup NewAccountRampupConfig `mapstructure:"new_account_rampup"`
+
 	// 账户切换最大次数（遇到上游错误时切换到其他账户的次数上限）
 	MaxAccountSwitches int `mapstructure:"max_account_switches"`
 	// Gemini 账户切换最大次数（Gemini 平台单独配置，因 API 限制更严格）
@@ -1226,6 +1229,61 @@ type ClientPlatformPoolConfig struct {
 	DefaultPlatform string `mapstructure:"default_platform"`
 	MinPoolTarget   int    `mapstructure:"min_pool_target"`
 	ShareWindowDays int    `mapstructure:"share_window_days"`
+}
+
+// NewAccountRampupConfig 限制"刚入池的号"能承接多少并发与多少条独立会话。
+//
+// 为什么需要：选号是 filterByMinPriority → filterByMinLoadRate，空载的新号必然赢；
+// 老号打满时，排队请求会在同一秒全部落到新号上。2026-09-08 的账号 216 就是这样，
+// 进池后 8 秒内接下 12 台机器的 12 个会话，2h19m 跑到 $35.83/h（同窗口最忙的老号
+// $22.10/h），随后被上游撤销。一个当天开通的订阅，有史以来第一批流量长这样，
+// 本身就是最直白的"账号被共享"特征，与请求指纹无关。
+//
+// 做法：按账号年龄（created_at）把 concurrency 与 max_sessions 从 initial_* 线性
+// 抬到账号自身的配置值，window_hours 之后完全放开。只作用于 Anthropic OAuth /
+// SetupToken 账号；其它平台原样透传。
+//
+// 重新授权会新建账号记录、created_at 重置，于是老号换绑后也会再爬一次坡。若确定
+// 不需要（例如只是换 token 的成熟号），在账号 extra 里设 rampup_exempt: true 跳过。
+type NewAccountRampupConfig struct {
+	Enabled            bool `mapstructure:"enabled"`
+	WindowHours        int  `mapstructure:"window_hours"`
+	InitialConcurrency int  `mapstructure:"initial_concurrency"`
+	InitialMaxSessions int  `mapstructure:"initial_max_sessions"`
+}
+
+func (c NewAccountRampupConfig) EffectiveWindowHours() int {
+	if c.WindowHours <= 0 {
+		return 48
+	}
+	return c.WindowHours
+}
+
+func (c NewAccountRampupConfig) EffectiveInitialConcurrency() int {
+	if c.InitialConcurrency <= 0 {
+		return 1
+	}
+	return c.InitialConcurrency
+}
+
+func (c NewAccountRampupConfig) EffectiveInitialMaxSessions() int {
+	if c.InitialMaxSessions <= 0 {
+		return 3
+	}
+	return c.InitialMaxSessions
+}
+
+func (c NewAccountRampupConfig) validate() error {
+	if c.WindowHours < 0 || c.WindowHours > 24*30 {
+		return fmt.Errorf("gateway.new_account_rampup.window_hours must be within 0..720")
+	}
+	if c.InitialConcurrency < 0 {
+		return fmt.Errorf("gateway.new_account_rampup.initial_concurrency must not be negative")
+	}
+	if c.InitialMaxSessions < 0 {
+		return fmt.Errorf("gateway.new_account_rampup.initial_max_sessions must not be negative")
+	}
+	return nil
 }
 
 const (
@@ -2692,6 +2750,10 @@ func setDefaults() {
 	viper.SetDefault("gateway.client_platform_pool.default_platform", "macos-arm64")
 	viper.SetDefault("gateway.client_platform_pool.min_pool_target", 2)
 	viper.SetDefault("gateway.client_platform_pool.share_window_days", 2)
+	viper.SetDefault("gateway.new_account_rampup.enabled", true)
+	viper.SetDefault("gateway.new_account_rampup.window_hours", 48)
+	viper.SetDefault("gateway.new_account_rampup.initial_concurrency", 1)
+	viper.SetDefault("gateway.new_account_rampup.initial_max_sessions", 3)
 	viper.SetDefault("gateway.repeat_payload_guard.small_probe.window_minutes", 0)
 	viper.SetDefault("gateway.max_account_switches", 10)
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
@@ -3603,6 +3665,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("gateway.upstream_response_read_max_bytes must be positive")
 	}
 	if err := c.Gateway.RepeatPayloadGuard.validate(); err != nil {
+		return err
+	}
+	if err := c.Gateway.NewAccountRampup.validate(); err != nil {
 		return err
 	}
 	if err := c.Gateway.ClientPlatformPool.validate(); err != nil {

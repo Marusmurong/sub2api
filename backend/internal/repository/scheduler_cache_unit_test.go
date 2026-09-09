@@ -1133,3 +1133,14 @@ func TestFilterSchedulerExtra_KeepsClientPlatform(t *testing.T) {
 		t.Fatalf("非白名单键不应进投影")
 	}
 }
+
+// 新号爬坡按 created_at 判断账号年龄，而候选列表读的是本投影。
+// 裁掉它（此前 buildSchedulerMetadataAccount 就没带），选号阶段看到的年龄全是零值，
+// 爬坡对候选列表完全失效——与 client_platform 被裁是同一类缺口。
+func TestBuildSchedulerMetadataAccount_KeepsCreatedAt(t *testing.T) {
+	created := time.Date(2026, 9, 8, 15, 46, 4, 0, time.UTC)
+	got := buildSchedulerMetadataAccount(service.Account{ID: 216, CreatedAt: created})
+	if !got.CreatedAt.Equal(created) {
+		t.Fatalf("created_at 必须保留在调度投影里, got %v", got.CreatedAt)
+	}
+}

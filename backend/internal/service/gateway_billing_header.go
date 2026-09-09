@@ -23,11 +23,18 @@ var ccVersionFingerprintInBillingRe = regexp.MustCompile(`(cc_version=\d+\.\d+\.
 
 // effectiveBillingUserAgent 决定 billing block 的版本同步该以哪个 UA 为准。
 //
-// 采自上游 v0.2.1。OAuth mimic 路径在套完账号指纹之后会强制使用内置 UA，
-// 因此此时必须读 claude.DefaultHeaders 而不是指纹里的 UA，否则 body 里的
-// cc_version 会停留在指纹的旧版本、与实际发出的 UA 不一致。
-func effectiveBillingUserAgent(tokenType string, mimicClaudeCode bool, fingerprint *Fingerprint) string {
+// 采自上游 v0.2.1，并按 2026-09-08 的出站头修复调整了取值优先级。
+//
+// 伪装路径的出站 UA 是「claude.DefaultHeaders 再被账号级强制身份压一次」
+// （applyClaudeCodeMimicHeaders），所以这里必须按同一优先级取值：
+// 取值优先级：forced（账号级强制身份）→ claude.DefaultHeaders → fingerprint。
+// 取错任何一档，body 里的 cc_version 都会与实际发出的 User-Agent 对不上。
+// 尤其不能裸读 fingerprint.UserAgent：遗留指纹里可能是客户端带来的旧版本。
+func effectiveBillingUserAgent(tokenType string, mimicClaudeCode bool, fingerprint, forced *Fingerprint) string {
 	if tokenType == "oauth" && mimicClaudeCode {
+		if forced != nil && forced.UserAgent != "" {
+			return forced.UserAgent
+		}
 		return claude.DefaultHeaders["User-Agent"]
 	}
 	if fingerprint == nil {

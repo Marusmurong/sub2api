@@ -508,7 +508,8 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 		if ctEnableFP {
 			billingFingerprint = ctFingerprint
 		}
-		userAgent := effectiveBillingUserAgent(tokenType, mimicClaudeCode, billingFingerprint)
+		userAgent := effectiveBillingUserAgent(tokenType, mimicClaudeCode, billingFingerprint,
+			forcedWireFingerprint(account, billingFingerprint))
 		// count_tokens 不产生 assistant 响应，因此不参与 parent-link：
 		// 既不注入 cc_prev_req（真实 CLI 的 count_tokens 同样没有上一轮 assistant
 		// 条目可指），也不记录本轮 id。
@@ -590,7 +591,11 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 
 	// OAuth + mimic Claude Code：强制注入 CLI 指纹 header
 	if tokenType == "oauth" && mimicClaudeCode {
-		applyClaudeCodeMimicHeaders(req, false)
+		var ctForced *Fingerprint
+		if ctEnableFP {
+			ctForced = forcedWireFingerprint(account, ctFingerprint)
+		}
+		applyClaudeCodeMimicHeaders(req, false, ctForced)
 	}
 
 	// 写入最终 anthropic-beta header（Del 一次避免白名单透传值残留）
