@@ -306,7 +306,9 @@ func performTLSHandshake(ctx context.Context, conn net.Conn, profile *Profile, a
 		"cipher_suite", state.CipherSuite,
 		"alpn", state.NegotiatedProtocol)
 
-	return tlsConn, nil
+	// 请求头块的顺序/大小写重写。包装点必须在这里——TLS 握手**之后**：HTTP 代理的
+	// CONNECT 前奏与 SOCKS5 协商发生在握手之前，不能被误改。见 header_order.go。
+	return newHeaderOrderConn(tlsConn), nil
 }
 
 // toUTLSCurves converts uint16 slice to utls.CurveID slice.

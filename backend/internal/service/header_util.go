@@ -31,12 +31,15 @@ var headerWireCasing = map[string]string{
 	"anthropic-version":                         "anthropic-version",
 	"anthropic-beta":                            "anthropic-beta",
 	"x-app":                                     "x-app",
-	"content-type":                              "content-type",
-	"accept-language":                           "accept-language",
-	"sec-fetch-mode":                            "sec-fetch-mode",
-	"accept-encoding":                           "Accept-Encoding",
-	"connection":                                "Connection",
-	"authorization":                             "authorization",
+	// Authorization / Content-Type 在 2.1.263 抓包里是首字母大写（第 2、3 位），
+	// 此前这里写成全小写，与真实客户端不符。出站顺序由 tlsfingerprint 的头块重写
+	// 兜底，这里改对是为了让调试日志与非指纹路径也一致。
+	"content-type":    "Content-Type",
+	"accept-language": "accept-language",
+	"sec-fetch-mode":  "sec-fetch-mode",
+	"accept-encoding": "Accept-Encoding",
+	"connection":      "Connection",
+	"authorization":   "Authorization",
 
 	// Claude Code 2.1.87+ 新增 header
 	"x-claude-code-session-id": "X-Claude-Code-Session-Id",
