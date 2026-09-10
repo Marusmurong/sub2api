@@ -154,7 +154,7 @@ func TestUnifiedIdentity_StripsClientBillingBlockKeepsClientInstructions(t *test
 	}
 	body := []byte(`{"model":"claude-opus-4-8","messages":[{"role":"user","content":"hi"}]}`)
 
-	out := rewriteSystemForNonClaudeCodeWithPromptBlocks(body, clientSystem, "", "")
+	out := rewriteSystemForNonClaudeCodeWithPromptBlocks(body, clientSystem, "", "", "")
 	blocks := gjson.GetBytes(out, "system").Array()
 	require.NotEmpty(t, blocks)
 

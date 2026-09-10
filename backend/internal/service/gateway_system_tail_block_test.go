@@ -16,7 +16,7 @@ func TestRewriteSystemKeepsClientInstructionsInSystemArray(t *testing.T) {
 	const clientSystem = "You are a helpful translation assistant. Always answer in Chinese."
 	body := []byte(`{"model":"claude-opus-5","messages":[{"role":"user","content":"你好，请帮我把这段话翻译成英文"}]}`)
 
-	out := rewriteSystemForNonClaudeCodeWithPromptBlocks(body, clientSystem, "", "")
+	out := rewriteSystemForNonClaudeCodeWithPromptBlocks(body, clientSystem, "", "", "")
 
 	system := gjson.GetBytes(out, "system")
 	if !system.IsArray() {
@@ -39,7 +39,7 @@ func TestRewriteSystemNoLongerInjectsFakeConversation(t *testing.T) {
 	body := []byte(`{"model":"claude-opus-5","messages":[{"role":"user","content":"你好，请帮我把这段话翻译成英文"}]}`)
 
 	out := rewriteSystemForNonClaudeCodeWithPromptBlocks(
-		body, "You are a helpful translation assistant.", "", "")
+		body, "You are a helpful translation assistant.", "", "", "")
 
 	raw := string(out)
 	for _, marker := range []string{
@@ -69,7 +69,7 @@ func TestRewriteSystemKeepsFingerprintConsistentWithFinalBody(t *testing.T) {
 	body := []byte(`{"model":"claude-opus-5","messages":[{"role":"user","content":"你好，请帮我把这段话翻译成英文"}]}`)
 
 	out := rewriteSystemForNonClaudeCodeWithPromptBlocks(
-		body, "You are a helpful translation assistant.", "", "")
+		body, "You are a helpful translation assistant.", "", "", "")
 
 	// 按最终 body 重算的 fp，应与 block 里已写入的一致
 	want := computeClaudeCodeFingerprint(out, claude.CLICurrentVersion)
@@ -86,7 +86,7 @@ func TestRewriteSystemStripsIdentityPrefixButKeepsInstructions(t *testing.T) {
 	const clientSystem = "You are Claude Code, Anthropic's official CLI for Claude.\n\nAlways answer in Chinese."
 	body := []byte(`{"model":"claude-opus-5","messages":[{"role":"user","content":"hi"}]}`)
 
-	out := rewriteSystemForNonClaudeCodeWithPromptBlocks(body, clientSystem, "", "")
+	out := rewriteSystemForNonClaudeCodeWithPromptBlocks(body, clientSystem, "", "", "")
 
 	system := gjson.GetBytes(out, "system").Array()
 	last := system[len(system)-1].Get("text").String()

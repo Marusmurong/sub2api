@@ -235,6 +235,10 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// （user-agent/x-stainless-*/x-app/Accept/Accept-Encoding/Connection/x-stainless-helper-method）
 	if tokenType == "oauth" && mimicClaudeCode {
 		applyClaudeCodeMimicHeaders(req, reqStream, forcedFingerprint)
+		// 出站 UA 的括号后缀跟随本次请求判定出的入口，与 system[0] 的 billing 块
+		// cc_entrypoint 同源（forward 入口判定一次，见 client_entrypoint.go）。
+		// 版本段与机器身份（OS/arch/runtime/package）不受影响，仍按账号统一。
+		applyClientEntrypointUserAgent(req, ClientEntrypointFromContext(ctx))
 	}
 
 	// 写入最终 anthropic-beta header
@@ -972,6 +976,22 @@ func buildBetaTokenSet(tokens []string) map[string]struct{} {
 }
 
 var defaultDroppedBetasSet = buildBetaTokenSet(claude.DroppedBetas)
+
+// applyClientEntrypointUserAgent 把出站 User-Agent 的括号后缀换成本次请求的入口形态。
+//
+// 只动后缀，不动 "claude-cli/<版本>" 前缀：版本属于账号级统一身份，入口属于
+// 单次请求。回落形态 "(external, cli)" 与改动前逐字相同，所以 cli 请求不受影响。
+func applyClientEntrypointUserAgent(req *http.Request, e ClientEntrypoint) {
+	if req == nil || e.UASuffix == "" {
+		return
+	}
+	current := getHeaderRaw(req.Header, "User-Agent")
+	m := claudeCLIUAVersionPrefixRegex.FindString(current)
+	if m == "" {
+		return
+	}
+	setHeaderRaw(req.Header, "User-Agent", m+" "+e.UASuffix)
+}
 
 // applyClaudeCodeMimicHeaders forces "Claude Code-like" request headers.
 // This mirrors opencode-anthropic-auth behavior: do not trust downstream

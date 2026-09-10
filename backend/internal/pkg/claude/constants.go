@@ -101,6 +101,19 @@ const DefaultCacheControlTTL = "5m"
 // 抬版本前必须重抓样本核对头与 TLS，方法见 tlsfingerprint/claudecode_clienthello_test.go。
 const CLICurrentVersion = "2.1.263"
 
+// CLIPatchVersion 返回当前伪装 CLI 版本的 patch 段（"2.1.263" → "263"）。
+//
+// agent-sdk 的版本号与 CLI patch 同步递进（线上实测 2.1.263↔0.3.263、2.1.266↔0.3.266），
+// 出站 UA 后缀里的 agent-sdk 段据此生成，不跟随下游客户端的值——否则一个账号会先后
+// 冒出十几个 SDK 版本，本身就是多人使用特征。
+func CLIPatchVersion() string {
+	v := CLIVersion()
+	if i := strings.LastIndex(v, "."); i >= 0 && i+1 < len(v) {
+		return v[i+1:]
+	}
+	return v
+}
+
 // MimicryBetaGates 是账号级门控的 beta 开关。真实 CLI 只在账号具备对应权限时
 // 才发这些 beta，所以不能按模型无脑发：发了号没有的门控 beta，形态反而不对。
 // 取值来源见 Account.MimicryBetaGates()（账号 extra 里的标记）。

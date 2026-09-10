@@ -92,4 +92,8 @@ const (
 
 	// ClaudeCodeVersion stores the extracted Claude Code version from User-Agent (e.g. "2.1.22")
 	ClaudeCodeVersion Key = "ctx_claude_code_version"
+
+	// ClientEntrypoint 是本次请求最终对外声明的入口（cc_entrypoint + UA 后缀）。
+	// 在 forward 入口判定一次，system 块与出站头两处共用，避免各自解析出不同结果。
+	ClientEntrypoint Key = "ctx_client_entrypoint"
 )

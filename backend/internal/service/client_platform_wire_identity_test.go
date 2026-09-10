@@ -153,3 +153,42 @@ func TestClientPlatformWireBytes(t *testing.T) {
 	line := buildClaudeMimicDebugLine(req, body, typedAccount("windows-x64"), "oauth", true)
 	require.Contains(t, line, `x-stainless-os="Windows"`)
 }
+
+// 入口跟随下游后,出站 UA 后缀必须真的变,而机器身份(OS/arch/runtime/package)不许动。
+// 断到 wire bytes:只查 header map 会被读法骗(见上一条注释)。
+func TestClientEntrypointReachesWire(t *testing.T) {
+	body := []byte(`{"model":"claude-opus-5","messages":[{"role":"user","content":"hi"}]}`)
+
+	for _, tc := range []struct {
+		name  string
+		entry ClientEntrypoint
+		want  string
+	}{
+		{"回落 cli(与改动前逐字相同)", defaultClientEntrypoint(), claude.DefaultHeaders["User-Agent"]},
+		{"VS Code 扩展", ClientEntrypoint{Product: "claude-vscode", UASuffix: "(external, claude-vscode, agent-sdk/0.3.263)"},
+			"claude-cli/" + claude.CLIVersion() + " (external, claude-vscode, agent-sdk/0.3.263)"},
+		{"sdk-cli", ClientEntrypoint{Product: "sdk-cli", UASuffix: "(external, sdk-cli)"},
+			"claude-cli/" + claude.CLIVersion() + " (external, sdk-cli)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := newWireIdentityService()
+			ctx := WithClientEntrypoint(context.Background(), tc.entry)
+			req, _, err := svc.buildUpstreamRequest(ctx, newWireIdentityContext(t),
+				typedAccount("windows-x64"), body, "tok", "oauth", "claude-opus-5", true, true)
+			require.NoError(t, err)
+
+			var buf bytes.Buffer
+			require.NoError(t, req.Write(&buf))
+			wire := buf.String()
+			require.Contains(t, wire, "User-Agent: "+tc.want+"\r\n")
+
+			// 机器身份不受入口影响
+			require.Contains(t, wire, "X-Stainless-OS: Windows\r\n")
+			require.Contains(t, wire, "X-Stainless-Arch: x64\r\n")
+			require.Contains(t, wire, "X-Stainless-Runtime-Version: "+claude.DefaultHeaders["X-Stainless-Runtime-Version"]+"\r\n")
+			require.Contains(t, wire, "X-Stainless-Package-Version: "+claude.DefaultHeaders["X-Stainless-Package-Version"]+"\r\n")
+			// x-app 恒为 cli:真实抓包里 `(external, sdk-cli)` 的请求 x-app 也是 cli
+			require.Contains(t, wire, "x-app: cli\r\n")
+		})
+	}
+}

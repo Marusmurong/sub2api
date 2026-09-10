@@ -36,7 +36,7 @@ func TestSystemShape_ClientWithSystemGetsNoExpansionBlock(t *testing.T) {
 	}
 
 	texts := systemBlockTexts(t, rewriteSystemForNonClaudeCodeWithPromptBlocks(
-		[]byte(probeBody), clientSystem, "", ""))
+		[]byte(probeBody), clientSystem, "", "", ""))
 
 	require.Len(t, texts, 3, "必须恰好 3 块，与真实 CC 同形")
 	require.Contains(t, texts[0], "x-anthropic-billing-header:")
@@ -53,7 +53,7 @@ func TestSystemShape_ClientWithoutSystemKeepsExpansionBlock(t *testing.T) {
 	// 第三方客户端（opencode 等）没有 system：仅两块会在体量上明显异于真实 CLI，
 	// 此时扩充段是有意的填充，不能一并去掉。
 	texts := systemBlockTexts(t, rewriteSystemForNonClaudeCodeWithPromptBlocks(
-		[]byte(probeBody), nil, "", ""))
+		[]byte(probeBody), nil, "", "", ""))
 
 	require.Len(t, texts, 3)
 	require.Contains(t, texts[0], "x-anthropic-billing-header:")
@@ -67,7 +67,7 @@ func TestSystemShape_ClientSystemOnlyIdentityFallsBackToExpansion(t *testing.T) 
 		map[string]any{"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude."},
 	}
 	texts := systemBlockTexts(t, rewriteSystemForNonClaudeCodeWithPromptBlocks(
-		[]byte(probeBody), clientSystem, "", ""))
+		[]byte(probeBody), clientSystem, "", "", ""))
 
 	require.Len(t, texts, 3)
 	require.Equal(t, claudeCodeSystemPromptExpansion, texts[2])
@@ -87,7 +87,7 @@ func TestSystemShape_ExpansionSkippedEvenWhenConfigInlinesLiteralText(t *testing
 	}
 
 	texts := systemBlockTexts(t, rewriteSystemForNonClaudeCodeWithPromptBlocks(
-		[]byte(probeBody), clientSystem, "", inlined))
+		[]byte(probeBody), clientSystem, "", inlined, ""))
 
 	require.Len(t, texts, 3, "字面文本写法同样要被识别为扩充段并跳过")
 	require.Equal(t, "客户端的项目指令", texts[2])

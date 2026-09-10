@@ -239,8 +239,20 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		systemRewritten := false
 		systemRaw, _ := parsed.SystemValue()
 		systemPromptInjectionEnabled, systemPrompt, systemPromptBlocks := s.claudeOAuthSystemPromptInjectionSettings(ctx)
+		// 入口声明只在这里判定一次：此刻正文还没被改写（下游自带的 billing 行仍在），
+		// 原始请求头也拿得到。判定结果同时用于 system[0] 的 billing 块和出站 UA 后缀——
+		// 两处若各自解析，会出现头说 vscode、块说 cli 的新矛盾。
+		clientUA := ""
+		if c != nil && c.Request != nil {
+			clientUA = c.Request.UserAgent()
+		}
+		entrypoint := ResolveClientEntrypoint(clientUA, body)
+		ctx = WithClientEntrypoint(ctx, entrypoint)
+		if c != nil && c.Request != nil {
+			c.Request = c.Request.WithContext(ctx)
+		}
 		if systemPromptInjectionEnabled {
-			if err := replaceBody(rewriteSystemForNonClaudeCodeWithPromptBlocks(body, systemRaw, systemPrompt, systemPromptBlocks)); err != nil {
+			if err := replaceBody(rewriteSystemForNonClaudeCodeWithPromptBlocks(body, systemRaw, systemPrompt, systemPromptBlocks, entrypoint.Product)); err != nil {
 				return nil, err
 			}
 			systemRewritten = true
@@ -1065,7 +1077,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		// Anthropic 返回的头名是 request-id，x-request-id 只是部分网关补的别名，
 		// 生产实测恒为空——既拿不到 id 回传给下游，出问题时也无法凭 id 向上游报障。
 		// 上游 v0.1.172 在这里新增了响应模型审计字段，一并保留。
-		RequestID:                     upstreamRequestID(resp.Header),
+		RequestID: upstreamRequestID(resp.Header),
 		// UpstreamHeaders 采自上游 v0.2.1（错误诊断用），与 RequestID 取值无关。
 		UpstreamHeaders:               resp.Header,
 		Usage:                         *usage,

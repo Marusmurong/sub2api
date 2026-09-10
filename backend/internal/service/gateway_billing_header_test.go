@@ -118,7 +118,7 @@ func TestBuildOAuthRequest_BillingMatchesWireUserAgent(t *testing.T) {
 				c, _ := gin.CreateTestContext(httptest.NewRecorder())
 				c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 				body := []byte(`{"model":"claude-haiku-4-5","system":[{"type":"text","text":""}],"messages":[{"role":"user","content":"hello world"}]}`)
-				billing, err := buildBillingAttributionText(body, "2.1.81")
+				billing, err := buildBillingAttributionText(body, "2.1.81", "")
 				require.NoError(t, err)
 				body, err = sjson.SetBytes(body, "system.0.text", billing)
 				require.NoError(t, err)

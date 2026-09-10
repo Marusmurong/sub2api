@@ -186,13 +186,18 @@ func extractFirstUserText(body []byte) string {
 //
 // 此 block 不带 cache_control（与真实 CLI 一致；cache breakpoint 由后续的
 // Claude Code prompt block 承担）。
-func buildBillingAttributionText(body []byte, cliVersion string) (string, error) {
+// entrypoint 为空时按 "cli" 处理（改动前的行为）。它跟随下游真实产品，
+// 与出站 UA 后缀同源（见 client_entrypoint.go），两处必须取同一个判定结果。
+func buildBillingAttributionText(body []byte, cliVersion, entrypoint string) (string, error) {
 	if cliVersion == "" {
 		return "", fmt.Errorf("cliVersion required")
 	}
+	if entrypoint == "" {
+		entrypoint = "cli"
+	}
 	fp := computeClaudeCodeFingerprint(body, cliVersion)
 	return fmt.Sprintf(
-		"x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=cli;",
-		cliVersion, fp,
+		"x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=%s;",
+		cliVersion, fp, entrypoint,
 	), nil
 }
