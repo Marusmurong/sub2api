@@ -891,10 +891,23 @@ func removeThinkingDependentContextStrategies(body []byte) []byte {
 	}
 
 	if len(filtered) == 0 {
-		if b, err := sjson.DeleteBytes(body, "context_management.edits"); err == nil {
-			return b
+		b, err := sjson.DeleteBytes(body, "context_management.edits")
+		if err != nil {
+			return body
 		}
-		return body
+		// edits 删空后若 context_management 再无其它键，整个对象一并删掉。
+		//
+		// 留一个空的 "context_management": {} 是我们独有的形态：真实 Claude Code
+		// 要么带着 edits 发，要么根本不发这个字段，不存在"发一个空壳"的情况。
+		// 2026-09-10 出口抓包实测到过这条——客户端启用了 thinking、我们据此补上
+		// clear_thinking edit，随后签名污染又把 thinking 剥掉，edits 被清空，
+		// 空壳就这么留在了出站请求里。
+		if rest := gjson.GetBytes(b, "context_management"); rest.IsObject() && len(rest.Map()) == 0 {
+			if b2, err2 := sjson.DeleteBytes(b, "context_management"); err2 == nil {
+				return b2
+			}
+		}
+		return b
 	}
 
 	filteredBytes, err := json.Marshal(filtered)
