@@ -47,6 +47,21 @@ func hoistSystemRoleMessages(body []byte) ([]byte, bool) {
 			kept = append(kept, msg.Value())
 			continue
 		}
+		// 带 output_config 的 system 消息是**会话中控制消息**，不是系统提示词，
+		// 不能提升到顶层 system。
+		//
+		// pi-ai（Harness 的 Anthropic provider）为 opus5 生成形如
+		// {"role":"system","content":[],"output_config":{"effort":"high"}} 的消息，
+		// 由 mid-conversation-output-config beta 保护，必须原位保留。提升它会丢掉
+		// output_config（顶层 system 只收文本），等于把客户端的 effort 控制悄悄吃掉；
+		// 而它的 content 本来就是空的，提升后还会被空内容兜底再改一次。
+		//
+		// 缺 beta 时该消息由 stripAnthropicMessageOutputConfigUnlessBeta 整条删除，
+		// 轮不到这里；所以这里只需原样放行。
+		if msg.Get("output_config").Exists() {
+			kept = append(kept, msg.Value())
+			continue
+		}
 		found = true
 		if text := strings.TrimSpace(systemTextOfMessage(msg)); text != "" {
 			systemParts = append(systemParts, text)

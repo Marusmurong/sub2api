@@ -715,10 +715,13 @@ func TestRemoveThinkingDependentContextStrategies_RemovesSingleEntry(t *testing.
 
 	var req map[string]any
 	require.NoError(t, json.Unmarshal(out, &req))
-	cm, ok := req["context_management"].(map[string]any)
-	require.True(t, ok)
-	_, hasEdits := cm["edits"]
-	require.False(t, hasEdits, "所有 edits 均为 clear_thinking_20251015 时应删除 edits 键")
+	// 与上游有意分歧：edits 清空后若 context_management 再无其它键，整个对象一并删掉。
+	// 真实 Claude Code 要么带 edits 发，要么根本不发，不存在发一个空壳；
+	// 2026-09-10 出口抓包实测到过 "context_management":{} 被发给上游。
+	// 兄弟键仍在时只删 edits，见 TestRemoveThinkingDependentContextStrategies_MixedEntries
+	// 与 TestRemoveThinkingStrategiesKeepsSiblingKeys。
+	_, hasCM := req["context_management"]
+	require.False(t, hasCM, "edits 清空且无其它键时应删除整个 context_management")
 }
 
 func TestRemoveThinkingDependentContextStrategies_MixedEntries(t *testing.T) {
@@ -757,10 +760,9 @@ func TestFilterThinkingBlocksForRetry_RemovesClearThinkingStrategy_FastPath(t *t
 	_, hasThinking := req["thinking"]
 	require.False(t, hasThinking, "顶层 thinking 应被移除")
 
-	cm, ok := req["context_management"].(map[string]any)
-	require.True(t, ok)
-	_, hasEdits := cm["edits"]
-	require.False(t, hasEdits, "fast path 下 clear_thinking_20251015 应被移除，edits 键应被删除")
+	// 同上：edits 清空且无兄弟键 → 整个 context_management 删除（不留空壳）。
+	_, hasCM := req["context_management"]
+	require.False(t, hasCM, "fast path 下 clear_thinking 移除后不应留下空的 context_management")
 }
 
 func TestFilterThinkingBlocksForRetry_RemovesClearThinkingStrategy_WithThinkingBlocks(t *testing.T) {

@@ -192,6 +192,26 @@ func TestComputeFinalAnthropicBeta_OAuthMimic_IgnoresClientBeta(t *testing.T) {
 	require.True(t, ok)
 	require.False(t, strings.Contains(final, "custom-experimental-beta"),
 		"mimic 路径必须忽略客户端 anthropic-beta header")
+	// 与上游有意分歧：mimic 的 beta 集合以真实客户端抓包为准，不按功能需要添加。
+	// 2026-09-07 本机 2.1.263 OAuth 抓样的出站 beta 里没有
+	// mid-conversation-output-config-2026-07-01（同期的 per-turn-control-2026-07-01
+	// 在，说明该 id 当时已存在、只是 CLI 不发），故三族模板都不含它。
+	//
+	// 代价：pi-ai 一类客户端的消息级 output_config 会被 upstream 的
+	// stripAnthropicMessageOutputConfigUnlessBeta 剥掉。这与改动前的净效果相同——
+	// 此前那条空 system 控制消息本就被 hoistSystemRoleMessages 提升掉了。
+	// 重抓一次 2.1.263 OAuth 样本若发现该 beta，再加进模板并改回本断言。
+	require.False(t, anthropicBetaTokensContains(final, claude.BetaMidConversationOutputConfig),
+		"mimic 的 beta 集合以抓包为准，不含 mid-conversation-output-config")
+
+	// 显式 dropSet 仍能移除 mimic 注入的该 beta，且不会因此放行客户端未知 beta。
+	dropped, ok := s.computeFinalAnthropicBeta("oauth", true, "claude-sonnet-4-6", hdr, []byte(`{}`),
+		map[string]struct{}{claude.BetaMidConversationOutputConfig: {}})
+	require.True(t, ok)
+	require.False(t, anthropicBetaTokensContains(dropped, claude.BetaMidConversationOutputConfig),
+		"显式 dropSet 必须能移除新增的 mimic beta")
+	require.False(t, strings.Contains(dropped, "custom-experimental-beta"),
+		"dropSet 存在时 mimic 路径仍必须忽略客户端 anthropic-beta header")
 }
 
 func TestComputeFinalAnthropicBeta_OAuthTransparent_NonHaiku_PreservesClientContextManagement(t *testing.T) {

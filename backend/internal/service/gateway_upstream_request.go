@@ -480,6 +480,15 @@ func applyClaudeOAuthHeaderDefaults(req *http.Request) {
 		if value == "" {
 			continue
 		}
+		// Accept-Encoding 不在这里补：客户端没显式协商压缩时，应当让 net/http 自己
+		// 发它的默认 gzip 并透明解压。我们灌上 CC 的 "gzip, deflate, br, zstd" 会关掉
+		// 透明解压，还会与 Go 自己加的那个并存（上游 213de0797 修的就是这个重复头）。
+		//
+		// 伪装路径不受影响：applyClaudeCodeMimicHeaders 在本函数之后按 DefaultHeaders
+		// 强制覆写，真实 CC 的压缩协商照发。
+		if strings.EqualFold(key, "Accept-Encoding") {
+			continue
+		}
 		if getHeaderRaw(req.Header, key) == "" {
 			setHeaderRaw(req.Header, resolveWireCasing(key), value)
 		}

@@ -6,6 +6,7 @@ import (
 )
 
 // headerWireCasing 定义每个白名单 header 在真实 Claude CLI 抓包中的准确大小写。
+// Accept-Encoding keeps canonical casing so net/http recognizes explicit compression negotiation.
 // Go 的 HTTP server 解析请求时会将所有 header key 转为 Canonical 形式（如 x-app → X-App），
 // 此 map 用于在转发时恢复到真实的 wire format。
 //
@@ -34,6 +35,10 @@ var headerWireCasing = map[string]string{
 	// Authorization / Content-Type 在 2.1.263 抓包里是首字母大写（第 2、3 位），
 	// 此前这里写成全小写，与真实客户端不符。出站顺序由 tlsfingerprint 的头块重写
 	// 兜底，这里改对是为了让调试日志与非指纹路径也一致。
+	//
+	// accept-encoding 用 canonical 大小写是上游 213de0797 的要求：key 非 canonical 时
+	// net/http 认不出我们已显式协商压缩，会再加一个自己的，出站就出现两个
+	// Accept-Encoding。两边结论一致，合并后保留。
 	"content-type":    "Content-Type",
 	"accept-language": "accept-language",
 	"sec-fetch-mode":  "sec-fetch-mode",
