@@ -957,6 +957,11 @@ export interface Proxy {
   quality_grade?: string
   quality_summary?: string
   quality_checked?: number
+  /** 出口 IP 网络类型。缺省表示尚未检测，或检测时数据源不可用。 */
+  network_type?: IPNetworkType
+  network_type_source?: string
+  isp?: string
+  asn?: string
   expires_at: string | null
   fallback_mode: 'none' | 'proxy' | 'direct'
   backup_proxy_id?: number | null
@@ -964,6 +969,9 @@ export interface Proxy {
   created_at: string
   updated_at: string
 }
+
+/** 出口 IP 网络类型。与后端 service.IPNetworkType 一一对应。 */
+export type IPNetworkType = 'residential' | 'mobile' | 'business' | 'hosting' | 'vpn' | 'unknown'
 
 export interface ProxyAccountSummary {
   id: number
@@ -997,6 +1005,10 @@ export interface ProxyQualityCheckResult {
   challenge_count: number
   checked_at: number
   items: ProxyQualityCheckItem[]
+  network_type?: IPNetworkType
+  network_type_source?: string
+  isp?: string
+  asn?: string
 }
 
 // Gemini credentials structure for OAuth and API Key authentication

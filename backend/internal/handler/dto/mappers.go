@@ -553,6 +553,11 @@ func ProxyWithAccountCountFromService(p *service.ProxyWithAccountCount) *ProxyWi
 		QualityGrade:   p.QualityGrade,
 		QualitySummary: p.QualitySummary,
 		QualityChecked: p.QualityChecked,
+
+		NetworkType:       p.NetworkType,
+		NetworkTypeSource: p.NetworkTypeSource,
+		ISP:               p.ISP,
+		ASN:               p.ASN,
 	}
 }
 
@@ -598,6 +603,11 @@ func ProxyWithAccountCountFromServiceAdmin(p *service.ProxyWithAccountCount) *Ad
 		QualityGrade:   p.QualityGrade,
 		QualitySummary: p.QualitySummary,
 		QualityChecked: p.QualityChecked,
+
+		NetworkType:       p.NetworkType,
+		NetworkTypeSource: p.NetworkTypeSource,
+		ISP:               p.ISP,
+		ASN:               p.ASN,
 	}
 }
 

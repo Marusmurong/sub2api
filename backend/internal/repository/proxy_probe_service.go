@@ -63,7 +63,9 @@ var probeURLs = []struct {
 	url    string
 	parser string
 }{
-	{"http://ip-api.com/json/?lang=zh-CN", "ip-api"},
+	// fields 显式列全：默认响应不带 asname，而 isp/org/as/asname 是出口 IP 类型本地兜底
+	// 判定的唯一输入。status 与 message 必须保留，否则 parseIPAPI 的失败分支读不到原因。
+	{"http://ip-api.com/json/?lang=zh-CN&fields=status,message,query,country,countryCode,region,regionName,city,isp,org,as,asname", "ip-api"},
 	{"http://api64.ipify.org?format=json", "ipify"},
 }
 
@@ -168,6 +170,10 @@ func (s *proxyProbeService) parseIPAPI(body []byte, latencyMs int64) (*service.P
 		RegionName  string `json:"regionName"`
 		Country     string `json:"country"`
 		CountryCode string `json:"countryCode"`
+		ISP         string `json:"isp"`
+		Org         string `json:"org"`
+		AS          string `json:"as"`
+		ASName      string `json:"asname"`
 	}
 
 	if err := json.Unmarshal(body, &ipInfo); err != nil {
@@ -194,6 +200,10 @@ func (s *proxyProbeService) parseIPAPI(body []byte, latencyMs int64) (*service.P
 		Region:      region,
 		Country:     ipInfo.Country,
 		CountryCode: ipInfo.CountryCode,
+		ISP:         ipInfo.ISP,
+		Org:         ipInfo.Org,
+		ASN:         ipInfo.AS,
+		ASName:      ipInfo.ASName,
 	}, latencyMs, nil
 }
 

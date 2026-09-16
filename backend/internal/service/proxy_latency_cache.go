@@ -20,6 +20,11 @@ type ProxyLatencyInfo struct {
 	QualitySummary   string    `json:"quality_summary,omitempty"`
 	QualityCheckedAt *int64    `json:"quality_checked_at,omitempty"`
 	QualityCFRay     string    `json:"quality_cf_ray,omitempty"`
+	// 出口 IP 网络类型快照，随质量检测一起写入，列表页直接读，不重复调用数据源。
+	NetworkType       string    `json:"network_type,omitempty"`
+	NetworkTypeSource string    `json:"network_type_source,omitempty"`
+	ISP               string    `json:"isp,omitempty"`
+	ASN               string    `json:"asn,omitempty"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 

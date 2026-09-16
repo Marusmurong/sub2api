@@ -197,6 +197,29 @@ security:
     #     parser: "chatgpt-trace"
     #   - url: "https://api64.ipify.org?format=json"
     #     parser: "ipify"
+    # Exit IP network type detection (residential / datacenter / VPN), shown under
+    # the proxy name on the admin proxies page and scored in the quality check.
+    # Only runs when an admin triggers a quality check - never on a schedule,
+    # so the free-tier quotas are not exhausted.
+    # 出口 IP 网络类型识别（家庭住宅 / 机房 / VPN），标注在代理列表的名称下方，
+    # 并计入质量评分。仅在管理员手动触发「质量检测」时调用，不做定时全量重扫。
+    ip_classifier:
+      enabled: true
+      # Comma-separated sources; empty means "proxycheck,ipdata".
+      # Multiple sources are queried in parallel and the most conservative verdict wins:
+      # single sources miss datacenters regularly (AS174 Cogent reads as "Business" on
+      # proxycheck and is only caught by ipdata's asn.type=internet_backbone).
+      # 逗号分隔的数据源；留空等价于 "proxycheck,ipdata"。
+      # 多源并行查询并取最保守的结果——单源漏判是常态：AS174 Cogent 在 proxycheck
+      # 只被判为 Business，唯一识破它是机房的是 ipdata 的 asn.type=internet_backbone。
+      provider: "proxycheck,ipdata"
+      # proxycheck.io key. Empty uses the free 100 queries/day allowance without a key.
+      # proxycheck.io 的 key。留空则使用无 key 的 100 次/天免费额度。
+      api_key: ""
+      # ipdata.co key (free tier: 1500 queries/day). Empty disables this source.
+      # ipdata.co 的 key（免费层 1500 次/天）。留空则不启用该源。
+      ipdata_api_key: ""
+      timeout_seconds: 6
   proxy_fallback:
     # Allow auxiliary services (update check, pricing data) to fallback to direct
     # connection when proxy initialization fails. Does NOT affect AI gateway connections.

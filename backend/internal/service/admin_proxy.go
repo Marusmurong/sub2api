@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -309,6 +310,8 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 	})
 	result.PassedCount++
 
+	s.appendIPNetworkTypeItem(ctx, result, exitInfo)
+
 	client, err := httpclient.GetClient(httpclient.Options{
 		ProxyURL:              proxyURL,
 		Timeout:               proxyQualityRequestTimeout,
@@ -344,6 +347,111 @@ func (s *adminServiceImpl) CheckProxyQuality(ctx context.Context, id int64) (*Pr
 	finalizeProxyQualityResult(result)
 	s.saveProxyQualitySnapshot(ctx, id, result, exitInfo)
 	return result, nil
+}
+
+// appendIPNetworkTypeItem 判定出口 IP 的网络类型，并作为一个检测项计入结果。
+//
+// 两级判定：第三方数据源（proxycheck）→ 失败时退回本地 ISP/AS 名称关键词。
+//
+// **两级都没有结果时不追加检测项**，只留日志。这一条是有意为之：proxycheck 免费层
+// 有每日额度，额度用完时若一律按 unknown 记 warn，会让全部代理在同一天静默掉 10 分，
+// 看起来像是代理集体劣化。「问不到」和「问了但归不了类」必须区别对待——后者才记 warn。
+func (s *adminServiceImpl) appendIPNetworkTypeItem(ctx context.Context, result *ProxyQualityCheckResult, exitInfo *ProxyExitInfo) {
+	if result == nil || exitInfo == nil || exitInfo.IP == "" {
+		return
+	}
+
+	info := s.classifyExitIP(ctx, exitInfo)
+	if info == nil {
+		return
+	}
+
+	status, message := ipNetworkTypeQualityStatus(info.Type)
+	if detail := ipNetworkProviderDetail(info); detail != "" {
+		message = message + "（" + detail + "）"
+	}
+
+	result.NetworkType = string(info.Type)
+	result.NetworkTypeSource = info.Source
+	result.ISP = info.ISP
+	result.ASN = info.ASN
+
+	result.Items = append(result.Items, ProxyQualityCheckItem{
+		Target:  proxyQualityTargetIPType,
+		Status:  status,
+		Message: message,
+	})
+	switch status {
+	case "pass":
+		result.PassedCount++
+	case "warn":
+		result.WarnCount++
+	default:
+		result.FailedCount++
+	}
+}
+
+// classifyExitIP 返回出口 IP 的分类结果；彻底判不出来时返回 nil。
+func (s *adminServiceImpl) classifyExitIP(ctx context.Context, exitInfo *ProxyExitInfo) *IPNetworkInfo {
+	if s.ipNetworkClassifier != nil {
+		info, err := s.ipNetworkClassifier.ClassifyIP(ctx, exitInfo.IP)
+		if err == nil && info != nil && info.Type != IPNetworkTypeUnknown {
+			fillIPNetworkProviderFallback(info, exitInfo)
+			return info
+		}
+		if err != nil {
+			logger.LegacyPrintf("service.admin",
+				"Warning: classify exit ip %s failed, falling back to provider name: %v", exitInfo.IP, err)
+		}
+	}
+
+	// 兜底：用同一次 ip-api 调用已经拿到的 ISP / org / AS 名称猜，不产生额外请求。
+	if t := ClassifyByProviderName(exitInfo.ISP, exitInfo.Org, exitInfo.ASName, exitInfo.ASN); t != IPNetworkTypeUnknown {
+		return &IPNetworkInfo{
+			Type:   t,
+			Source: IPNetworkSourceProviderName,
+			ISP:    exitInfo.ISP,
+			Org:    exitInfo.Org,
+			ASN:    exitInfo.ASN,
+			ASName: exitInfo.ASName,
+		}
+	}
+	return nil
+}
+
+// fillIPNetworkProviderFallback 用 ip-api 的字段补齐第三方没给的 ISP/ASN，
+// 让前端 tooltip 在任一数据源下都有内容可显示。
+func fillIPNetworkProviderFallback(info *IPNetworkInfo, exitInfo *ProxyExitInfo) {
+	if info == nil || exitInfo == nil {
+		return
+	}
+	if info.ISP == "" {
+		info.ISP = exitInfo.ISP
+	}
+	if info.Org == "" {
+		info.Org = exitInfo.Org
+	}
+	if info.ASN == "" {
+		info.ASN = exitInfo.ASN
+	}
+	if info.ASName == "" {
+		info.ASName = exitInfo.ASName
+	}
+}
+
+// ipNetworkProviderDetail 拼出给人看的运营商说明，例如 "Cogent Communications · AS174"。
+func ipNetworkProviderDetail(info *IPNetworkInfo) string {
+	if info == nil {
+		return ""
+	}
+	parts := make([]string, 0, 2)
+	if name := strings.TrimSpace(info.ISP); name != "" {
+		parts = append(parts, name)
+	}
+	if asn := strings.TrimSpace(info.ASN); asn != "" {
+		parts = append(parts, asn)
+	}
+	return strings.Join(parts, " · ")
 }
 
 func runProxyQualityTarget(ctx context.Context, client *http.Client, target proxyQualityTarget) ProxyQualityCheckItem {
@@ -505,6 +613,10 @@ func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxyID
 		QualitySummary:   result.Summary,
 		QualityCheckedAt: &checkedAt,
 		QualityCFRay:     proxyQualityFirstCFRay(result),
+		NetworkType:       result.NetworkType,
+		NetworkTypeSource: result.NetworkTypeSource,
+		ISP:               result.ISP,
+		ASN:               result.ASN,
 		UpdatedAt:        time.Now(),
 	}
 	if result.BaseLatencyMs > 0 {
@@ -587,6 +699,10 @@ func (s *adminServiceImpl) attachProxyLatency(ctx context.Context, proxies []Pro
 		proxies[i].QualityGrade = info.QualityGrade
 		proxies[i].QualitySummary = info.QualitySummary
 		proxies[i].QualityChecked = info.QualityCheckedAt
+		proxies[i].NetworkType = info.NetworkType
+		proxies[i].NetworkTypeSource = info.NetworkTypeSource
+		proxies[i].ISP = info.ISP
+		proxies[i].ASN = info.ASN
 	}
 }
 
@@ -610,6 +726,19 @@ func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, 
 				merged.QualitySummary = existing.QualitySummary
 				merged.QualityCheckedAt = existing.QualityCheckedAt
 				merged.QualityCFRay = existing.QualityCFRay
+			}
+			// 出口类型单独判断：它由质量检测写入，而 TestProxy / probeProxyLatency
+			// 这类普通延迟探测根本不产生该字段，若跟着上面的整体条件走，
+			// 一次「测试」就会把名称下方的类型标注抹掉。
+			if merged.NetworkType == "" {
+				merged.NetworkType = existing.NetworkType
+				merged.NetworkTypeSource = existing.NetworkTypeSource
+				if merged.ISP == "" {
+					merged.ISP = existing.ISP
+				}
+				if merged.ASN == "" {
+					merged.ASN = existing.ASN
+				}
 			}
 		}
 	}

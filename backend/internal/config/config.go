@@ -852,6 +852,38 @@ type ProxyProbeConfig struct {
 	// 留空时使用内置默认列表（ip-api → ipify）。
 	// 某些 AI API 专用代理只允许访问特定域名，配置多个备选可提高探测成功率。
 	URLs []ProbeURLConfig `mapstructure:"urls"`
+	// IPClassifier 出口 IP 网络类型识别（住宅 / 机房 / VPN）。
+	IPClassifier IPClassifierConfig `mapstructure:"ip_classifier"`
+}
+
+// IPClassifierConfig 配置出口 IP 的网络类型识别。
+//
+// 只在管理员手动触发「代理质量检测」时调用，不做定时全量重扫——proxycheck 免费层
+// 无 key 100 次/天、带免费 key 1000 次/天，定时扫会直接打爆额度。
+type IPClassifierConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+	// Provider 逗号分隔的数据源列表，留空等价于 "proxycheck,ipdata"。
+	// 配置多个时并行查询并取最保守的结果——单源漏判是常态，见 NewIPNetworkClassifier。
+	Provider string `mapstructure:"provider"`
+	// APIKey 是 proxycheck.io 的 key（留空走 100 次/天的无 key 额度）。
+	APIKey string `mapstructure:"api_key"`
+	// IPDataAPIKey 是 ipdata.co 的 key（免费层 1500 次/天）。留空则不启用该源。
+	IPDataAPIKey   string `mapstructure:"ipdata_api_key"`
+	TimeoutSeconds int    `mapstructure:"timeout_seconds"`
+}
+
+func (c IPClassifierConfig) validate() error {
+	for _, raw := range strings.Split(c.Provider, ",") {
+		switch strings.ToLower(strings.TrimSpace(raw)) {
+		case "", "proxycheck", "ipdata":
+		default:
+			return fmt.Errorf("security.proxy_probe.ip_classifier.provider entries must be \"proxycheck\" or \"ipdata\"")
+		}
+	}
+	if c.TimeoutSeconds < 0 || c.TimeoutSeconds > 60 {
+		return fmt.Errorf("security.proxy_probe.ip_classifier.timeout_seconds must be within 0..60")
+	}
+	return nil
 }
 
 // ProbeURLConfig 描述一个探测端点及其响应解析方式。
@@ -3065,6 +3097,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("security.proxy_probe.urls: %w", err)
 	}
 	c.Security.ProxyProbe.URLs = proxyProbeURLs
+	if err := c.Security.ProxyProbe.IPClassifier.validate(); err != nil {
+		return err
+	}
 	if c.Plugins.MaxUploadBytes <= 0 || c.Plugins.MaxUploadBytes > 1024*1024*1024 {
 		return fmt.Errorf("plugins.max_upload_bytes must be between 1 and 1073741824")
 	}

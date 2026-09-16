@@ -118,8 +118,18 @@
             />
           </template>
 
-          <template #cell-name="{ value }">
-            <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+          <template #cell-name="{ row, value }">
+            <div class="flex flex-col items-start gap-0.5">
+              <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+              <span
+                v-if="row.network_type"
+                class="badge whitespace-nowrap text-xs"
+                :class="networkTypeClass(row.network_type)"
+                :title="networkTypeTitle(row)"
+              >
+                {{ networkTypeLabel(row.network_type) }}
+              </span>
+            </div>
           </template>
 
           <template #cell-protocol="{ value }">
@@ -868,6 +878,18 @@
           </div>
           <div class="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-600 dark:text-gray-300">
             <div>{{ t('admin.proxies.qualityExitIP') }}: {{ qualityReport.exit_ip || '-' }}</div>
+            <div>
+              {{ t('admin.proxies.qualityNetworkType') }}:
+              <span
+                v-if="qualityReport.network_type"
+                class="badge whitespace-nowrap text-xs"
+                :class="networkTypeClass(qualityReport.network_type)"
+                :title="networkTypeTitle(qualityReport)"
+              >
+                {{ networkTypeLabel(qualityReport.network_type) }}
+              </span>
+              <span v-else>-</span>
+            </div>
             <div>{{ t('admin.proxies.qualityCountry') }}: {{ qualityReport.country || '-' }}</div>
             <div>
               {{ t('admin.proxies.qualityBaseLatency') }}:
@@ -1765,6 +1787,43 @@ const expiryLabel = (row: Proxy): string => {
 const expiryBadgeClass = (row: Proxy): string =>
   proxyExpiryBadgeClass(row.expires_at, row.status)
 
+// 出口 IP 网络类型标签。住宅/移动是我们要的形态，机房/VPN 是明确的风险信号。
+const networkTypeClass = (type?: string) => {
+  switch (type) {
+    case 'residential':
+    case 'mobile':
+      return 'badge-success'
+    case 'business':
+      return 'badge-warning'
+    case 'hosting':
+    case 'vpn':
+      return 'badge-danger'
+    default:
+      return 'badge-gray'
+  }
+}
+
+const networkTypeLabel = (type?: string) => {
+  switch (type) {
+    case 'residential':
+      return t('admin.proxies.networkTypeResidential')
+    case 'mobile':
+      return t('admin.proxies.networkTypeMobile')
+    case 'business':
+      return t('admin.proxies.networkTypeBusiness')
+    case 'hosting':
+      return t('admin.proxies.networkTypeHosting')
+    case 'vpn':
+      return t('admin.proxies.networkTypeVpn')
+    default:
+      return t('admin.proxies.networkTypeUnknown')
+  }
+}
+
+// tooltip 给出判定依据：运营商、ASN、数据源。判错时能一眼看出是哪家给的结论。
+const networkTypeTitle = (row: { isp?: string; asn?: string; network_type_source?: string }) =>
+  [row.isp, row.asn, row.network_type_source].filter(Boolean).join(' · ') || undefined
+
 const qualityOverallClass = (status?: string) => {
   if (status === 'healthy') return 'badge-success'
   if (status === 'warn') return 'badge-warning'
@@ -1783,6 +1842,8 @@ const qualityTargetLabel = (target: string) => {
   switch (target) {
     case 'base_connectivity':
       return t('admin.proxies.qualityTargetBase')
+    case 'ip_type':
+      return t('admin.proxies.qualityTargetIPType')
     case 'openai':
       return 'OpenAI'
     case 'anthropic':

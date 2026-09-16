@@ -144,6 +144,29 @@ func (s *ProxyProbeServiceSuite) TestParseIPAPI_Success() {
 	require.Equal(s.T(), "CN", info.CountryCode)
 }
 
+// isp / org / as / asname 是出口 IP 类型本地兜底判定的唯一输入，
+// 内置探测 URL 的 fields 参数里显式带了它们，解析必须跟上。
+// 报文照抄 2026-09-16 对 130.117.139.191 的实测响应。
+func (s *ProxyProbeServiceSuite) TestParseIPAPI_CarriesProviderFieldsForClassification() {
+	body := []byte(`{"status":"success","query":"130.117.139.191","city":"London","regionName":"England","country":"United Kingdom","countryCode":"GB","isp":"Cogent Communications","org":"Hongkong Seaga Technology Limited","as":"AS174 Cogent Communications, LLC","asname":"COGENT-174"}`)
+	info, _, err := s.prober.parseIPAPI(body, 100)
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), "Cogent Communications", info.ISP)
+	require.Equal(s.T(), "Hongkong Seaga Technology Limited", info.Org)
+	require.Equal(s.T(), "AS174 Cogent Communications, LLC", info.ASN)
+	require.Equal(s.T(), "COGENT-174", info.ASName)
+}
+
+// 内置探测 URL 必须保留 status 与 message：parseIPAPI 的失败分支靠它们给出原因。
+func (s *ProxyProbeServiceSuite) TestBuiltinProbeURLKeepsStatusAndMessageFields() {
+	require.Contains(s.T(), probeURLs[0].url, "fields=")
+	require.Contains(s.T(), probeURLs[0].url, "status")
+	require.Contains(s.T(), probeURLs[0].url, "message")
+	for _, field := range []string{"isp", "org", "as", "asname", "query", "countryCode"} {
+		require.Contains(s.T(), probeURLs[0].url, field)
+	}
+}
+
 func (s *ProxyProbeServiceSuite) TestParseIPAPI_Failure() {
 	body := []byte(`{"status":"fail","message":"rate limited"}`)
 	_, _, err := s.prober.parseIPAPI(body, 100)

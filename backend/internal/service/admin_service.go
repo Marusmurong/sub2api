@@ -600,6 +600,12 @@ type ProxyQualityCheckResult struct {
 	ChallengeCount int                     `json:"challenge_count"`
 	CheckedAt      int64                   `json:"checked_at"`
 	Items          []ProxyQualityCheckItem `json:"items"`
+	// 出口 IP 网络类型。NetworkType 为空表示本次没能判定（数据源不可用），
+	// 与「判定了但归类为 unknown」是两回事，见 CheckProxyQuality。
+	NetworkType       string `json:"network_type,omitempty"`
+	NetworkTypeSource string `json:"network_type_source,omitempty"`
+	ISP               string `json:"isp,omitempty"`
+	ASN               string `json:"asn,omitempty"`
 }
 
 type ProxyQualityCheckItem struct {
@@ -618,6 +624,12 @@ type ProxyExitInfo struct {
 	Region      string
 	Country     string
 	CountryCode string
+	// ISP / Org / ASN / ASName 供出口 IP 类型的本地兜底判定使用（ClassifyByProviderName）。
+	// 它们来自同一次 ip-api 调用，不产生额外请求。
+	ISP    string
+	Org    string
+	ASN    string
+	ASName string
 }
 
 // ProxyExitInfoProber tests proxy connectivity and retrieves exit information
@@ -674,6 +686,10 @@ var proxyQualityTargets = []proxyQualityTarget{
 	},
 }
 
+// proxyQualityTargetIPType 是出口 IP 网络类型检测项的 target 名。
+// 它不在 proxyQualityTargets 里——那张表是「HTTP 端点可达性」，这一项不发 HTTP 到目标站点。
+const proxyQualityTargetIPType = "ip_type"
+
 const (
 	proxyQualityRequestTimeout        = 15 * time.Second
 	proxyQualityResponseHeaderTimeout = 10 * time.Second
@@ -701,6 +717,7 @@ type adminServiceImpl struct {
 	billingCacheService  *BillingCacheService
 	proxyProber          ProxyExitInfoProber
 	proxyLatencyCache    ProxyLatencyCache
+	ipNetworkClassifier  IPNetworkClassifier
 	authCacheInvalidator APIKeyAuthCacheInvalidator
 	entClient            *dbent.Client // 用于开启数据库事务
 	settingService       *SettingService
@@ -754,6 +771,7 @@ func NewAdminService(
 	billingCacheService *BillingCacheService,
 	proxyProber ProxyExitInfoProber,
 	proxyLatencyCache ProxyLatencyCache,
+	ipNetworkClassifier IPNetworkClassifier,
 	authCacheInvalidator APIKeyAuthCacheInvalidator,
 	entClient *dbent.Client,
 	settingService *SettingService,
@@ -784,6 +802,7 @@ func NewAdminService(
 		billingCacheService:  billingCacheService,
 		proxyProber:          proxyProber,
 		proxyLatencyCache:    proxyLatencyCache,
+		ipNetworkClassifier:  ipNetworkClassifier,
 		authCacheInvalidator: authCacheInvalidator,
 		entClient:            entClient,
 		settingService:       settingService,
