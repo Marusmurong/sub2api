@@ -37,6 +37,10 @@ type DeviceLimitCache interface {
 
 	// ClearDevices 清空账号的全部设备登记（运营手动放行换机）。
 	ClearDevices(ctx context.Context, accountID int64) error
+
+	// ActiveDeviceAccounts 返回 accountIDs 中已登记 deviceID 且未过期的账号集合（设备亲和用）。
+	// 只读，不刷新时间戳；查询失败的账号视为未登记。
+	ActiveDeviceAccounts(ctx context.Context, deviceID string, accountIDs []int64, windows map[int64]time.Duration) (map[int64]struct{}, error)
 }
 
 // deviceLimitIDRegex 合法设备 ID：Claude Code 的 userID，恰好 64 位十六进制。
@@ -227,6 +231,129 @@ func (s *GatewayService) ReleaseUnservedDeviceRegistrations(ctx context.Context,
 	for _, accountID := range req.takeAllExcept(servedAccountID) {
 		s.unregisterDevice(ctx, accountID, req.deviceID)
 	}
+}
+
+// ====== 设备亲和：一台设备尽量固定在同一个账号上 ======
+
+// deviceAffinitySet 返回候选账号中"本请求设备已登记且未过期"的账号集合。
+// 无设备上下文、无合法设备 ID、缓存不可用、无启用设备限制的候选：返回 nil（不启用亲和）。
+func (s *GatewayService) deviceAffinitySet(ctx context.Context, accounts []Account) map[int64]struct{} {
+	if s == nil || s.deviceLimitCache == nil {
+		return nil
+	}
+	req := deviceLimitRequestFromContext(ctx)
+	if req == nil || req.deviceID == "" {
+		return nil
+	}
+	ids := make([]int64, 0, len(accounts))
+	windows := make(map[int64]time.Duration, len(accounts))
+	for i := range accounts {
+		acc := &accounts[i]
+		if !isDeviceLimitApplicable(acc) {
+			continue
+		}
+		ids = append(ids, acc.ID)
+		windows[acc.ID] = time.Duration(acc.GetDeviceWindowMinutes()) * time.Minute
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	set, err := s.deviceLimitCache.ActiveDeviceAccounts(ctx, req.deviceID, ids, windows)
+	if err != nil {
+		slog.Warn("device_affinity.lookup_failed", "device", shortDeviceID(req.deviceID), "error", err)
+		return nil
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return set
+}
+
+// partitionByDeviceAffinity 稳定地把亲和账号移到切片前部，其余相对顺序不变。
+func partitionByDeviceAffinity(accounts []*Account, affinity map[int64]struct{}) []*Account {
+	if len(affinity) == 0 || len(accounts) == 0 {
+		return accounts
+	}
+	front := make([]*Account, 0, len(accounts))
+	rest := make([]*Account, 0, len(accounts))
+	for _, acc := range accounts {
+		if _, ok := affinity[acc.ID]; ok {
+			front = append(front, acc)
+		} else {
+			rest = append(rest, acc)
+		}
+	}
+	return append(front, rest...)
+}
+
+// partitionLoadsByDeviceAffinity 同 partitionByDeviceAffinity，作用于带负载信息的候选。
+func partitionLoadsByDeviceAffinity(items []accountWithLoad, affinity map[int64]struct{}) []accountWithLoad {
+	if len(affinity) == 0 || len(items) == 0 {
+		return items
+	}
+	front := make([]accountWithLoad, 0, len(items))
+	rest := make([]accountWithLoad, 0, len(items))
+	for _, item := range items {
+		if _, ok := affinity[item.account.ID]; ok {
+			front = append(front, item)
+		} else {
+			rest = append(rest, item)
+		}
+	}
+	return append(front, rest...)
+}
+
+// tryDeviceAffinity 在负载感知选号之前，优先把请求落到本设备已登记的账号上：
+//  1. 亲和账号有空槽 → 直接占槽返回；
+//  2. 亲和账号槽满但排队未超过粘性会话的上限 → 返回该账号的等待计划（宁可等也不换号）；
+//  3. 都不行 → handled=false，交给常规负载感知选号。
+func (s *GatewayService) tryDeviceAffinity(ctx context.Context, candidates []*Account, affinity map[int64]struct{}, groupID *int64, sessionHash string, preferOAuth bool, waitTimeout time.Duration, maxWaiting int) (*AccountSelectionResult, bool, error) {
+	if len(affinity) == 0 {
+		return nil, false, nil
+	}
+	affine := make([]*Account, 0, len(affinity))
+	for _, acc := range candidates {
+		if _, ok := affinity[acc.ID]; ok {
+			affine = append(affine, acc)
+		}
+	}
+	if len(affine) == 0 {
+		return nil, false, nil
+	}
+
+	result, ok, err := s.tryAcquireByLegacyOrder(ctx, affine, groupID, sessionHash, preferOAuth)
+	if err != nil {
+		return nil, false, err
+	}
+	if ok {
+		slog.Debug("device_affinity.hit", "account_id", result.Account.ID, "result", "slot_acquired")
+		return result, true, nil
+	}
+
+	if s.concurrencyService == nil || maxWaiting <= 0 {
+		return nil, false, nil
+	}
+	for _, acc := range affine {
+		waitingCount, _ := s.concurrencyService.GetAccountWaitingCount(ctx, acc.ID)
+		if waitingCount >= maxWaiting {
+			continue
+		}
+		if !s.checkAndRegisterSession(ctx, acc, sessionHash) {
+			continue
+		}
+		slog.Debug("device_affinity.hit", "account_id", acc.ID, "result", "wait_plan")
+		selection, err := s.newSelectionResult(ctx, acc, false, nil, &AccountWaitPlan{
+			AccountID:      acc.ID,
+			MaxConcurrency: acc.Concurrency,
+			Timeout:        waitTimeout,
+			MaxWaiting:     maxWaiting,
+		})
+		if err != nil {
+			return nil, false, err
+		}
+		return selection, true, nil
+	}
+	return nil, false, nil
 }
 
 func (s *GatewayService) unregisterDevice(ctx context.Context, accountID int64, deviceID string) {

@@ -27,10 +27,11 @@ type deviceLimitCacheStub struct {
 	registerErr  error
 	registered   []int64
 	unregistered map[int64][]string
+	affinity     map[int64]struct{} // ActiveDeviceAccounts 返回的"已登记本设备"账号
 }
 
 func newDeviceLimitCacheStub(allowed, isNew bool) *deviceLimitCacheStub {
-	return &deviceLimitCacheStub{allowed: allowed, isNew: isNew, unregistered: map[int64][]string{}}
+	return &deviceLimitCacheStub{allowed: allowed, isNew: isNew, unregistered: map[int64][]string{}, affinity: map[int64]struct{}{}}
 }
 
 func (s *deviceLimitCacheStub) RegisterDevice(_ context.Context, accountID int64, _ string, _ int, _ time.Duration) (bool, bool, error) {
@@ -55,6 +56,18 @@ func (s *deviceLimitCacheStub) GetActiveDeviceCountBatch(context.Context, []int6
 }
 
 func (s *deviceLimitCacheStub) ClearDevices(context.Context, int64) error { return nil }
+
+func (s *deviceLimitCacheStub) ActiveDeviceAccounts(_ context.Context, _ string, accountIDs []int64, _ map[int64]time.Duration) (map[int64]struct{}, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[int64]struct{})
+	for _, id := range accountIDs {
+		if _, ok := s.affinity[id]; ok {
+			out[id] = struct{}{}
+		}
+	}
+	return out, nil
+}
 
 // sessionRegisterStub 只实现 RegisterSession，用于驱动会话被拒的分支。
 type sessionRegisterStub struct {

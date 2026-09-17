@@ -69,6 +69,30 @@ var (
 
 		return redis.call('ZCARD', key)
 	`)
+
+	// isDeviceActiveScript 只读检查设备是否已登记且未过期（不刷新时间戳）
+	// KEYS[1] = device_limit:account:{accountID}
+	// ARGV[1] = window（秒）
+	// ARGV[2] = deviceID
+	// 返回: 1 = 活跃, 0 = 未登记或已过期
+	isDeviceActiveScript = redis.NewScript(`
+		redis.replicate_commands()
+		local key = KEYS[1]
+		local window = tonumber(ARGV[1])
+		local deviceID = ARGV[2]
+
+		local score = redis.call('ZSCORE', key, deviceID)
+		if score == false then
+			return 0
+		end
+
+		local timeResult = redis.call('TIME')
+		local now = tonumber(timeResult[1])
+		if tonumber(score) <= now - window then
+			return 0
+		end
+		return 1
+	`)
 )
 
 type deviceLimitCache struct {
@@ -85,7 +109,7 @@ func NewDeviceLimitCache(rdb *redis.Client, defaultWindowMinutes int) service.De
 
 	// 预加载 Lua 脚本，避免 Pipeline 中出现 NOSCRIPT 错误
 	ctx := context.Background()
-	for _, script := range []*redis.Script{registerDeviceScript, getActiveDeviceCountScript} {
+	for _, script := range []*redis.Script{registerDeviceScript, getActiveDeviceCountScript, isDeviceActiveScript} {
 		if err := script.Load(ctx, rdb).Err(); err != nil {
 			log.Printf("[DeviceLimitCache] Failed to preload Lua script: %v", err)
 		}
@@ -170,4 +194,32 @@ func (c *deviceLimitCache) GetActiveDeviceCountBatch(ctx context.Context, accoun
 // ClearDevices 清空账号的全部设备登记
 func (c *deviceLimitCache) ClearDevices(ctx context.Context, accountID int64) error {
 	return c.rdb.Del(ctx, deviceLimitKey(accountID)).Err()
+}
+
+// ActiveDeviceAccounts 返回已登记 deviceID 且未过期的账号集合（只读）
+func (c *deviceLimitCache) ActiveDeviceAccounts(ctx context.Context, deviceID string, accountIDs []int64, windows map[int64]time.Duration) (map[int64]struct{}, error) {
+	result := make(map[int64]struct{})
+	if deviceID == "" || len(accountIDs) == 0 {
+		return result, nil
+	}
+
+	pipe := c.rdb.Pipeline()
+	cmds := make(map[int64]*redis.Cmd, len(accountIDs))
+	for _, accountID := range accountIDs {
+		window := c.defaultWindow
+		if windows != nil {
+			if w, ok := windows[accountID]; ok && w > 0 {
+				window = w
+			}
+		}
+		cmds[accountID] = isDeviceActiveScript.Run(ctx, pipe, []string{deviceLimitKey(accountID)}, c.windowSeconds(window), deviceID)
+	}
+	_, _ = pipe.Exec(ctx)
+
+	for accountID, cmd := range cmds {
+		if active, err := cmd.Int(); err == nil && active == 1 {
+			result[accountID] = struct{}{}
+		}
+	}
+	return result, nil
 }

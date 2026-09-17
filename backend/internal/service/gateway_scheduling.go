@@ -236,6 +236,10 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 	ctx = s.withWindowCostPrefetch(ctx, accounts)
 	ctx = s.withRPMPrefetch(ctx, accounts)
 
+	// 设备亲和：本设备已登记过的账号集合（无设备上下文或未启用设备限制时为 nil）。
+	// 用于让同一台设备尽量固定在同一个账号上：路由层排序、Layer 1.7 优先抢槽、兜底排队优先。
+	deviceAffinity := s.deviceAffinitySet(ctx, accounts)
+
 	// 提前构建 accountByID（供 Layer 1 和 Layer 1.5 使用）
 	accountByID := make(map[int64]*Account, len(accounts))
 	for i := range accounts {
@@ -483,6 +487,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 					}
 				})
 				shuffleWithinSortGroups(routingAvailable)
+				routingAvailable = partitionLoadsByDeviceAffinity(routingAvailable, deviceAffinity)
 
 				// 4. 尝试获取槽位
 				for _, item := range routingAvailable {
@@ -711,6 +716,17 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 		return nil, ErrNoAvailableAccounts
 	}
 
+	// ============ Layer 1.7: 设备亲和（本设备已登记的账号优先） ============
+	if len(deviceAffinity) > 0 {
+		result, handled, affinityErr := s.tryDeviceAffinity(ctx, candidates, deviceAffinity, groupID, sessionHash, preferOAuth, cfg.StickySessionWaitTimeout, cfg.StickySessionMaxWaiting)
+		if affinityErr != nil {
+			return nil, affinityErr
+		}
+		if handled {
+			return result, nil
+		}
+	}
+
 	accountLoads := make([]AccountWithConcurrency, 0, len(candidates))
 	for _, acc := range candidates {
 		accountLoads = append(accountLoads, AccountWithConcurrency{
@@ -784,6 +800,7 @@ func (s *GatewayService) SelectAccountWithLoadAwareness(ctx context.Context, gro
 
 	// ============ Layer 3: 兜底排队 ============
 	s.sortCandidatesForFallback(candidates, preferOAuth, cfg.FallbackSelectionMode)
+	candidates = partitionByDeviceAffinity(candidates, deviceAffinity)
 	for _, acc := range candidates {
 		// 会话数量限制检查（等待计划也需要占用会话配额）
 		if !s.checkAndRegisterSession(ctx, acc, sessionHash) {

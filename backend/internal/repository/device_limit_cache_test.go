@@ -184,6 +184,33 @@ func TestDeviceLimitCache_InvalidParamsAllowWithoutRegistering(t *testing.T) {
 	require.Empty(t, empty)
 }
 
+// 设备亲和只读查询：只返回已登记且未过期的账号，不刷新时间戳。
+func TestDeviceLimitCache_ActiveDeviceAccounts(t *testing.T) {
+	cache, mr := newDeviceLimitCacheForTest(t)
+	ctx := context.Background()
+	base := time.Date(2026, 9, 17, 10, 0, 0, 0, time.UTC)
+	windows := map[int64]time.Duration{1: time.Hour, 2: time.Hour, 3: time.Hour}
+
+	_, _, err := cache.RegisterDevice(ctx, 1, deviceA, 1, time.Hour)
+	require.NoError(t, err)
+	_, _, err = cache.RegisterDevice(ctx, 2, deviceB, 1, time.Hour)
+	require.NoError(t, err)
+
+	set, err := cache.ActiveDeviceAccounts(ctx, deviceA, []int64{1, 2, 3}, windows)
+	require.NoError(t, err)
+	require.Equal(t, map[int64]struct{}{1: {}}, set)
+
+	// 只读：查询后 A 的时间戳不变，61 分钟后视为过期
+	mr.SetTime(base.Add(61 * time.Minute))
+	set, err = cache.ActiveDeviceAccounts(ctx, deviceA, []int64{1, 2, 3}, windows)
+	require.NoError(t, err)
+	require.Empty(t, set)
+
+	empty, err := cache.ActiveDeviceAccounts(ctx, "", []int64{1}, windows)
+	require.NoError(t, err)
+	require.Empty(t, empty)
+}
+
 // 窗口 ≤0 时退回默认窗口，而不是把所有设备当成立即过期。
 func TestDeviceLimitCache_ZeroWindowFallsBackToDefault(t *testing.T) {
 	cache, mr := newDeviceLimitCacheForTest(t)
