@@ -3132,6 +3132,37 @@ func (a *Account) GetSessionIdleTimeoutMinutes() int {
 	return 5
 }
 
+// GetMaxDevices 获取窗口内允许的设备数上限（设备限制）
+// 返回 0 表示未启用（缺省、非法或负数一律视为未启用）
+func (a *Account) GetMaxDevices() int {
+	if a == nil || a.Extra == nil {
+		return 0
+	}
+	v, ok := a.Extra["max_devices"]
+	if !ok {
+		return 0
+	}
+	n := parseExtraInt(v)
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
+// GetDeviceWindowMinutes 获取设备空闲释放窗口（分钟）
+// 缺省或非法时返回 DefaultDeviceWindowMinutes
+func (a *Account) GetDeviceWindowMinutes() int {
+	if a == nil || a.Extra == nil {
+		return DefaultDeviceWindowMinutes
+	}
+	if v, ok := a.Extra["device_window_minutes"]; ok {
+		if n := parseExtraInt(v); n > 0 {
+			return n
+		}
+	}
+	return DefaultDeviceWindowMinutes
+}
+
 // GetBaseRPM 获取基础 RPM 限制
 // 返回 0 表示未启用（负数视为无效配置，按 0 处理）
 func (a *Account) GetBaseRPM() int {

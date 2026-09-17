@@ -2640,6 +2640,70 @@
           </div>
         </div>
 
+        <!-- Device Limit -->
+        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+          <div class="mb-3 flex items-center justify-between">
+            <div>
+              <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.deviceLimit.label') }}</label>
+              <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                {{ t('admin.accounts.quotaControl.deviceLimit.hint') }}
+              </p>
+            </div>
+            <button
+              type="button"
+              @click="deviceLimitEnabled = !deviceLimitEnabled"
+              :class="[
+                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2',
+                deviceLimitEnabled ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+              ]"
+            >
+              <span
+                :class="[
+                  'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                  deviceLimitEnabled ? 'translate-x-5' : 'translate-x-0'
+                ]"
+              />
+            </button>
+          </div>
+
+          <div v-if="deviceLimitEnabled" class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="input-label">{{ t('admin.accounts.quotaControl.deviceLimit.maxDevices') }}</label>
+              <input
+                v-model.number="maxDevices"
+                type="number"
+                min="1"
+                step="1"
+                class="input"
+                :placeholder="t('admin.accounts.quotaControl.deviceLimit.maxDevicesPlaceholder')"
+              />
+              <p class="input-hint">{{ t('admin.accounts.quotaControl.deviceLimit.maxDevicesHint') }}</p>
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.accounts.quotaControl.deviceLimit.windowMinutes') }}</label>
+              <div class="relative">
+                <input
+                  v-model.number="deviceWindowMinutes"
+                  type="number"
+                  min="1"
+                  step="1"
+                  class="input pr-12"
+                  :placeholder="t('admin.accounts.quotaControl.deviceLimit.windowMinutesPlaceholder')"
+                />
+                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 dark:text-gray-400">{{ t('common.minutes') }}</span>
+              </div>
+              <p class="input-hint">{{ t('admin.accounts.quotaControl.deviceLimit.windowMinutesHint') }}</p>
+            </div>
+          </div>
+
+          <div v-if="deviceLimitEnabled && props.account" class="mt-3 flex items-center justify-between gap-3">
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('admin.accounts.quotaControl.deviceLimit.clearDevicesHint') }}</p>
+            <button type="button" class="btn btn-secondary btn-sm" :disabled="clearingDevices" @click="clearRegisteredDevices">
+              {{ t('admin.accounts.quotaControl.deviceLimit.clearDevices') }}
+            </button>
+          </div>
+        </div>
+
         <!-- RPM Limit -->
         <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
@@ -3491,6 +3555,24 @@ const windowCostStickyReserve = ref<number | null>(null)
 const sessionLimitEnabled = ref(false)
 const maxSessions = ref<number | null>(null)
 const sessionIdleTimeout = ref<number | null>(null)
+const DEFAULT_DEVICE_WINDOW_MINUTES = 360
+const deviceLimitEnabled = ref(false)
+const maxDevices = ref<number | null>(null)
+const deviceWindowMinutes = ref<number | null>(null)
+const clearingDevices = ref(false)
+
+const clearRegisteredDevices = async () => {
+  if (!props.account) return
+  clearingDevices.value = true
+  try {
+    await adminAPI.accounts.clearDevices(props.account.id)
+    appStore.showSuccess(t('admin.accounts.quotaControl.deviceLimit.clearDevicesSuccess'))
+  } catch (error: any) {
+    appStore.showError(error?.message || t('admin.accounts.quotaControl.deviceLimit.clearDevicesFailed'))
+  } finally {
+    clearingDevices.value = false
+  }
+}
 const rpmLimitEnabled = ref(false)
 const baseRpm = ref<number | null>(null)
 const rpmStrategy = ref<'tiered' | 'sticky_exempt'>('tiered')
@@ -4702,6 +4784,9 @@ function loadQuotaControlSettings(account: Account) {
   sessionLimitEnabled.value = false
   maxSessions.value = null
   sessionIdleTimeout.value = null
+  deviceLimitEnabled.value = false
+  maxDevices.value = null
+  deviceWindowMinutes.value = null
   rpmLimitEnabled.value = false
   baseRpm.value = null
   rpmStrategy.value = 'tiered'
@@ -4736,6 +4821,12 @@ function loadQuotaControlSettings(account: Account) {
     sessionLimitEnabled.value = true
     maxSessions.value = account.max_sessions
     sessionIdleTimeout.value = account.session_idle_timeout_minutes ?? 5
+  }
+
+  if (account.max_devices != null && account.max_devices > 0) {
+    deviceLimitEnabled.value = true
+    maxDevices.value = account.max_devices
+    deviceWindowMinutes.value = account.device_window_minutes ?? DEFAULT_DEVICE_WINDOW_MINUTES
   }
 
   // RPM limit
@@ -5395,6 +5486,18 @@ const handleSubmit = async () => {
       } else {
         delete newExtra.max_sessions
         delete newExtra.session_idle_timeout_minutes
+      }
+
+      // Device limit settings (0 / disabled = no limit)
+      if (deviceLimitEnabled.value && maxDevices.value != null && maxDevices.value > 0) {
+        newExtra.max_devices = Math.floor(maxDevices.value)
+        newExtra.device_window_minutes =
+          deviceWindowMinutes.value != null && deviceWindowMinutes.value > 0
+            ? Math.floor(deviceWindowMinutes.value)
+            : DEFAULT_DEVICE_WINDOW_MINUTES
+      } else {
+        delete newExtra.max_devices
+        delete newExtra.device_window_minutes
       }
 
       // RPM limit settings

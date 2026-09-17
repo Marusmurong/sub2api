@@ -135,9 +135,9 @@ type Group struct {
 	AudioSttPricePerHour         *float64 `json:"audio_stt_price_per_hour"`
 
 	// Claude Code 客户端限制
-	ClaudeCodeOnly  bool   `json:"claude_code_only"`
-	AllowNonClaudeCode bool `json:"allow_non_claude_code"`
-	FallbackGroupID *int64 `json:"fallback_group_id"`
+	ClaudeCodeOnly     bool   `json:"claude_code_only"`
+	AllowNonClaudeCode bool   `json:"allow_non_claude_code"`
+	FallbackGroupID    *int64 `json:"fallback_group_id"`
 	// 无效请求兜底分组
 	FallbackGroupIDOnInvalidRequest *int64 `json:"fallback_group_id_on_invalid_request"`
 
@@ -254,6 +254,11 @@ type Account struct {
 	// 从 extra 字段提取，方便前端显示和编辑
 	MaxSessions           *int `json:"max_sessions,omitempty"`
 	SessionIdleTimeoutMin *int `json:"session_idle_timeout_minutes,omitempty"`
+
+	// 设备数量控制（仅 Anthropic OAuth/SetupToken 账号有效）
+	// 从 extra 字段提取，方便前端显示和编辑
+	MaxDevices          *int `json:"max_devices,omitempty"`
+	DeviceWindowMinutes *int `json:"device_window_minutes,omitempty"`
 
 	// RPM 限制（仅 Anthropic OAuth/SetupToken 账号有效）
 	// 从 extra 字段提取，方便前端显示和编辑
@@ -374,6 +379,8 @@ type AccountListItem struct {
 	WindowCostStickyReserve *float64 `json:"window_cost_sticky_reserve,omitempty"`
 	MaxSessions             *int     `json:"max_sessions,omitempty"`
 	SessionIdleTimeoutMin   *int     `json:"session_idle_timeout_minutes,omitempty"`
+	MaxDevices              *int     `json:"max_devices,omitempty"`
+	DeviceWindowMinutes     *int     `json:"device_window_minutes,omitempty"`
 	BaseRPM                 *int     `json:"base_rpm,omitempty"`
 	RPMStrategy             *string  `json:"rpm_strategy,omitempty"`
 	RPMStickyBuffer         *int     `json:"rpm_sticky_buffer,omitempty"`

@@ -362,6 +362,14 @@ export async function getStats(id: number, days: number = 30): Promise<AccountUs
  * @param id - Account ID
  * @returns Updated account
  */
+/**
+ * 清空账号在设备限制里的全部登记（换机后无需等待窗口过期）
+ */
+export async function clearDevices(id: number): Promise<{ account_id: number; cleared: boolean }> {
+  const { data } = await apiClient.post<{ account_id: number; cleared: boolean }>(`/admin/accounts/${id}/clear-devices`)
+  return data
+}
+
 export async function clearError(id: number): Promise<Account> {
   const { data } = await apiClient.post<Account>(`/admin/accounts/${id}/clear-error`)
   return data
@@ -1089,6 +1097,7 @@ export const accountsAPI = {
   applyOAuthCredentials,
   getStats,
   clearError,
+  clearDevices,
   getUsage,
   getBatchUsage,
   getTodayStats,

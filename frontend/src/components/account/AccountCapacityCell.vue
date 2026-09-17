@@ -21,6 +21,13 @@
       </svg>
     </CapacityBadge>
 
+    <!-- 设备数量限制 -->
+    <CapacityBadge v-if="showDeviceLimit" :color-class="deviceLimitClass" :tooltip="deviceLimitTooltip" :current="activeDevices" :max="account.max_devices!" data-testid="capacity-devices">
+      <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" />
+      </svg>
+    </CapacityBadge>
+
     <!-- RPM 限制 -->
     <CapacityBadge v-if="showRpmLimit" :color-class="rpmClass" :tooltip="rpmTooltip" :current="currentRPM" :max="account.base_rpm!" :suffix="rpmStrategyTag">
       <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
@@ -119,6 +126,35 @@ const sessionLimitTooltip = computed(() => {
   const idle = props.account.session_idle_timeout_minutes || 5
   if (current >= max) return t('admin.accounts.capacity.sessions.full', { idle })
   return t('admin.accounts.capacity.sessions.normal', { idle })
+})
+
+// ====== 设备限制 ======
+const DEFAULT_DEVICE_WINDOW_MINUTES = 360
+
+const showDeviceLimit = computed(() =>
+  isAnthropicOAuthOrSetupToken.value &&
+  props.account.max_devices != null &&
+  props.account.max_devices > 0
+)
+
+const activeDevices = computed(() => props.account.active_devices ?? 0)
+
+const deviceLimitClass = computed(() => {
+  if (!showDeviceLimit.value) return ''
+  const current = activeDevices.value
+  const max = props.account.max_devices || 0
+  if (current >= max) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+  if (current >= max * 0.8) return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+  return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+})
+
+const deviceLimitTooltip = computed(() => {
+  if (!showDeviceLimit.value) return ''
+  const current = activeDevices.value
+  const max = props.account.max_devices || 0
+  const window = props.account.device_window_minutes || DEFAULT_DEVICE_WINDOW_MINUTES
+  if (current >= max) return t('admin.accounts.capacity.devices.full', { window })
+  return t('admin.accounts.capacity.devices.normal', { window })
 })
 
 // ====== RPM ======

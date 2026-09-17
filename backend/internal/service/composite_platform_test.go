@@ -139,6 +139,7 @@ func TestNewGatewayServiceWiresCompositeModelOwnershipResolver(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 		resolver,
 		nil,
 		nil,

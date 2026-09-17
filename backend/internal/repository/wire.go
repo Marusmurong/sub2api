@@ -48,6 +48,12 @@ func ProvideSessionLimitCache(rdb *redis.Client, cfg *config.Config) service.Ses
 	return NewSessionLimitCache(rdb, defaultIdleTimeoutMinutes)
 }
 
+// ProvideDeviceLimitCache 创建设备限制缓存
+// 用于 Anthropic OAuth/SetupToken 账号的窗口内设备数量控制
+func ProvideDeviceLimitCache(rdb *redis.Client) service.DeviceLimitCache {
+	return NewDeviceLimitCache(rdb, service.DefaultDeviceWindowMinutes)
+}
+
 // ProvideSchedulerCache 创建调度快照缓存，并注入快照分块参数。
 func ProvideSchedulerCache(rdb *redis.Client, cfg *config.Config) service.SchedulerCache {
 	mgetChunkSize := defaultSchedulerSnapshotMGetChunkSize
@@ -116,6 +122,7 @@ var ProviderSet = wire.NewSet(
 	NewInternal500CounterCache,
 	ProvideConcurrencyCache,
 	ProvideSessionLimitCache,
+	ProvideDeviceLimitCache,
 	NewRPMCache,
 	NewUserRPMCache,
 	NewUserMsgQueueCache,

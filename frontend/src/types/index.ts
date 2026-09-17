@@ -1253,6 +1253,10 @@ export interface Account {
   max_sessions?: number | null
   session_idle_timeout_minutes?: number | null
 
+  // 设备数量控制（仅 Anthropic OAuth/SetupToken 账号有效）
+  max_devices?: number | null
+  device_window_minutes?: number | null
+
   // RPM 限制（仅 Anthropic OAuth/SetupToken 账号有效）
   base_rpm?: number | null
   rpm_strategy?: string | null
@@ -1296,6 +1300,7 @@ export interface Account {
   // 运行时状态（仅当启用对应限制时返回）
   current_window_cost?: number | null // 当前窗口费用
   active_sessions?: number | null // 当前活跃会话数
+  active_devices?: number | null // 窗口内已登记设备数
   current_rpm?: number | null // 当前分钟 RPM 计数
 
   // 影子账号关系（spark 维度影子）

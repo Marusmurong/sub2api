@@ -802,6 +802,7 @@ type GatewayService struct {
 	concurrencyService         *ConcurrencyService
 	claudeTokenProvider        *ClaudeTokenProvider
 	sessionLimitCache          SessionLimitCache // 会话数量限制缓存（仅 Anthropic OAuth/SetupToken）
+	deviceLimitCache           DeviceLimitCache  // 设备数量限制缓存（仅 Anthropic OAuth/SetupToken）
 	rpmCache                   RPMCache          // RPM 计数缓存（仅 Anthropic OAuth/SetupToken）
 	userGroupRateResolver      *userGroupRateResolver
 	userGroupRateCache         *gocache.Cache
@@ -842,6 +843,7 @@ func NewGatewayService(
 	deferredService *DeferredService,
 	claudeTokenProvider *ClaudeTokenProvider,
 	sessionLimitCache SessionLimitCache,
+	deviceLimitCache DeviceLimitCache,
 	rpmCache RPMCache,
 	digestStore *DigestSessionStore,
 	settingService *SettingService,
@@ -876,6 +878,7 @@ func NewGatewayService(
 		deferredService:       deferredService,
 		claudeTokenProvider:   claudeTokenProvider,
 		sessionLimitCache:     sessionLimitCache,
+		deviceLimitCache:      deviceLimitCache,
 		rpmCache:              rpmCache,
 		userGroupRateCache:    gocache.New(userGroupRateTTL, time.Minute),
 		settingService:        settingService,

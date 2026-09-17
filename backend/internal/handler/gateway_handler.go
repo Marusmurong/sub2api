@@ -338,6 +338,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		sessionKey = "gemini:" + sessionHash
 	}
 
+	// 设备限制上下文：调度栈经 ctx 取设备 ID 并记录本请求新登记的账号，
+	// 请求结束时只释放未服务的新登记（见下方 defer）。无合法设备 ID 时一律放行。
+	deviceReq := service.NewDeviceLimitRequest(parsedReq.MetadataUserID)
+	c.Request = c.Request.WithContext(service.WithDeviceLimitRequest(c.Request.Context(), deviceReq))
+
 	// 查询粘性会话绑定的账号 ID
 	var sessionBoundAccountID int64
 	if sessionKey != "" {
@@ -689,7 +694,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 	// 成功请求保持既有空闲超时语义（会话按最后活动时间过期）。
 	sessionSlotAccounts := make(map[int64]*service.Account)
 	upstreamServedSession := false
+	var servedAccountID int64
 	defer func() {
+		// 设备登记：无条件清理本请求在"最终未服务的账号"上的新登记（失败时 servedAccountID=0 → 全部释放），
+		// 此前已登记的设备不受影响。
+		h.gatewayService.ReleaseUnservedDeviceRegistrations(context.Background(), deviceReq, servedAccountID)
 		if upstreamServedSession {
 			return
 		}
@@ -840,8 +849,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", profitVetoExhaustedMessage, streamStarted)
 					return
 				}
-				// 尝试被否决（从未转发），立即释放该账号的会话注册
+				// 尝试被否决（从未转发），立即释放该账号的会话注册与设备新登记
 				h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionKey)
+				h.gatewayService.ReleaseAccountDeviceRegistration(context.Background(), deviceReq, account.ID)
 				delete(sessionSlotAccounts, account.ID)
 				continue
 			}
@@ -1073,10 +1083,11 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 						currentSubscription = nil
 						fallbackUsed = true
 						retryWithFallback = true
-						// 原分组账号已确定性失败（prompt too long），先释放其会话注册再走兜底分组
+						// 原分组账号已确定性失败（prompt too long），先释放其会话注册与设备新登记再走兜底分组
 						for _, acc := range sessionSlotAccounts {
 							h.gatewayService.ReleaseAccountSession(context.Background(), acc, sessionKey)
 						}
+						h.gatewayService.ReleaseUnservedDeviceRegistrations(context.Background(), deviceReq, 0)
 						sessionSlotAccounts = make(map[int64]*service.Account)
 						break
 					}
@@ -1093,8 +1104,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 					action := fs.HandleFailoverError(c.Request.Context(), h.gatewayService, account.ID, account.Platform, account.GetPoolModeRetryCount(), failoverErr)
 					switch action {
 					case FailoverContinue:
-						// 本次尝试已确定性失败，立即释放该账号的会话注册
+						// 本次尝试已确定性失败，立即释放该账号的会话注册与设备新登记
 						h.gatewayService.ReleaseAccountSession(context.Background(), account, sessionKey)
+						h.gatewayService.ReleaseAccountDeviceRegistration(context.Background(), deviceReq, account.ID)
 						delete(sessionSlotAccounts, account.ID)
 						continue
 					case FailoverExhausted:
@@ -1134,8 +1146,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				// 不会走到这里重复计费。
 				if result != nil {
 					submitForwardUsage(result)
-					// 上游已接受并计量本次会话（流中断），会话槽保持既有语义
+					// 上游已接受并计量本次会话（流中断），会话槽与设备登记保持既有语义
 					upstreamServedSession = true
+					servedAccountID = account.ID
 				}
 				return
 			}
@@ -1161,8 +1174,9 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 			}
 
 			submitForwardUsage(result)
-			// 转发成功，会话槽保持既有空闲超时语义
+			// 转发成功，会话槽与设备登记保持既有空闲超时语义
 			upstreamServedSession = true
+			servedAccountID = account.ID
 			return
 		}
 		if !retryWithFallback {

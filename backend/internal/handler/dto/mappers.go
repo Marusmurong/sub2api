@@ -294,6 +294,11 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		if idleTimeout := a.GetSessionIdleTimeoutMinutes(); idleTimeout > 0 {
 			out.SessionIdleTimeoutMin = &idleTimeout
 		}
+		if maxDevices := a.GetMaxDevices(); maxDevices > 0 {
+			out.MaxDevices = &maxDevices
+			windowMinutes := a.GetDeviceWindowMinutes()
+			out.DeviceWindowMinutes = &windowMinutes
+		}
 		if rpm := a.GetBaseRPM(); rpm > 0 {
 			out.BaseRPM = &rpm
 			strategy := a.GetRPMStrategy()
@@ -470,6 +475,7 @@ func AccountListItemFromAccount(a *Account) *AccountListItem {
 		SessionWindowEnd: a.SessionWindowEnd, SessionWindowStatus: a.SessionWindowStatus,
 		WindowCostLimit: a.WindowCostLimit, WindowCostStickyReserve: a.WindowCostStickyReserve,
 		MaxSessions: a.MaxSessions, SessionIdleTimeoutMin: a.SessionIdleTimeoutMin, BaseRPM: a.BaseRPM,
+		MaxDevices: a.MaxDevices, DeviceWindowMinutes: a.DeviceWindowMinutes,
 		RPMStrategy: a.RPMStrategy, RPMStickyBuffer: a.RPMStickyBuffer, UserMsgQueueMode: a.UserMsgQueueMode,
 		EnableTLSFingerprint: a.EnableTLSFingerprint, TLSFingerprintProfileID: a.TLSFingerprintProfileID,
 		EnableSessionIDMasking: a.EnableSessionIDMasking, CacheTTLOverrideEnabled: a.CacheTTLOverrideEnabled,

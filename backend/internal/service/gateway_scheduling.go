@@ -1468,11 +1468,26 @@ func (s *GatewayService) IncrementAccountRPM(ctx context.Context, accountID int6
 	return err
 }
 
-// checkAndRegisterSession 检查并注册会话，用于会话数量限制
+// checkAndRegisterSession 检查并登记本请求在该账号上的客户端身份：先设备限制，再会话限制。
+// 仅适用于 Anthropic OAuth/SetupToken 账号；两项都未启用时恒为 true。
+// 返回 false 表示该账号对本请求不可选，调用方换下一个账号。
+// 设备登记成功但会话被拒时，撤销本次新登记的设备，避免账号被一个从未服务的设备白占。
+func (s *GatewayService) checkAndRegisterSession(ctx context.Context, account *Account, sessionID string) bool {
+	if !s.checkAndRegisterDevice(ctx, account) {
+		return false
+	}
+	if !s.registerSessionSlot(ctx, account, sessionID) {
+		s.rollbackNewDeviceRegistration(ctx, account)
+		return false
+	}
+	return true
+}
+
+// registerSessionSlot 检查并注册会话，用于会话数量限制
 // 仅适用于 Anthropic OAuth/SetupToken 账号
 // sessionID: 会话标识符（使用粘性会话的 hash）
 // 返回 true 表示允许（在限制内或会话已存在），false 表示拒绝（超出限制且是新会话）
-func (s *GatewayService) checkAndRegisterSession(ctx context.Context, account *Account, sessionID string) bool {
+func (s *GatewayService) registerSessionSlot(ctx context.Context, account *Account, sessionID string) bool {
 	// 只检查 Anthropic OAuth/SetupToken 账号
 	if !account.IsAnthropicOAuthOrSetupToken() {
 		return true

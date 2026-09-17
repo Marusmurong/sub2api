@@ -60,6 +60,7 @@ type AccountHandler struct {
 	concurrencyService      *service.ConcurrencyService
 	crsSyncService          *service.CRSSyncService
 	sessionLimitCache       service.SessionLimitCache
+	deviceLimitCache        service.DeviceLimitCache
 	rpmCache                service.RPMCache
 	tokenCacheInvalidator   service.TokenCacheInvalidator
 	grokImportProber        grokImportProber
@@ -199,6 +200,7 @@ type AccountWithConcurrency struct {
 	// 以下字段仅对 Anthropic OAuth/SetupToken 账号有效，且仅在启用相应功能时返回
 	CurrentWindowCost *float64 `json:"current_window_cost,omitempty"` // 当前窗口费用
 	ActiveSessions    *int     `json:"active_sessions,omitempty"`     // 当前活跃会话数
+	ActiveDevices     *int     `json:"active_devices,omitempty"`      // 窗口内已登记设备数
 	CurrentRPM        *int     `json:"current_rpm,omitempty"`         // 当前分钟 RPM 计数
 }
 
@@ -212,6 +214,7 @@ type AccountListItemWithConcurrency struct {
 	SchedulerScores    []AccountSchedulerGroupScore `json:"scheduler_scores,omitempty"`
 	CurrentWindowCost  *float64                     `json:"current_window_cost,omitempty"`
 	ActiveSessions     *int                         `json:"active_sessions,omitempty"`
+	ActiveDevices      *int                         `json:"active_devices,omitempty"`
 	CurrentRPM         *int                         `json:"current_rpm,omitempty"`
 }
 
@@ -389,6 +392,15 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 			if sessions, err := h.sessionLimitCache.GetActiveSessionCountBatch(ctx, []int64{account.ID}, idleTimeouts); err == nil {
 				if count, ok := sessions[account.ID]; ok {
 					item.ActiveSessions = &count
+				}
+			}
+		}
+
+		if h.deviceLimitCache != nil && account.GetMaxDevices() > 0 {
+			windows := map[int64]time.Duration{account.ID: time.Duration(account.GetDeviceWindowMinutes()) * time.Minute}
+			if devices, err := h.deviceLimitCache.GetActiveDeviceCountBatch(ctx, []int64{account.ID}, windows); err == nil {
+				if count, ok := devices[account.ID]; ok {
+					item.ActiveDevices = &count
 				}
 			}
 		}
@@ -722,6 +734,8 @@ func (h *AccountHandler) List(c *gin.Context) {
 	sessionLimitAccountIDs := make([]int64, 0)
 	rpmAccountIDs := make([]int64, 0)
 	sessionIdleTimeouts := make(map[int64]time.Duration) // 各账号的会话空闲超时配置
+	deviceLimitAccountIDs := make([]int64, 0)
+	deviceWindows := make(map[int64]time.Duration) // 各账号的设备释放窗口配置
 	for i := range accounts {
 		acc := &accounts[i]
 		if acc.IsAnthropicOAuthOrSetupToken() {
@@ -731,6 +745,10 @@ func (h *AccountHandler) List(c *gin.Context) {
 			if acc.GetMaxSessions() > 0 {
 				sessionLimitAccountIDs = append(sessionLimitAccountIDs, acc.ID)
 				sessionIdleTimeouts[acc.ID] = time.Duration(acc.GetSessionIdleTimeoutMinutes()) * time.Minute
+			}
+			if acc.GetMaxDevices() > 0 {
+				deviceLimitAccountIDs = append(deviceLimitAccountIDs, acc.ID)
+				deviceWindows[acc.ID] = time.Duration(acc.GetDeviceWindowMinutes()) * time.Minute
 			}
 			if acc.GetBaseRPM() > 0 {
 				rpmAccountIDs = append(rpmAccountIDs, acc.ID)
@@ -752,6 +770,12 @@ func (h *AccountHandler) List(c *gin.Context) {
 		if activeSessions == nil {
 			activeSessions = make(map[int64]int)
 		}
+	}
+
+	// 始终获取窗口内已登记设备数（Redis ZCARD，低开销）
+	var activeDevices map[int64]int
+	if len(deviceLimitAccountIDs) > 0 && h.deviceLimitCache != nil {
+		activeDevices, _ = h.deviceLimitCache.GetActiveDeviceCountBatch(c.Request.Context(), deviceLimitAccountIDs, deviceWindows)
 	}
 
 	// 始终获取窗口费用（PostgreSQL 聚合查询）
@@ -815,6 +839,13 @@ func (h *AccountHandler) List(c *gin.Context) {
 			}
 		}
 
+		// 添加已登记设备数（仅当启用时）
+		if activeDevices != nil {
+			if count, ok := activeDevices[acc.ID]; ok {
+				item.ActiveDevices = &count
+			}
+		}
+
 		// 添加 RPM 计数（仅当启用时）
 		if rpmCounts != nil {
 			if rpm, ok := rpmCounts[acc.ID]; ok {
@@ -838,6 +869,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 				SchedulerScores:    item.SchedulerScores,
 				CurrentWindowCost:  item.CurrentWindowCost,
 				ActiveSessions:     item.ActiveSessions,
+				ActiveDevices:      item.ActiveDevices,
 				CurrentRPM:         item.CurrentRPM,
 			}
 		}
@@ -1729,6 +1761,30 @@ func (h *AccountHandler) ClearError(c *gin.Context) {
 	}
 
 	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+}
+
+// ClearDevices 清空账号在设备限制里的全部登记，让换机后的新设备无需等待窗口过期即可接入
+// POST /api/v1/admin/accounts/:id/clear-devices
+func (h *AccountHandler) ClearDevices(c *gin.Context) {
+	accountID, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		response.BadRequest(c, "Invalid account ID")
+		return
+	}
+	if _, err := h.adminService.GetAccount(c.Request.Context(), accountID); err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	if h.deviceLimitCache == nil {
+		response.InternalError(c, "Device limit cache unavailable")
+		return
+	}
+	if err := h.deviceLimitCache.ClearDevices(c.Request.Context(), accountID); err != nil {
+		slog.Error("account.clear_devices_failed", "account_id", accountID, "err", err)
+		response.InternalError(c, "Failed to clear devices")
+		return
+	}
+	response.Success(c, gin.H{"account_id": accountID, "cleared": true})
 }
 
 // RevertProxyFallback handles reverting account proxy to original before fallback.

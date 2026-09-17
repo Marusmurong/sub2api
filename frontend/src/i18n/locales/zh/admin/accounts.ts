@@ -238,6 +238,10 @@ export default {
           full: '活跃会话已满，新会话需等待（空闲超时：{idle}分钟）',
           normal: '活跃会话正常（空闲超时：{idle}分钟）'
         },
+        devices: {
+          full: '设备已满，新设备将路由到其他账号（释放时长：{window}分钟）',
+          normal: '已登记设备正常（释放时长：{window}分钟）'
+        },
         rpm: {
           full: '已达 RPM 上限',
           warning: 'RPM 接近上限',
@@ -1006,6 +1010,20 @@ export default {
           idleTimeout: '空闲超时',
           idleTimeoutPlaceholder: '5',
           idleTimeoutHint: '会话空闲超时后自动释放'
+        },
+        deviceLimit: {
+          label: '设备数量控制',
+          hint: '限制窗口内允许接入的客户端设备数（按 Claude Code 设备 ID 计，无设备 ID 的请求不计数）',
+          maxDevices: '最大设备数',
+          maxDevicesPlaceholder: '1',
+          maxDevicesHint: '窗口内允许的设备数，满员后新设备路由到其他账号',
+          windowMinutes: '释放时长',
+          windowMinutesPlaceholder: '360',
+          windowMinutesHint: '设备空闲超过该时长后释放名额',
+          clearDevices: '清空已登记设备',
+          clearDevicesHint: '换机后立即放行新设备，无需等待释放时长',
+          clearDevicesSuccess: '已清空该账号的设备登记',
+          clearDevicesFailed: '清空设备登记失败'
         },
         rpmLimit: {
           label: 'RPM 限制',

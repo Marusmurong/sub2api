@@ -35,6 +35,7 @@ func newGatewayRecordUsageServiceForTest(usageRepo UsageLogRepository, userRepo 
 		nil,
 		nil,
 		&DeferredService{},
+		nil, // claudeTokenProvider
 		nil,
 		nil,
 		nil,

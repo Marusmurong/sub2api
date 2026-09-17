@@ -362,6 +362,10 @@ export default {
           full: 'Active sessions full, new sessions must wait (idle timeout: {idle} min)',
           normal: 'Active sessions normal (idle timeout: {idle} min)'
         },
+        devices: {
+          full: 'Devices full, new devices are routed to other accounts (release window: {window} min)',
+          normal: 'Registered devices normal (release window: {window} min)'
+        },
         rpm: {
           full: 'RPM limit reached',
           warning: 'RPM approaching limit',
@@ -936,6 +940,20 @@ export default {
           idleTimeout: 'Idle Timeout',
           idleTimeoutPlaceholder: '5',
           idleTimeoutHint: 'Sessions will be released after idle timeout'
+        },
+        deviceLimit: {
+          label: 'Device Count Limit',
+          hint: 'Limit how many client devices may use this account within the window (by Claude Code device ID; requests without one are not counted)',
+          maxDevices: 'Max Devices',
+          maxDevicesPlaceholder: '1',
+          maxDevicesHint: 'Devices allowed within the window; new devices are routed elsewhere once full',
+          windowMinutes: 'Release Window',
+          windowMinutesPlaceholder: '360',
+          windowMinutesHint: 'A device slot is released after it stays idle this long',
+          clearDevices: 'Clear registered devices',
+          clearDevicesHint: 'Let a new device in immediately without waiting for the release window',
+          clearDevicesSuccess: 'Registered devices cleared for this account',
+          clearDevicesFailed: 'Failed to clear registered devices'
         },
         rpmLimit: {
           label: 'RPM Limit',
