@@ -3,6 +3,7 @@ package middleware
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -82,6 +83,13 @@ func GroupModelAllowlist() gin.HandlerFunc {
 			return
 		}
 
+		// 被拒的模型名必须进日志：访问日志只有 ingress_reject_reason，排查时看不到客户端
+		// 到底写了什么模型（2026-09-19 一次 [1m] 后缀误拒就是靠猜才定位的）。
+		slog.Info("gateway.model_not_allowed",
+			"model", blocked,
+			"group_id", apiKey.Group.ID,
+			"api_key_id", apiKey.ID,
+			"path", c.FullPath())
 		service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalModelConfiguration)
 		MarkIngressRejected(c, IngressRejectModelNotAllowed)
 		groupModelAllowlistErrorWriter(c)(c, http.StatusNotFound, fmt.Sprintf("Model %q is not available for this group", blocked))

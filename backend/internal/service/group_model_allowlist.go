@@ -145,6 +145,15 @@ func groupModelAllowlistCandidates(model string) []string {
 	add(strings.TrimPrefix(model, "models/"))
 	add(claude.NormalizeModelID(strings.TrimSuffix(model, "-thinking")))
 	add(NormalizeOpenAICompatRequestedModel(model))
+	// Claude Code 的 [1m] 是客户端上下文选择器（settings.model = "opus[1m]" 等），
+	// 不是另一个模型；网关转发前会剥掉它（normalizeClaudeCodeLongContextModel）。
+	// 白名单准入发生在那之前，必须按同一规则归一化，否则「白名单里有 claude-x、
+	// 客户端开了 1M 上下文」这种最常见的组合会在入口被 404 掉。
+	if base := normalizeClaudeCodeLongContextModel(model); base != model {
+		add(base)
+		add(claude.NormalizeModelID(strings.TrimSuffix(base, "-thinking")))
+		add(NormalizeOpenAICompatRequestedModel(base))
+	}
 	return candidates
 }
 

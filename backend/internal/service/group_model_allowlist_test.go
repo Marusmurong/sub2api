@@ -100,6 +100,12 @@ func TestGroupModelAllowlistAllows(t *testing.T) {
 		{name: "case-insensitive entry match", model: "Claude-Sonnet-4.5", want: true},
 		{name: "not listed", model: "claude-opus-4.6", want: false},
 		{name: "thinking suffix tolerated via claude normalization", model: "claude-sonnet-4.5-thinking", want: true},
+		// Claude Code 1M 上下文选择器：settings.model = "opus[1m]" 会让请求模型带 [1m] 后缀，
+		// 白名单按去掉后缀的公开模型名准入（生产实测：分组开白名单后所有 1M 客户端入口 404）。
+		{name: "claude code [1m] suffix stripped", model: "claude-sonnet-4.5[1m]", want: true},
+		{name: "claude code duplicated [1m] suffix stripped", model: "claude-sonnet-4.5[1m][1m]", want: true},
+		{name: "claude code [1m] with thinking suffix", model: "claude-sonnet-4.5-thinking[1m]", want: true},
+		{name: "claude code [1m] on unlisted model still rejected", model: "claude-opus-4.6[1m]", want: false},
 		{name: "gemini models/ prefix stripped", model: "models/gemini-2.5-pro", want: true},
 		{name: "gemini models/ prefix not in list", model: "models/gemini-2.5-flash", want: false},
 		{name: "openai reasoning suffix normalizes to base model", model: "gpt-5.5-codex-high", want: true},
