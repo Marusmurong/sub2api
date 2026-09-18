@@ -19,43 +19,55 @@ const (
 	testSessionUUID = "3e938e51-c7b0-43ab-90f4-253c7503bc5e"
 )
 
+type unregisterCall struct {
+	device string
+	daily  bool
+}
+
 // deviceLimitCacheStub 记录调用并按配置返回，用于验证调度侧设备限制逻辑。
 type deviceLimitCacheStub struct {
 	mu           sync.Mutex
-	allowed      bool
-	isNew        bool
+	reg          DeviceRegistration
 	registerErr  error
 	registered   []int64
-	unregistered map[int64][]string
+	lastLimits   map[int64]DeviceLimits
+	unregistered map[int64][]unregisterCall
 	affinity     map[int64]struct{} // ActiveDeviceAccounts 返回的"已登记本设备"账号
 }
 
 func newDeviceLimitCacheStub(allowed, isNew bool) *deviceLimitCacheStub {
-	return &deviceLimitCacheStub{allowed: allowed, isNew: isNew, unregistered: map[int64][]string{}, affinity: map[int64]struct{}{}}
+	return &deviceLimitCacheStub{
+		reg:          DeviceRegistration{Allowed: allowed, IsNew: isNew},
+		lastLimits:   map[int64]DeviceLimits{},
+		unregistered: map[int64][]unregisterCall{},
+		affinity:     map[int64]struct{}{},
+	}
 }
 
-func (s *deviceLimitCacheStub) RegisterDevice(_ context.Context, accountID int64, _ string, _ int, _ time.Duration) (bool, bool, error) {
+func (s *deviceLimitCacheStub) RegisterDevice(_ context.Context, accountID int64, _ string, limits DeviceLimits) (DeviceRegistration, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.registered = append(s.registered, accountID)
+	s.lastLimits[accountID] = limits
 	if s.registerErr != nil {
-		return false, false, s.registerErr
+		return DeviceRegistration{}, s.registerErr
 	}
-	return s.allowed, s.isNew, nil
+	return s.reg, nil
 }
 
-func (s *deviceLimitCacheStub) UnregisterDevice(_ context.Context, accountID int64, deviceID string) error {
+func (s *deviceLimitCacheStub) UnregisterDevice(_ context.Context, accountID int64, deviceID string, daily bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.unregistered[accountID] = append(s.unregistered[accountID], deviceID)
+	s.unregistered[accountID] = append(s.unregistered[accountID], unregisterCall{device: deviceID, daily: daily})
 	return nil
 }
 
-func (s *deviceLimitCacheStub) GetActiveDeviceCountBatch(context.Context, []int64, map[int64]time.Duration) (map[int64]int, error) {
-	return map[int64]int{}, nil
+func (s *deviceLimitCacheStub) GetDeviceCountsBatch(context.Context, []int64, map[int64]time.Duration) (map[int64]DeviceCounts, error) {
+	return map[int64]DeviceCounts{}, nil
 }
 
-func (s *deviceLimitCacheStub) ClearDevices(context.Context, int64) error { return nil }
+func (s *deviceLimitCacheStub) ClearDevices(context.Context, int64) error      { return nil }
+func (s *deviceLimitCacheStub) ClearDailyDevices(context.Context, int64) error { return nil }
 
 func (s *deviceLimitCacheStub) ActiveDeviceAccounts(_ context.Context, _ string, accountIDs []int64, _ map[int64]time.Duration) (map[int64]struct{}, error) {
 	s.mu.Lock()
@@ -122,30 +134,45 @@ func TestExtractDeviceLimitID(t *testing.T) {
 func TestAccountDeviceLimitGetters(t *testing.T) {
 	var nilAcc *Account
 	require.Equal(t, 0, nilAcc.GetMaxDevices())
+	require.Equal(t, 0, nilAcc.GetMaxDevicesDaily())
 	require.Equal(t, DefaultDeviceWindowMinutes, nilAcc.GetDeviceWindowMinutes())
 
 	cases := []struct {
 		name       string
 		extra      map[string]any
 		wantMax    int
+		wantDaily  int
 		wantWindow int
 	}{
-		{"nil_extra", nil, 0, DefaultDeviceWindowMinutes},
-		{"unset", map[string]any{}, 0, DefaultDeviceWindowMinutes},
-		{"int_values", map[string]any{"max_devices": 2, "device_window_minutes": 60}, 2, 60},
-		{"json_float_values", map[string]any{"max_devices": float64(3), "device_window_minutes": float64(120)}, 3, 120},
-		{"string_values", map[string]any{"max_devices": "1", "device_window_minutes": "30"}, 1, 30},
-		{"negative_max_disabled", map[string]any{"max_devices": -1}, 0, DefaultDeviceWindowMinutes},
-		{"zero_window_falls_back", map[string]any{"max_devices": 1, "device_window_minutes": 0}, 1, DefaultDeviceWindowMinutes},
-		{"garbage_window_falls_back", map[string]any{"max_devices": 1, "device_window_minutes": "abc"}, 1, DefaultDeviceWindowMinutes},
+		{"nil_extra", nil, 0, 0, DefaultDeviceWindowMinutes},
+		{"unset", map[string]any{}, 0, 0, DefaultDeviceWindowMinutes},
+		{"int_values", map[string]any{"max_devices": 2, "device_window_minutes": 60, "max_devices_daily": 3}, 2, 3, 60},
+		{"json_float_values", map[string]any{"max_devices": float64(3), "device_window_minutes": float64(120), "max_devices_daily": float64(5)}, 3, 5, 120},
+		{"string_values", map[string]any{"max_devices": "1", "device_window_minutes": "30", "max_devices_daily": "2"}, 1, 2, 30},
+		{"negative_disabled", map[string]any{"max_devices": -1, "max_devices_daily": -2}, 0, 0, DefaultDeviceWindowMinutes},
+		{"daily_only", map[string]any{"max_devices_daily": 3}, 0, 3, DefaultDeviceWindowMinutes},
+		{"zero_window_falls_back", map[string]any{"max_devices": 1, "device_window_minutes": 0}, 1, 0, DefaultDeviceWindowMinutes},
+		{"garbage_window_falls_back", map[string]any{"max_devices": 1, "device_window_minutes": "abc"}, 1, 0, DefaultDeviceWindowMinutes},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			acc := &Account{Extra: tc.extra}
 			require.Equal(t, tc.wantMax, acc.GetMaxDevices())
+			require.Equal(t, tc.wantDaily, acc.GetMaxDevicesDaily())
 			require.Equal(t, tc.wantWindow, acc.GetDeviceWindowMinutes())
 		})
 	}
+}
+
+func TestIsDeviceLimitApplicable(t *testing.T) {
+	oauth := func(extra map[string]any) *Account {
+		return &Account{Platform: PlatformAnthropic, Type: AccountTypeOAuth, Extra: extra}
+	}
+	require.False(t, isDeviceLimitApplicable(nil))
+	require.False(t, isDeviceLimitApplicable(oauth(nil)))
+	require.True(t, isDeviceLimitApplicable(oauth(map[string]any{"max_devices": 1})))
+	require.True(t, isDeviceLimitApplicable(oauth(map[string]any{"max_devices_daily": 3})), "只设 24h 上限也应生效")
+	require.False(t, isDeviceLimitApplicable(&Account{Platform: PlatformAnthropic, Type: AccountTypeAPIKey, Extra: map[string]any{"max_devices_daily": 3}}))
 }
 
 func TestCheckAndRegisterDevice_PassThroughWithoutTouchingCache(t *testing.T) {
@@ -182,14 +209,31 @@ func TestCheckAndRegisterDevice_PassThroughWithoutTouchingCache(t *testing.T) {
 	})
 }
 
-func TestCheckAndRegisterDevice_RejectsNewDeviceWhenFull(t *testing.T) {
-	ctx, req := ctxWithDevice(t, testDeviceHex)
-	cache := newDeviceLimitCacheStub(false, false)
+func TestCheckAndRegisterDevice_PassesBothLayersToCache(t *testing.T) {
+	ctx, _ := ctxWithDevice(t, testDeviceHex)
+	cache := newDeviceLimitCacheStub(true, true)
 	svc := &GatewayService{deviceLimitCache: cache}
+	acc := newDeviceLimitTestAccount(1)
+	acc.Extra["device_window_minutes"] = 180
+	acc.Extra["max_devices_daily"] = 3
 
-	require.False(t, svc.checkAndRegisterDevice(ctx, newDeviceLimitTestAccount(1)))
-	require.Equal(t, []int64{42}, cache.registered)
-	require.Empty(t, req.NewlyRegisteredAccountIDs())
+	require.True(t, svc.checkAndRegisterDevice(ctx, acc))
+	require.Equal(t, DeviceLimits{MaxDevices: 1, Window: 3 * time.Hour, MaxDaily: 3, DailyWindow: DeviceDailyWindow}, cache.lastLimits[42])
+}
+
+func TestCheckAndRegisterDevice_RejectsWhenFull(t *testing.T) {
+	for _, reason := range []string{"concurrent", "daily"} {
+		t.Run(reason, func(t *testing.T) {
+			ctx, req := ctxWithDevice(t, testDeviceHex)
+			cache := newDeviceLimitCacheStub(false, false)
+			cache.reg.Reason = reason
+			svc := &GatewayService{deviceLimitCache: cache}
+
+			require.False(t, svc.checkAndRegisterDevice(ctx, newDeviceLimitTestAccount(1)))
+			require.Equal(t, []int64{42}, cache.registered)
+			require.Empty(t, req.NewlyRegisteredAccountIDs())
+		})
+	}
 }
 
 func TestCheckAndRegisterDevice_FailOpenOnCacheError(t *testing.T) {
@@ -215,12 +259,21 @@ func TestCheckAndRegisterDevice_TracksOnlyNewRegistrations(t *testing.T) {
 		require.True(t, svc.checkAndRegisterDevice(ctx, newDeviceLimitTestAccount(1)))
 		require.Empty(t, req.NewlyRegisteredAccountIDs())
 	})
+	t.Run("existing_slot_but_new_daily_tracked", func(t *testing.T) {
+		ctx, req := ctxWithDevice(t, testDeviceHex)
+		cache := newDeviceLimitCacheStub(true, false)
+		cache.reg.IsNewDaily = true
+		svc := &GatewayService{deviceLimitCache: cache}
+		require.True(t, svc.checkAndRegisterDevice(ctx, newDeviceLimitTestAccount(1)))
+		require.Equal(t, []int64{42}, req.NewlyRegisteredAccountIDs())
+	})
 }
 
 // 设备登记成功但会话被拒：必须撤销本次新登记的设备，否则账号被一个从未服务的设备白占整个窗口。
 func TestCheckAndRegisterSession_RollsBackNewDeviceWhenSessionRejected(t *testing.T) {
 	ctx, req := ctxWithDevice(t, testDeviceHex)
 	deviceCache := newDeviceLimitCacheStub(true, true)
+	deviceCache.reg.IsNewDaily = true
 	svc := &GatewayService{
 		deviceLimitCache:  deviceCache,
 		sessionLimitCache: &sessionRegisterStub{allowed: false},
@@ -229,7 +282,7 @@ func TestCheckAndRegisterSession_RollsBackNewDeviceWhenSessionRejected(t *testin
 	acc.Extra["max_sessions"] = 1
 
 	require.False(t, svc.checkAndRegisterSession(ctx, acc, "session-hash"))
-	require.Equal(t, []string{testDeviceLower}, deviceCache.unregistered[42], "新登记的设备应被撤销")
+	require.Equal(t, []unregisterCall{{device: testDeviceLower, daily: true}}, deviceCache.unregistered[42], "新登记的设备与 24h 额度都应撤销")
 	require.Empty(t, req.NewlyRegisteredAccountIDs())
 }
 
@@ -278,6 +331,7 @@ func TestCheckAndRegisterSession_BothPass(t *testing.T) {
 func TestReleaseUnservedDeviceRegistrations_ReleasesOnlyUnservedNewOnes(t *testing.T) {
 	ctx, req := ctxWithDevice(t, testDeviceHex)
 	cache := newDeviceLimitCacheStub(true, true)
+	cache.reg.IsNewDaily = true
 	svc := &GatewayService{deviceLimitCache: cache}
 	for _, id := range []int64{1, 2, 3} {
 		acc := newDeviceLimitTestAccount(1)
@@ -293,6 +347,7 @@ func TestReleaseUnservedDeviceRegistrations_ReleasesOnlyUnservedNewOnes(t *testi
 	}
 	sort.Slice(released, func(i, j int) bool { return released[i] < released[j] })
 	require.Equal(t, []int64{1, 3}, released, "只释放未服务的账号")
+	require.True(t, cache.unregistered[1][0].daily, "新计入的 24h 额度一并退回")
 	require.Equal(t, []int64{2}, req.NewlyRegisteredAccountIDs(), "服务中的账号保留登记")
 
 	// 幂等：再次调用不重复释放
@@ -316,7 +371,7 @@ func TestReleaseAccountDeviceRegistration_OnlyNewAndIdempotent(t *testing.T) {
 	svc.ReleaseAccountDeviceRegistration(context.Background(), req, 42)
 	svc.ReleaseAccountDeviceRegistration(context.Background(), req, 99)
 
-	require.Equal(t, []string{testDeviceLower}, cache.unregistered[42])
+	require.Equal(t, []unregisterCall{{device: testDeviceLower, daily: false}}, cache.unregistered[42])
 	require.Empty(t, cache.unregistered[99])
 }
 

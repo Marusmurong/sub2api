@@ -96,4 +96,37 @@ describe('AccountCapacityCell device limit badge', () => {
     })
     expect(devicesBadge(wrapper).classes()).toContain('bg-yellow-100')
   })
+
+  it('shows the 24h usage as a suffix and in the tooltip when both layers are set', () => {
+    const wrapper = mount(AccountCapacityCell, {
+      props: { account: makeAccount({ max_devices: 1, device_window_minutes: 180, active_devices: 0, max_devices_daily: 3, active_devices_daily: 2 }) }
+    })
+    const badge = devicesBadge(wrapper)
+    expect(badge.text()).toContain('[24h 2/3]')
+    expect(badge.attributes('title')).toBe(
+      'admin.accounts.capacity.devices.normal:{"window":180}\nadmin.accounts.capacity.devices.daily:{"used":2,"max":3}'
+    )
+    expect(badge.classes()).toContain('bg-emerald-100')
+  })
+
+  it('turns red when the 24h quota is full even if concurrent slots are free', () => {
+    const wrapper = mount(AccountCapacityCell, {
+      props: { account: makeAccount({ max_devices: 1, active_devices: 0, max_devices_daily: 3, active_devices_daily: 3 }) }
+    })
+    const badge = devicesBadge(wrapper)
+    expect(badge.classes()).toContain('bg-red-100')
+    expect(badge.attributes('title')).toContain('admin.accounts.capacity.devices.dailyFull:{"used":3,"max":3}')
+  })
+
+  it('shows only the 24h layer when max_devices is unset', () => {
+    const wrapper = mount(AccountCapacityCell, {
+      props: { account: makeAccount({ max_devices_daily: 3, active_devices_daily: 1 }) }
+    })
+    const badge = devicesBadge(wrapper)
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toContain('1')
+    expect(badge.text()).toContain('3')
+    expect(badge.text()).toContain('[24h]')
+    expect(badge.attributes('title')).toBe('admin.accounts.capacity.devices.daily:{"used":1,"max":3}')
+  })
 })

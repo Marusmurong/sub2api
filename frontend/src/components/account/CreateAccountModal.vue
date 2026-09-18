@@ -2801,6 +2801,18 @@
               </div>
               <p class="input-hint">{{ t('admin.accounts.quotaControl.deviceLimit.windowMinutesHint') }}</p>
             </div>
+            <div>
+              <label class="input-label">{{ t('admin.accounts.quotaControl.deviceLimit.maxDaily') }}</label>
+              <input
+                v-model.number="maxDevicesDaily"
+                type="number"
+                min="0"
+                step="1"
+                class="input"
+                :placeholder="t('admin.accounts.quotaControl.deviceLimit.maxDailyPlaceholder')"
+              />
+              <p class="input-hint">{{ t('admin.accounts.quotaControl.deviceLimit.maxDailyHint') }}</p>
+            </div>
           </div>
         </div>
 
@@ -4654,14 +4666,21 @@ const DEFAULT_DEVICE_WINDOW_MINUTES = 360
 const deviceLimitEnabled = ref(false)
 const maxDevices = ref<number | null>(null)
 const deviceWindowMinutes = ref<number | null>(null)
+const maxDevicesDaily = ref<number | null>(null)
 
+// Two independent layers; a blank / 0 value leaves that layer unlimited.
 const appendDeviceLimitExtra = (extra: Record<string, unknown>) => {
-  if (!deviceLimitEnabled.value || maxDevices.value == null || maxDevices.value <= 0) return
-  extra.max_devices = Math.floor(maxDevices.value)
-  extra.device_window_minutes =
-    deviceWindowMinutes.value != null && deviceWindowMinutes.value > 0
-      ? Math.floor(deviceWindowMinutes.value)
-      : DEFAULT_DEVICE_WINDOW_MINUTES
+  if (!deviceLimitEnabled.value) return
+  if (maxDevices.value != null && maxDevices.value > 0) {
+    extra.max_devices = Math.floor(maxDevices.value)
+    extra.device_window_minutes =
+      deviceWindowMinutes.value != null && deviceWindowMinutes.value > 0
+        ? Math.floor(deviceWindowMinutes.value)
+        : DEFAULT_DEVICE_WINDOW_MINUTES
+  }
+  if (maxDevicesDaily.value != null && maxDevicesDaily.value > 0) {
+    extra.max_devices_daily = Math.floor(maxDevicesDaily.value)
+  }
 }
 const rpmLimitEnabled = ref(false)
 const baseRpm = ref<number | null>(null)
@@ -5443,6 +5462,7 @@ const resetForm = () => {
   deviceLimitEnabled.value = false
   maxDevices.value = null
   deviceWindowMinutes.value = null
+  maxDevicesDaily.value = null
   rpmLimitEnabled.value = false
   baseRpm.value = null
   rpmStrategy.value = 'tiered'

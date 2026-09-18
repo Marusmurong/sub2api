@@ -22,7 +22,7 @@
     </CapacityBadge>
 
     <!-- 设备数量限制 -->
-    <CapacityBadge v-if="showDeviceLimit" :color-class="deviceLimitClass" :tooltip="deviceLimitTooltip" :current="activeDevices" :max="account.max_devices!" data-testid="capacity-devices">
+    <CapacityBadge v-if="showDeviceLimit" :color-class="deviceLimitClass" :tooltip="deviceLimitTooltip" :current="deviceBadgeCurrent" :max="deviceBadgeMax" :suffix="deviceBadgeSuffix" data-testid="capacity-devices">
       <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25A2.25 2.25 0 015.25 3h13.5A2.25 2.25 0 0121 5.25z" />
       </svg>
@@ -131,30 +131,51 @@ const sessionLimitTooltip = computed(() => {
 // ====== 设备限制 ======
 const DEFAULT_DEVICE_WINDOW_MINUTES = 360
 
+// 两层各自独立：并发名额（max_devices + 释放时长）与滚动 24 小时接纳数（max_devices_daily）。
+const maxDevices = computed(() => props.account.max_devices ?? 0)
+const maxDevicesDaily = computed(() => props.account.max_devices_daily ?? 0)
+const hasConcurrentLimit = computed(() => maxDevices.value > 0)
+const hasDailyLimit = computed(() => maxDevicesDaily.value > 0)
+
 const showDeviceLimit = computed(() =>
-  isAnthropicOAuthOrSetupToken.value &&
-  props.account.max_devices != null &&
-  props.account.max_devices > 0
+  isAnthropicOAuthOrSetupToken.value && (hasConcurrentLimit.value || hasDailyLimit.value)
 )
 
 const activeDevices = computed(() => props.account.active_devices ?? 0)
+const activeDevicesDaily = computed(() => props.account.active_devices_daily ?? 0)
+
+const isConcurrentFull = computed(() => hasConcurrentLimit.value && activeDevices.value >= maxDevices.value)
+const isDailyFull = computed(() => hasDailyLimit.value && activeDevicesDaily.value >= maxDevicesDaily.value)
+const isConcurrentWarning = computed(() => hasConcurrentLimit.value && activeDevices.value >= maxDevices.value * 0.8)
+const isDailyWarning = computed(() => hasDailyLimit.value && activeDevicesDaily.value >= maxDevicesDaily.value * 0.8)
+
+// 徽章主数字：设了并发上限就显示名额用量，只设 24 小时上限时显示 24 小时用量
+const deviceBadgeCurrent = computed(() => (hasConcurrentLimit.value ? activeDevices.value : activeDevicesDaily.value))
+const deviceBadgeMax = computed(() => (hasConcurrentLimit.value ? maxDevices.value : maxDevicesDaily.value))
+const deviceBadgeSuffix = computed(() => {
+  if (!hasConcurrentLimit.value || !hasDailyLimit.value) return hasDailyLimit.value && !hasConcurrentLimit.value ? '[24h]' : undefined
+  return `[24h ${activeDevicesDaily.value}/${maxDevicesDaily.value}]`
+})
 
 const deviceLimitClass = computed(() => {
   if (!showDeviceLimit.value) return ''
-  const current = activeDevices.value
-  const max = props.account.max_devices || 0
-  if (current >= max) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-  if (current >= max * 0.8) return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+  if (isConcurrentFull.value || isDailyFull.value) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+  if (isConcurrentWarning.value || isDailyWarning.value) return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
   return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
 })
 
 const deviceLimitTooltip = computed(() => {
   if (!showDeviceLimit.value) return ''
-  const current = activeDevices.value
-  const max = props.account.max_devices || 0
-  const window = props.account.device_window_minutes || DEFAULT_DEVICE_WINDOW_MINUTES
-  if (current >= max) return t('admin.accounts.capacity.devices.full', { window })
-  return t('admin.accounts.capacity.devices.normal', { window })
+  const lines: string[] = []
+  if (hasConcurrentLimit.value) {
+    const window = props.account.device_window_minutes || DEFAULT_DEVICE_WINDOW_MINUTES
+    lines.push(t(isConcurrentFull.value ? 'admin.accounts.capacity.devices.full' : 'admin.accounts.capacity.devices.normal', { window }))
+  }
+  if (hasDailyLimit.value) {
+    const params = { used: activeDevicesDaily.value, max: maxDevicesDaily.value }
+    lines.push(t(isDailyFull.value ? 'admin.accounts.capacity.devices.dailyFull' : 'admin.accounts.capacity.devices.daily', params))
+  }
+  return lines.join('\n')
 })
 
 // ====== RPM ======

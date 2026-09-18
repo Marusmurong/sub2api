@@ -2694,6 +2694,18 @@
               </div>
               <p class="input-hint">{{ t('admin.accounts.quotaControl.deviceLimit.windowMinutesHint') }}</p>
             </div>
+            <div>
+              <label class="input-label">{{ t('admin.accounts.quotaControl.deviceLimit.maxDaily') }}</label>
+              <input
+                v-model.number="maxDevicesDaily"
+                type="number"
+                min="0"
+                step="1"
+                class="input"
+                :placeholder="t('admin.accounts.quotaControl.deviceLimit.maxDailyPlaceholder')"
+              />
+              <p class="input-hint">{{ t('admin.accounts.quotaControl.deviceLimit.maxDailyHint') }}</p>
+            </div>
           </div>
 
           <div v-if="deviceLimitEnabled && props.account" class="mt-3 flex items-center justify-between gap-3">
@@ -3559,6 +3571,7 @@ const DEFAULT_DEVICE_WINDOW_MINUTES = 360
 const deviceLimitEnabled = ref(false)
 const maxDevices = ref<number | null>(null)
 const deviceWindowMinutes = ref<number | null>(null)
+const maxDevicesDaily = ref<number | null>(null)
 const clearingDevices = ref(false)
 
 const clearRegisteredDevices = async () => {
@@ -4787,6 +4800,7 @@ function loadQuotaControlSettings(account: Account) {
   deviceLimitEnabled.value = false
   maxDevices.value = null
   deviceWindowMinutes.value = null
+  maxDevicesDaily.value = null
   rpmLimitEnabled.value = false
   baseRpm.value = null
   rpmStrategy.value = 'tiered'
@@ -4823,10 +4837,13 @@ function loadQuotaControlSettings(account: Account) {
     sessionIdleTimeout.value = account.session_idle_timeout_minutes ?? 5
   }
 
-  if (account.max_devices != null && account.max_devices > 0) {
+  const hasMaxDevices = account.max_devices != null && account.max_devices > 0
+  const hasMaxDevicesDaily = account.max_devices_daily != null && account.max_devices_daily > 0
+  if (hasMaxDevices || hasMaxDevicesDaily) {
     deviceLimitEnabled.value = true
-    maxDevices.value = account.max_devices
-    deviceWindowMinutes.value = account.device_window_minutes ?? DEFAULT_DEVICE_WINDOW_MINUTES
+    maxDevices.value = hasMaxDevices ? account.max_devices! : null
+    deviceWindowMinutes.value = hasMaxDevices ? (account.device_window_minutes ?? DEFAULT_DEVICE_WINDOW_MINUTES) : null
+    maxDevicesDaily.value = hasMaxDevicesDaily ? account.max_devices_daily! : null
   }
 
   // RPM limit
@@ -5488,9 +5505,11 @@ const handleSubmit = async () => {
         delete newExtra.session_idle_timeout_minutes
       }
 
-      // Device limit settings (0 / disabled = no limit)
-      if (deviceLimitEnabled.value && maxDevices.value != null && maxDevices.value > 0) {
-        newExtra.max_devices = Math.floor(maxDevices.value)
+      // Device limit settings: two independent layers, 0 / blank / disabled = no limit for that layer
+      const wantMaxDevices = deviceLimitEnabled.value && maxDevices.value != null && maxDevices.value > 0
+      const wantMaxDevicesDaily = deviceLimitEnabled.value && maxDevicesDaily.value != null && maxDevicesDaily.value > 0
+      if (wantMaxDevices) {
+        newExtra.max_devices = Math.floor(maxDevices.value!)
         newExtra.device_window_minutes =
           deviceWindowMinutes.value != null && deviceWindowMinutes.value > 0
             ? Math.floor(deviceWindowMinutes.value)
@@ -5498,6 +5517,11 @@ const handleSubmit = async () => {
       } else {
         delete newExtra.max_devices
         delete newExtra.device_window_minutes
+      }
+      if (wantMaxDevicesDaily) {
+        newExtra.max_devices_daily = Math.floor(maxDevicesDaily.value!)
+      } else {
+        delete newExtra.max_devices_daily
       }
 
       // RPM limit settings

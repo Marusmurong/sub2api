@@ -364,7 +364,9 @@ export default {
         },
         devices: {
           full: 'Devices full, new devices are routed to other accounts (release window: {window} min)',
-          normal: 'Registered devices normal (release window: {window} min)'
+          normal: 'Registered devices normal (release window: {window} min)',
+          daily: '24h accepted {used} / {max} devices',
+          dailyFull: '24h device quota full ({used} / {max}), new devices are routed to other accounts'
         },
         rpm: {
           full: 'RPM limit reached',
@@ -950,6 +952,9 @@ export default {
           windowMinutes: 'Release Window',
           windowMinutesPlaceholder: '360',
           windowMinutesHint: 'A device slot is released after it stays idle this long',
+          maxDaily: 'Max devices per 24h',
+          maxDailyPlaceholder: '0',
+          maxDailyHint: 'Distinct devices accepted within a rolling 24h window; 0 = unlimited. Changing it restarts the count',
           clearDevices: 'Clear registered devices',
           clearDevicesHint: 'Let a new device in immediately without waiting for the release window',
           clearDevicesSuccess: 'Registered devices cleared for this account',

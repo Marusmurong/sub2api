@@ -198,10 +198,11 @@ type AccountWithConcurrency struct {
 	SchedulerScore     *AccountSchedulerScore       `json:"scheduler_score,omitempty"`
 	SchedulerScores    []AccountSchedulerGroupScore `json:"scheduler_scores,omitempty"`
 	// 以下字段仅对 Anthropic OAuth/SetupToken 账号有效，且仅在启用相应功能时返回
-	CurrentWindowCost *float64 `json:"current_window_cost,omitempty"` // 当前窗口费用
-	ActiveSessions    *int     `json:"active_sessions,omitempty"`     // 当前活跃会话数
-	ActiveDevices     *int     `json:"active_devices,omitempty"`      // 窗口内已登记设备数
-	CurrentRPM        *int     `json:"current_rpm,omitempty"`         // 当前分钟 RPM 计数
+	CurrentWindowCost  *float64 `json:"current_window_cost,omitempty"`  // 当前窗口费用
+	ActiveSessions     *int     `json:"active_sessions,omitempty"`      // 当前活跃会话数
+	ActiveDevices      *int     `json:"active_devices,omitempty"`       // 窗口内已登记设备数
+	ActiveDevicesDaily *int     `json:"active_devices_daily,omitempty"` // 24 小时内接纳过的设备数
+	CurrentRPM         *int     `json:"current_rpm,omitempty"`          // 当前分钟 RPM 计数
 }
 
 // AccountListItemWithConcurrency is the compact account-list envelope used
@@ -215,6 +216,7 @@ type AccountListItemWithConcurrency struct {
 	CurrentWindowCost  *float64                     `json:"current_window_cost,omitempty"`
 	ActiveSessions     *int                         `json:"active_sessions,omitempty"`
 	ActiveDevices      *int                         `json:"active_devices,omitempty"`
+	ActiveDevicesDaily *int                         `json:"active_devices_daily,omitempty"`
 	CurrentRPM         *int                         `json:"current_rpm,omitempty"`
 }
 
@@ -396,11 +398,13 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 			}
 		}
 
-		if h.deviceLimitCache != nil && account.GetMaxDevices() > 0 {
+		if h.deviceLimitCache != nil && (account.GetMaxDevices() > 0 || account.GetMaxDevicesDaily() > 0) {
 			windows := map[int64]time.Duration{account.ID: time.Duration(account.GetDeviceWindowMinutes()) * time.Minute}
-			if devices, err := h.deviceLimitCache.GetActiveDeviceCountBatch(ctx, []int64{account.ID}, windows); err == nil {
-				if count, ok := devices[account.ID]; ok {
-					item.ActiveDevices = &count
+			if devices, err := h.deviceLimitCache.GetDeviceCountsBatch(ctx, []int64{account.ID}, windows); err == nil {
+				if counts, ok := devices[account.ID]; ok {
+					active, daily := counts.Active, counts.Daily
+					item.ActiveDevices = &active
+					item.ActiveDevicesDaily = &daily
 				}
 			}
 		}
@@ -746,7 +750,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 				sessionLimitAccountIDs = append(sessionLimitAccountIDs, acc.ID)
 				sessionIdleTimeouts[acc.ID] = time.Duration(acc.GetSessionIdleTimeoutMinutes()) * time.Minute
 			}
-			if acc.GetMaxDevices() > 0 {
+			if acc.GetMaxDevices() > 0 || acc.GetMaxDevicesDaily() > 0 {
 				deviceLimitAccountIDs = append(deviceLimitAccountIDs, acc.ID)
 				deviceWindows[acc.ID] = time.Duration(acc.GetDeviceWindowMinutes()) * time.Minute
 			}
@@ -773,9 +777,9 @@ func (h *AccountHandler) List(c *gin.Context) {
 	}
 
 	// 始终获取窗口内已登记设备数（Redis ZCARD，低开销）
-	var activeDevices map[int64]int
+	var activeDevices map[int64]service.DeviceCounts
 	if len(deviceLimitAccountIDs) > 0 && h.deviceLimitCache != nil {
-		activeDevices, _ = h.deviceLimitCache.GetActiveDeviceCountBatch(c.Request.Context(), deviceLimitAccountIDs, deviceWindows)
+		activeDevices, _ = h.deviceLimitCache.GetDeviceCountsBatch(c.Request.Context(), deviceLimitAccountIDs, deviceWindows)
 	}
 
 	// 始终获取窗口费用（PostgreSQL 聚合查询）
@@ -841,8 +845,10 @@ func (h *AccountHandler) List(c *gin.Context) {
 
 		// 添加已登记设备数（仅当启用时）
 		if activeDevices != nil {
-			if count, ok := activeDevices[acc.ID]; ok {
-				item.ActiveDevices = &count
+			if counts, ok := activeDevices[acc.ID]; ok {
+				active, daily := counts.Active, counts.Daily
+				item.ActiveDevices = &active
+				item.ActiveDevicesDaily = &daily
 			}
 		}
 
@@ -870,6 +876,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 				CurrentWindowCost:  item.CurrentWindowCost,
 				ActiveSessions:     item.ActiveSessions,
 				ActiveDevices:      item.ActiveDevices,
+				ActiveDevicesDaily: item.ActiveDevicesDaily,
 				CurrentRPM:         item.CurrentRPM,
 			}
 		}
@@ -1185,6 +1192,8 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	// 确定是否跳过混合渠道检查
 	skipCheck := req.ConfirmMixedChannelRisk != nil && *req.ConfirmMixedChannelRisk
 
+	prevMaxDevicesDaily := h.currentMaxDevicesDaily(c.Request.Context(), accountID)
+
 	account, err := h.adminService.UpdateAccount(c.Request.Context(), accountID, &service.UpdateAccountInput{
 		Name:                  req.Name,
 		Notes:                 req.Notes,
@@ -1226,7 +1235,38 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		h.scheduleOpenAIResponsesProbe(account)
 	}
 
+	h.resetDailyDevicesOnLimitChange(c.Request.Context(), prevMaxDevicesDaily, account)
+
 	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
+}
+
+// currentMaxDevicesDaily 读取更新前的 24 小时设备上限；读不到返回 -1（视为未知，不触发清零）。
+func (h *AccountHandler) currentMaxDevicesDaily(ctx context.Context, accountID int64) int {
+	if h.deviceLimitCache == nil {
+		return -1
+	}
+	prev, err := h.adminService.GetAccount(ctx, accountID)
+	if err != nil || prev == nil {
+		return -1
+	}
+	return prev.GetMaxDevicesDaily()
+}
+
+// resetDailyDevicesOnLimitChange 24 小时设备上限的值改动时，清零该账号的 24 小时记录，
+// 从改动时刻按新值重新计数（含开启/关闭）。只改并发数或释放时长不清零，正占名额的设备不受影响。
+func (h *AccountHandler) resetDailyDevicesOnLimitChange(ctx context.Context, prev int, account *service.Account) {
+	if h.deviceLimitCache == nil || account == nil || prev < 0 {
+		return
+	}
+	next := account.GetMaxDevicesDaily()
+	if next == prev {
+		return
+	}
+	if err := h.deviceLimitCache.ClearDailyDevices(ctx, account.ID); err != nil {
+		slog.Warn("account.reset_daily_devices_failed", "account_id", account.ID, "err", err)
+		return
+	}
+	slog.Info("account.daily_devices_reset", "account_id", account.ID, "from", prev, "to", next)
 }
 
 // scheduleOpenAIResponsesProbe 异步触发 OpenAI APIKey 账号的 Responses API 能力探测。

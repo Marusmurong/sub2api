@@ -1396,6 +1396,7 @@ const shouldReplaceAutoRefreshRow = (current: Account, next: Account) => {
     current.current_window_cost !== next.current_window_cost ||
     current.active_sessions !== next.active_sessions ||
     current.active_devices !== next.active_devices ||
+    current.active_devices_daily !== next.active_devices_daily ||
     current.schedulable !== next.schedulable ||
     current.status !== next.status ||
     current.rate_limit_reset_at !== next.rate_limit_reset_at ||
@@ -2190,7 +2191,8 @@ const mergeRuntimeFields = (oldAccount: Account, updatedAccount: Account): Accou
   current_concurrency: updatedAccount.current_concurrency ?? oldAccount.current_concurrency,
   current_window_cost: updatedAccount.current_window_cost ?? oldAccount.current_window_cost,
   active_sessions: updatedAccount.active_sessions ?? oldAccount.active_sessions,
-  active_devices: updatedAccount.active_devices ?? oldAccount.active_devices
+  active_devices: updatedAccount.active_devices ?? oldAccount.active_devices,
+  active_devices_daily: updatedAccount.active_devices_daily ?? oldAccount.active_devices_daily
 })
 
 const syncPaginationAfterLocalRemoval = () => {

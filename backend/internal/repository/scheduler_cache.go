@@ -1005,6 +1005,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		"session_idle_timeout_minutes",
 		"max_devices",
 		"device_window_minutes",
+		"max_devices_daily",
 		"openai_oauth_responses_websockets_v2_enabled",
 		"openai_oauth_responses_websockets_v2_mode",
 		"openai_apikey_responses_websockets_v2_enabled",

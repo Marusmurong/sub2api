@@ -3149,6 +3149,23 @@ func (a *Account) GetMaxDevices() int {
 	return n
 }
 
+// GetMaxDevicesDaily 获取滚动 24 小时内允许接纳的不同设备数上限
+// 返回 0 表示未启用（缺省、非法或负数一律视为未启用）
+func (a *Account) GetMaxDevicesDaily() int {
+	if a == nil || a.Extra == nil {
+		return 0
+	}
+	v, ok := a.Extra["max_devices_daily"]
+	if !ok {
+		return 0
+	}
+	n := parseExtraInt(v)
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
 // GetDeviceWindowMinutes 获取设备空闲释放窗口（分钟）
 // 缺省或非法时返回 DefaultDeviceWindowMinutes
 func (a *Account) GetDeviceWindowMinutes() int {

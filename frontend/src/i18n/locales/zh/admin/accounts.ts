@@ -240,7 +240,9 @@ export default {
         },
         devices: {
           full: '设备已满，新设备将路由到其他账号（释放时长：{window}分钟）',
-          normal: '已登记设备正常（释放时长：{window}分钟）'
+          normal: '已登记设备正常（释放时长：{window}分钟）',
+          daily: '24 小时已接纳 {used} / {max} 台',
+          dailyFull: '24 小时设备额度已满（{used} / {max}），新设备将路由到其他账号'
         },
         rpm: {
           full: '已达 RPM 上限',
@@ -1020,6 +1022,9 @@ export default {
           windowMinutes: '释放时长',
           windowMinutesPlaceholder: '360',
           windowMinutesHint: '设备空闲超过该时长后释放名额',
+          maxDaily: '24 小时最大设备数',
+          maxDailyPlaceholder: '0',
+          maxDailyHint: '滚动 24 小时内最多接纳的不同设备数，0 = 不限；改动后从改动时刻重新计数',
           clearDevices: '清空已登记设备',
           clearDevicesHint: '换机后立即放行新设备，无需等待释放时长',
           clearDevicesSuccess: '已清空该账号的设备登记',

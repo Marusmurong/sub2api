@@ -259,6 +259,7 @@ type Account struct {
 	// 从 extra 字段提取，方便前端显示和编辑
 	MaxDevices          *int `json:"max_devices,omitempty"`
 	DeviceWindowMinutes *int `json:"device_window_minutes,omitempty"`
+	MaxDevicesDaily     *int `json:"max_devices_daily,omitempty"`
 
 	// RPM 限制（仅 Anthropic OAuth/SetupToken 账号有效）
 	// 从 extra 字段提取，方便前端显示和编辑
@@ -381,6 +382,7 @@ type AccountListItem struct {
 	SessionIdleTimeoutMin   *int     `json:"session_idle_timeout_minutes,omitempty"`
 	MaxDevices              *int     `json:"max_devices,omitempty"`
 	DeviceWindowMinutes     *int     `json:"device_window_minutes,omitempty"`
+	MaxDevicesDaily         *int     `json:"max_devices_daily,omitempty"`
 	BaseRPM                 *int     `json:"base_rpm,omitempty"`
 	RPMStrategy             *string  `json:"rpm_strategy,omitempty"`
 	RPMStickyBuffer         *int     `json:"rpm_sticky_buffer,omitempty"`
