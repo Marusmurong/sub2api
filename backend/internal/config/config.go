@@ -2473,6 +2473,13 @@ func setDefaults() {
 	viper.SetDefault("security.csp.enabled", true)
 	viper.SetDefault("security.csp.policy", DefaultCSPPolicy)
 	viper.SetDefault("security.proxy_probe.insecure_skip_verify", false)
+	// 出口 IP 网络类型识别:默认值即"关闭、代码内默认源与超时",注册是为了让环境变量可达
+	// (viper.AutomaticEnv 只对已注册的键生效,见 env_reachability_test.go)。
+	viper.SetDefault("security.proxy_probe.ip_classifier.enabled", false)
+	viper.SetDefault("security.proxy_probe.ip_classifier.provider", "")
+	viper.SetDefault("security.proxy_probe.ip_classifier.api_key", "")
+	viper.SetDefault("security.proxy_probe.ip_classifier.ipdata_api_key", "")
+	viper.SetDefault("security.proxy_probe.ip_classifier.timeout_seconds", 0)
 	viper.SetDefault("security.trust_forwarded_ip_for_api_key_acl", true)
 
 	// Security - disable direct fallback on proxy error
