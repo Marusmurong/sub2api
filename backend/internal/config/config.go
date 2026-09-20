@@ -1407,6 +1407,46 @@ type RepeatPayloadGuardConfig struct {
 
 	// SmallProbe: 小请求重复探活拦截，与上面的大请求刷号拦截互补、独立配置。
 	SmallProbe RepeatSmallProbeConfig `mapstructure:"small_probe"`
+
+	// ForgedDevice: 伪造设备身份的探针拦截，判据是身份而不是频率。
+	ForgedDevice RepeatForgedDeviceConfig `mapstructure:"forged_device"`
+}
+
+// RepeatForgedDeviceConfig 拦截「伪装成 Claude Code、但 metadata.user_id 里的
+// device_id 不是 64 位 hex」的小请求。
+//
+// 背景（2026-09-21）：key 100 后面的系统以固定 `device_id:"1"`、UA claude-cli/2.1.202、
+// 输入 65~83 token、输出 9、无缓存的形态，每轮把 8 个模型各打一发做可用性巡检，
+// 三个订阅号都被摸到。真实 Claude Code 的 device_id 是 randomBytes(32) 的 64 位 hex，
+// 不可能是 "1"；它换模型换 session，指纹不重复，small_probe 的频率阈值抓不到。
+//
+// 判定：body ≤ small_probe.max_body_bytes、无 tools、单条 user 消息、metadata.user_id
+// 非空且解析不出合法 64 位 hex 的 device_id。命中即**本地回一句问候（200）**，与
+// small_probe 同一哲学：对方在测活，回错误它会把我们标为不可用并切走流量。
+type RepeatForgedDeviceConfig struct {
+	// Mode: off | observe | block。block 的含义是「本地回问候」，不是报错。
+	Mode string `mapstructure:"mode"`
+}
+
+// NormalizedMode 返回归一化后的模式，未知值视为 off。
+func (c RepeatForgedDeviceConfig) NormalizedMode() string {
+	switch c.Mode {
+	case RepeatPayloadGuardModeObserve:
+		return RepeatPayloadGuardModeObserve
+	case RepeatPayloadGuardModeBlock:
+		return RepeatPayloadGuardModeBlock
+	default:
+		return RepeatPayloadGuardModeOff
+	}
+}
+
+func (c RepeatForgedDeviceConfig) validate() error {
+	switch c.Mode {
+	case RepeatPayloadGuardModeOff, RepeatPayloadGuardModeObserve, RepeatPayloadGuardModeBlock:
+		return nil
+	default:
+		return fmt.Errorf("gateway.repeat_payload_guard.forged_device.mode must be one of off/observe/block, got %q", c.Mode)
+	}
 }
 
 // RepeatSmallProbeConfig 拦截「同一 key 反复发同一份小请求」的中转探活。
@@ -1510,6 +1550,9 @@ func (c RepeatPayloadGuardConfig) validate() error {
 	}
 	// 小探针子配置独立校验：父级 off 不代表它也 off，两套开关互不牵连。
 	// 它与父级共用 window_minutes，所以只要任一方开着，窗口就必须为正。
+	if err := c.ForgedDevice.validate(); err != nil {
+		return err
+	}
 	if err := c.SmallProbe.validate(); err != nil {
 		return err
 	}
@@ -2815,6 +2858,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.new_account_rampup.initial_concurrency", 1)
 	viper.SetDefault("gateway.new_account_rampup.initial_max_sessions", 3)
 	viper.SetDefault("gateway.repeat_payload_guard.small_probe.window_minutes", 0)
+	viper.SetDefault("gateway.repeat_payload_guard.forged_device.mode", RepeatPayloadGuardModeBlock)
 	viper.SetDefault("gateway.max_account_switches", 10)
 	viper.SetDefault("gateway.max_account_switches_gemini", 3)
 	viper.SetDefault("gateway.force_codex_cli", false)

@@ -246,6 +246,13 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 		return
 	}
 
+	// 伪造设备身份的探针：按身份判，不看频率。换模型换 session 的巡检指纹不重复，
+	// 上面的重复计数抓不到；但它的 device_id 不可能是合法 64 位 hex。同样在并发槽
+	// 与账号选择之前，命中后本地回问候、不发上游。
+	if h.interceptForgedDeviceProbe(c, parsedReq, body, reqModel, reqStream, apiKey.ID, reqLog) {
+		return
+	}
+
 	// 重复 payload 拦截：同一 key 反复提交同一份大 payload 时就地拒绝。
 	// 仍在用户并发槽与账号选择之前——命中后不发上游、不占账号槽、不消耗订阅额度。
 	//
