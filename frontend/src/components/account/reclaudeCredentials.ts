@@ -35,7 +35,7 @@ export interface ReclaudeFormValues {
   deviceHostname: string
   timezone: string
   userEmail: string
-  dailyTokenCap: string
+  planTier: string
   proxyId: number | null
 }
 
@@ -44,7 +44,7 @@ export type ReclaudeValidationError =
   | 'skInvalid'
   | 'seedInvalid'
   | 'deviceIdInvalid'
-  | 'dailyCapRequired'
+  | 'planTierRequired'
   | 'gatewayInvalid'
   | 'clientIdentityRequired'
 
@@ -105,8 +105,7 @@ export function validateReclaudeForm(values: ReclaudeFormValues): ReclaudeValida
   if (!Number.isInteger(deviceId) || deviceId <= 0) return 'deviceIdInvalid'
 
   // V-5：包络未标定就售卖 = 超卖。
-  const dailyCap = Number(values.dailyTokenCap.trim())
-  if (!Number.isFinite(dailyCap) || dailyCap <= 0) return 'dailyCapRequired'
+  if (!findReclaudePlanTier(values.planTier)) return 'planTierRequired'
 
   // V-9：https + 四节点硬白名单。默认配置下后端 SSRF 校验不生效，这是唯一防线。
   if (!isAllowedReclaudeGateway(values.gatewayUrl)) return 'gatewayInvalid'
@@ -162,12 +161,41 @@ export function buildReclaudeCredentials(values: ReclaudeFormValues): Record<str
   return credentials
 }
 
-/** RECLAUDE_DAILY_TOKEN_CAP_EXTRA_KEY 是日闸上限在 Account.Extra 里的键。 */
-export const RECLAUDE_DAILY_TOKEN_CAP_EXTRA_KEY = 'reclaude_daily_token_cap'
+/** RECLAUDE_PLAN_TIER_EXTRA_KEY 是套餐档位在 Account.Extra 里的键。 */
+export const RECLAUDE_PLAN_TIER_EXTRA_KEY = 'reclaude_plan_tier'
 
-/** buildReclaudeExtra 构造账号级 extra（目前只有日闸上限）。 */
+/**
+ * RECLAUDE_PLAN_TIERS 是建号时可选的套餐档位。
+ *
+ * 🔴 必须与后端 internal/service/reclaude_plan_tier.go 保持一致。
+ * dailyLimitUsd 在这里只用于**展示**——真正落库的限额由后端按档位 id 换算，
+ * 前端不参与计算，否则两边各算一次必然漂移。
+ *
+ * 基准 $600 的来历：2026-09-22 从号池里三个官方 oauth 号反推的日峰值消费
+ * （$592 / $396 / $356），且期间没有任何一个打到限流 —— 所以它是**下限**
+ * 而不是天花板。跑出真实数据后要回来调。
+ */
+export const RECLAUDE_PLAN_TIERS = [
+  { id: '20x', label: '20X', dailyLimitUsd: 600 },
+  { id: '20x-carpool-2', label: '20X 拼车-2', dailyLimitUsd: 300 },
+  { id: '20x-carpool-4', label: '20X 拼车-4', dailyLimitUsd: 150 },
+  { id: '5x', label: '5X', dailyLimitUsd: 300 }
+] as const
+
+export type ReclaudePlanTier = (typeof RECLAUDE_PLAN_TIERS)[number]
+
+/** findReclaudePlanTier 按 id 查档位；未知 id 返回 undefined。 */
+export function findReclaudePlanTier(id: string): ReclaudePlanTier | undefined {
+  return RECLAUDE_PLAN_TIERS.find((tier) => tier.id === id.trim())
+}
+
+/**
+ * buildReclaudeExtra 构造账号级 extra。
+ *
+ * 只带档位 id：日限额由后端换算后写进 quota_daily_limit，走既有的美元配额闸。
+ */
 export function buildReclaudeExtra(values: ReclaudeFormValues): Record<string, unknown> {
-  return { [RECLAUDE_DAILY_TOKEN_CAP_EXTRA_KEY]: Number(values.dailyTokenCap.trim()) }
+  return { [RECLAUDE_PLAN_TIER_EXTRA_KEY]: values.planTier.trim() }
 }
 
 /**

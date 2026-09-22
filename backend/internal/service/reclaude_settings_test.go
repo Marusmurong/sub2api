@@ -33,8 +33,13 @@ func TestReclaudeSettings_Normalize(t *testing.T) {
 }
 
 func TestGatewayService_ReclaudeKillSwitch(t *testing.T) {
+	// 日限额是套餐档位换算出的**美元**值；token 闸作为第二道并存。
 	account := &Account{ID: 9, Platform: PlatformAnthropic, Type: AccountTypeReclaude,
-		Extra: map[string]any{ExtraKeyReclaudeDailyTokenCap: float64(1000)}}
+		Extra: map[string]any{
+			ExtraKeyReclaudePlanTier:      "20x",
+			"quota_daily_limit":           600.0,
+			ExtraKeyReclaudeDailyTokenCap: float64(1000),
+		}}
 
 	t.Run("开关关闭时 reclaude 账号立即不可调度", func(t *testing.T) {
 		// 「关闭」的语义必须是立刻不可调度，不是「照跑到自然结束」——
@@ -61,6 +66,18 @@ func TestGatewayService_ReclaudeKillSwitch(t *testing.T) {
 		gateway := &GatewayService{reclaudeQuota: NewReclaudeQuotaGate(&fakeReclaudeUsageStore{})}
 
 		require.False(t, gateway.isAccountSchedulableForQuota(account))
+	})
+
+	// 未标定 = 禁止调度：未标定就售卖等于超卖，而超卖没有补救手段。
+	t.Run("没设日限额的 reclaude 账号不可调度", func(t *testing.T) {
+		gateway := &GatewayService{
+			reclaudeQuota:   NewReclaudeQuotaGate(&fakeReclaudeUsageStore{}),
+			reclaudeEnabled: func(context.Context) bool { return true },
+		}
+		unmetered := &Account{ID: 10, Platform: PlatformAnthropic, Type: AccountTypeReclaude,
+			Extra: map[string]any{}}
+
+		require.False(t, gateway.isAccountSchedulableForQuota(unmetered))
 	})
 
 	t.Run("非 reclaude 账号不受影响", func(t *testing.T) {

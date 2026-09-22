@@ -1336,8 +1336,6 @@ func (s *GatewayService) withWindowCostPrefetch(ctx context.Context, accounts []
 // isAccountSchedulableForQuota 检查账号是否在配额限制内
 // 适用于配置了 quota_limit 的 apikey 和 bedrock 类型账号
 func (s *GatewayService) isAccountSchedulableForQuota(account *Account) bool {
-	// reclaude 走独立的日 token 硬闸：既有配额子系统对它**完全不生效**
-	// （调度端只查 apikey/bedrock、写入端也只给这两类累加、且语义是美元计）。
 	if account.IsReclaude() {
 		// 运行时总开关先判。关闭的语义是**立即不可调度**，不是「照跑到自然结束」——
 		// 出事的时候需要的是止血，不是优雅退场。开关缺席一律按关处理。
@@ -1345,7 +1343,24 @@ func (s *GatewayService) isAccountSchedulableForQuota(account *Account) bool {
 		if s.reclaudeEnabled == nil || !s.reclaudeEnabled(ctx) {
 			return false
 		}
-		return !s.reclaudeQuota.IsDailyCapExceeded(ctx, account)
+
+		// 日限额走**美元**配额子系统（由套餐档位换算而来），与其它类型同口径。
+		// 没设限额 = 未标定 = 禁止调度：未标定就售卖等于超卖，而超卖在这个
+		// 模型里没有补救手段。
+		if account.GetQuotaDailyLimit() <= 0 {
+			return false
+		}
+		if account.IsQuotaExceeded() {
+			return false
+		}
+
+		// token 闸作为第二道：档位换算是按官方号反推的**估算**，
+		// 真实包络未知。两道闸取交集，先到者生效。
+		// 未标定 token 上限的账号不因此被拦（历史账号可能没有这个键）。
+		if ReclaudeDailyTokenCap(account) > 0 {
+			return !s.reclaudeQuota.IsDailyCapExceeded(ctx, account)
+		}
+		return true
 	}
 	if !account.IsAPIKeyOrBedrock() {
 		return true
@@ -1357,8 +1372,9 @@ func (s *GatewayService) isAccountSchedulableForQuota(account *Account) bool {
 // 仅适用于 Anthropic OAuth/SetupToken 账号
 // 返回 true 表示可调度，false 表示不可调度
 func (s *GatewayService) isAccountSchedulableForWindowCost(ctx context.Context, account *Account, isSticky bool) bool {
-	// 只检查 Anthropic OAuth/SetupToken 账号
-	if !account.IsAnthropicOAuthOrSetupToken() {
+	// 🔴 reclaude 不在此列：窗口锚点（SessionWindowStart/End）它从不写，
+	// 放进来会静默退化成小时窗。见 SupportsWindowCostLimit 的说明。
+	if !account.SupportsWindowCostLimit() {
 		return true
 	}
 
@@ -1435,7 +1451,7 @@ func (s *GatewayService) withRPMPrefetch(ctx context.Context, accounts []Account
 
 	var ids []int64
 	for i := range accounts {
-		if accounts[i].IsAnthropicOAuthOrSetupToken() && accounts[i].GetBaseRPM() > 0 {
+		if accounts[i].SupportsRPMLimit() && accounts[i].GetBaseRPM() > 0 {
 			ids = append(ids, accounts[i].ID)
 		}
 	}
@@ -1453,7 +1469,7 @@ func (s *GatewayService) withRPMPrefetch(ctx context.Context, accounts []Account
 // isAccountSchedulableForRPM 检查账号是否可根据 RPM 进行调度
 // 仅适用于 Anthropic OAuth/SetupToken 账号
 func (s *GatewayService) isAccountSchedulableForRPM(ctx context.Context, account *Account, isSticky bool) bool {
-	if !account.IsAnthropicOAuthOrSetupToken() {
+	if !account.SupportsRPMLimit() {
 		return true
 	}
 	baseRPM := account.GetBaseRPM()
@@ -1516,8 +1532,7 @@ func (s *GatewayService) checkAndRegisterSession(ctx context.Context, account *A
 // sessionID: 会话标识符（使用粘性会话的 hash）
 // 返回 true 表示允许（在限制内或会话已存在），false 表示拒绝（超出限制且是新会话）
 func (s *GatewayService) registerSessionSlot(ctx context.Context, account *Account, sessionID string) bool {
-	// 只检查 Anthropic OAuth/SetupToken 账号
-	if !account.IsAnthropicOAuthOrSetupToken() {
+	if !account.SupportsSessionLimit() {
 		return true
 	}
 
@@ -1549,7 +1564,7 @@ func (s *GatewayService) ReleaseAccountSession(ctx context.Context, account *Acc
 	if s == nil || s.sessionLimitCache == nil || account == nil || sessionID == "" {
 		return
 	}
-	if !account.IsAnthropicOAuthOrSetupToken() {
+	if !account.SupportsSessionLimit() {
 		return
 	}
 	if account.GetMaxSessions() <= 0 {

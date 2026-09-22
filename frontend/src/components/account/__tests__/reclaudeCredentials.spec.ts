@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest'
 import {
   buildReclaudeAccountName,
   buildReclaudeCredentials,
+  buildReclaudeExtra,
   validateReclaudeForm,
+  RECLAUDE_PLAN_TIERS,
+  RECLAUDE_PLAN_TIER_EXTRA_KEY,
   type ReclaudeFormValues
 } from '../reclaudeCredentials'
 
@@ -19,7 +22,7 @@ function form(overrides: Partial<ReclaudeFormValues> = {}): ReclaudeFormValues {
     deviceHostname: 'MBP-Dev',
     timezone: 'America/Los_Angeles',
     userEmail: 'owner@example.com',
-    dailyTokenCap: '2000000',
+    planTier: '20x',
     proxyId: 7,
     ...overrides
   }
@@ -71,9 +74,9 @@ describe('validateReclaudeForm', () => {
     expect(validateReclaudeForm(form({ deviceId: 'abc' }))).toBe('deviceIdInvalid')
   })
 
-  it('V-5 日 token 上限必须 > 0', () => {
+  it('V-5 必须选定套餐档位', () => {
     // 包络未标定就售卖 = 超卖。
-    expect(validateReclaudeForm(form({ dailyTokenCap: '0' }))).toBe('dailyCapRequired')
+    expect(validateReclaudeForm(form({ planTier: '' }))).toBe('planTierRequired')
   })
 
   it('V-9 网关必须是已知节点', () => {
@@ -108,5 +111,41 @@ describe('buildReclaudeCredentials', () => {
     expect(buildReclaudeCredentials(form())).not.toHaveProperty(
       'reclaude_synthetic_account_uuid'
     )
+  })
+})
+
+// 套餐档位取代了手填的日 token 上限。
+//
+// 🔴 换算关系错了就是超卖，而超卖在这个模型里没有补救手段 ——
+// 拼车 N 人就是把一份 20X 切 N 份，5X 是 20X 的**一半**（不是四分之一）。
+describe('reclaude 套餐档位', () => {
+  it('档位表与后端一致：拼车按份数切、5X 是 20X 的一半', () => {
+    const tierOf = (id: string) => RECLAUDE_PLAN_TIERS.find((tier) => tier.id === id)!
+    const base = tierOf('20x').dailyLimitUsd
+
+    expect(tierOf('20x-carpool-2').dailyLimitUsd).toBe(base / 2)
+    expect(tierOf('20x-carpool-4').dailyLimitUsd).toBe(base / 4)
+    expect(tierOf('5x').dailyLimitUsd).toBe(base / 2)
+  })
+
+  it('没选档位时校验不通过', () => {
+    // 放行的话账号拿不到日限额，调度端会判「未标定」直接不可调度 ——
+    // 表面是建号成功，实际是个永远不会被调度的死号。
+    const values = { ...form(), planTier: '' }
+
+    expect(validateReclaudeForm(values)).toBe('planTierRequired')
+  })
+
+  it('未知档位时校验不通过', () => {
+    const values = { ...form(), planTier: '50x' }
+
+    expect(validateReclaudeForm(values)).toBe('planTierRequired')
+  })
+
+  it('extra 里带的是档位 id，不是手填的数字', () => {
+    // 限额由后端按档位换算，前端不参与计算 —— 两边各算一次必然漂移。
+    const extra = buildReclaudeExtra({ ...form(), planTier: '20x-carpool-4' })
+
+    expect(extra[RECLAUDE_PLAN_TIER_EXTRA_KEY]).toBe('20x-carpool-4')
   })
 })

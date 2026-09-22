@@ -1,5 +1,5 @@
-import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { mount } from '@vue/test-utils'
+import { describe, expect, it, vi } from 'vitest'
 
 import ReclaudeStatusCell from '../ReclaudeStatusCell.vue'
 import type { Account } from '@/types'
@@ -10,22 +10,6 @@ vi.mock('vue-i18n', async () => {
   return { ...actual, useI18n: () => ({ t: (key: string) => key }) }
 })
 
-// 水位接口默认成功；单个用例里再覆盖。
-const getReclaudeDailyUsage = vi.fn()
-vi.mock('@/api/admin', () => ({
-  default: { accounts: { getReclaudeDailyUsage: (...args: unknown[]) => getReclaudeDailyUsage(...args) } }
-}))
-
-beforeEach(() => {
-  getReclaudeDailyUsage.mockReset()
-  getReclaudeDailyUsage.mockResolvedValue({
-    usage: { tokens: 0, upstream_calls: 0, failed_upstream_calls: 0 },
-    daily_cap: 2_000_000,
-    effective_tokens: 500_000,
-    weekly_soft_limit: 11_200_000
-  })
-})
-
 function account(overrides: Record<string, unknown> = {}): Account {
   return {
     id: 1,
@@ -33,7 +17,11 @@ function account(overrides: Record<string, unknown> = {}): Account {
     platform: 'anthropic',
     type: 'reclaude',
     credentials: { reclaude_client_version: 'v1.4.0' },
-    extra: { reclaude_daily_token_cap: 2_000_000 },
+    extra: {
+      reclaude_plan_tier: '20x',
+      quota_daily_limit: 600,
+      quota_daily_used: 120
+    },
     ...overrides
   } as unknown as Account
 }
@@ -43,63 +31,66 @@ function render(acc: Account) {
 }
 
 describe('ReclaudeStatusCell', () => {
-  it('显示日上限与客户端版本', () => {
+  // 🔴 口径必须与其它账号类型一致：都是**美元**日限额，都直接读账号行。
+  // 之前这里单独拉 Redis 的 token 水位，页面上两种账号显示两种东西，
+  // 运营对不上账。
+  it('显示套餐档位与美元日用量/限额', () => {
     const text = render(account()).text()
 
-    expect(text).toContain('2.0M')
+    expect(text).toContain('20X')
+    expect(text).toContain('$120.00')
+    expect(text).toContain('$600.00')
     expect(text).toContain('v1.4.0')
   })
 
-  it('日上限为 0 时明确标出未标定', () => {
-    // 上限为 0 = 包络未标定，账号根本不会被调度。显示成 "0" 会被误读成「用完了」。
-    const text = render(account({ extra: { reclaude_daily_token_cap: 0 } })).text()
+  it('没设日限额时明确标出未标定', () => {
+    // 未标定 = 账号根本不会被调度。显示成 "$0" 会被误读成「还没用」。
+    const text = render(account({ extra: { quota_daily_limit: 0 } })).text()
 
     expect(text).toContain('reclaudeCellCapMissing')
   })
 
-  it('缺少上限键时同样算未标定', () => {
-    expect(render(account({ extra: {} })).text()).toContain('reclaudeCellCapMissing')
+  it('缺少限额键时同样算未标定', () => {
+    const text = render(account({ extra: {} })).text()
+
+    expect(text).toContain('reclaudeCellCapMissing')
   })
 
-  it('有绑定邮箱与换号时间时一并展示', () => {
-    const text = render(
-      account({
-        extra: {
-          reclaude_daily_token_cap: 1000,
-          reclaude_bound_email: 'o***@example.com',
-          reclaude_last_switched_at: '2026-09-20T10:00:00Z'
-        }
-      })
-    ).text()
+  it('用量到顶时标红', () => {
+    const wrapper = render(account({
+      extra: { reclaude_plan_tier: '20x', quota_daily_limit: 600, quota_daily_used: 600 }
+    }))
 
-    expect(text).toContain('o***@example.com')
+    expect(wrapper.html()).toContain('text-red-600')
+  })
+
+  it('用量过八成时标黄', () => {
+    const wrapper = render(account({
+      extra: { reclaude_plan_tier: '20x', quota_daily_limit: 600, quota_daily_used: 500 }
+    }))
+
+    expect(wrapper.html()).toContain('text-amber-600')
+  })
+
+  it('未知档位时不显示档位标签，但限额照常显示', () => {
+    // 历史账号可能没有档位键；限额才是生效的那个值。
+    const text = render(account({
+      extra: { quota_daily_limit: 600, quota_daily_used: 10 }
+    })).text()
+
+    expect(text).toContain('$600.00')
+  })
+
+  it('显示绑定邮箱与换号日期', () => {
+    const text = render(account({
+      extra: {
+        quota_daily_limit: 600,
+        reclaude_bound_email: 'owner@example.com',
+        reclaude_last_switched_at: '2026-09-20T10:00:00Z'
+      }
+    })).text()
+
+    expect(text).toContain('owner@example.com')
     expect(text).toContain('reclaudeCellSwitched')
-  })
-
-  it('换号时间不可解析时不显示该行', () => {
-    const text = render(
-      account({ extra: { reclaude_daily_token_cap: 1000, reclaude_last_switched_at: 'nope' } })
-    ).text()
-
-    expect(text).not.toContain('reclaudeCellSwitched')
-  })
-
-  it('显示今日已用水位', async () => {
-    const wrapper = render(account())
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('500K')
-  })
-
-  it('水位读不到时显示「不可读」而不是 0', async () => {
-    // 🔴 回 0 会被读成「今天还没用」，而真相是「我们不知道」——
-    // 这条链路上水位只有我们自己的计数这一个信源，读不到必须看得见。
-    getReclaudeDailyUsage.mockRejectedValue(new Error('redis down'))
-
-    const wrapper = render(account())
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('reclaudeUsageUnavailable')
-    expect(wrapper.text()).not.toContain('reclaudeUsageToday0')
   })
 })

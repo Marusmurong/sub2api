@@ -32,7 +32,7 @@ func reclaudeCreateInput() *CreateAccountInput {
 			CredKeyReclaudeDeviceHostname: "mbp-dev",
 		},
 		Extra: map[string]any{
-			ExtraKeyReclaudeDailyTokenCap: float64(5_000_000),
+			ExtraKeyReclaudePlanTier: "20x",
 		},
 	}
 }
@@ -117,13 +117,24 @@ func TestPrepareReclaudeAccountCreate(t *testing.T) {
 		require.ErrorIs(t, err, ErrReclaudeProxyRequired)
 	})
 
-	t.Run("日上限缺失时拒绝", func(t *testing.T) {
+	t.Run("套餐档位缺失时拒绝", func(t *testing.T) {
 		input := reclaudeCreateInput()
-		delete(input.Extra, ExtraKeyReclaudeDailyTokenCap)
+		delete(input.Extra, ExtraKeyReclaudePlanTier)
 
 		_, err := PrepareReclaudeAccountCreate(configuredCfg(), cipher, input, input.Extra)
 
-		require.ErrorIs(t, err, ErrReclaudeDailyCapRequired)
+		require.ErrorIs(t, err, ErrReclaudePlanTierRequired)
+	})
+
+	// 档位是限额的唯一入口 —— 落库的必须是换算值，不是运维手填的值。
+	t.Run("档位换算出的美元日限额落进 extra", func(t *testing.T) {
+		input := reclaudeCreateInput()
+		input.Extra[ExtraKeyReclaudePlanTier] = "20x-carpool-4"
+
+		prepared, err := PrepareReclaudeAccountCreate(configuredCfg(), cipher, input, input.Extra)
+
+		require.NoError(t, err)
+		require.Equal(t, 150.0, prepared.Extra["quota_daily_limit"])
 	})
 
 	t.Run("网关地址被规范化后落库", func(t *testing.T) {

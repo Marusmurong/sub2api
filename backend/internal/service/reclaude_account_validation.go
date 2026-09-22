@@ -20,7 +20,7 @@ var (
 	ErrReclaudeSeedInvalid       = errors.New("reclaude ed25519 seed is invalid")
 	ErrReclaudeSKInvalid         = errors.New("reclaude sk is invalid")
 	ErrReclaudeDeviceIDInvalid   = errors.New("reclaude device id is invalid")
-	ErrReclaudeDailyCapRequired  = errors.New("reclaude daily token cap must be greater than zero")
+	ErrReclaudePlanTierRequired  = errors.New("reclaude plan tier must be selected")
 	ErrReclaudeGatewayNotAllowed = errors.New("reclaude gateway url is not an allowed route node")
 	ErrReclaudeClientIdentity    = errors.New("reclaude client version and platform are required")
 	ErrReclaudeGroupMixed        = errors.New("reclaude accounts must not share a group with self-hosted accounts")
@@ -54,7 +54,7 @@ type ReclaudeAccountInput struct {
 	ClientVersion  string
 	ClientPlatform string
 	UserEmail      string
-	DailyTokenCap  int64
+	PlanTier       string
 	DeviceHostname string
 }
 
@@ -65,7 +65,9 @@ type ReclaudeAccountInput struct {
 type ReclaudeValidationResult struct {
 	Seed              []byte
 	NormalizedGateway string
-	Warnings          []string
+	// DailyLimitUSD 由所选档位换算而来，建号时直接写进 extra.quota_daily_limit。
+	DailyLimitUSD float64
+	Warnings      []string
 }
 
 // ValidateReclaudeAccountInput 执行建号硬校验。
@@ -95,9 +97,15 @@ func ValidateReclaudeAccountInput(input ReclaudeAccountInput) (ReclaudeValidatio
 	}
 
 	// V-5：包络未标定就售卖 = 超卖。
-	if input.DailyTokenCap <= 0 {
-		return result, ErrReclaudeDailyCapRequired
+	//
+	// 档位换算出美元日限额，走既有的配额子系统（日/周/总 + 固定/滚动重置）。
+	// 不再单独维护 token 计的日闸 —— 两套闸并存会让「哪个在生效」变成
+	// 需要查代码才能回答的问题。
+	tier, ok := FindReclaudePlanTier(strings.TrimSpace(input.PlanTier))
+	if !ok {
+		return result, fmt.Errorf("%w: got %q", ErrReclaudePlanTierRequired, input.PlanTier)
 	}
+	result.DailyLimitUSD = tier.DailyLimitUSD
 
 	if strings.TrimSpace(input.ClientVersion) == "" || strings.TrimSpace(input.ClientPlatform) == "" {
 		return result, ErrReclaudeClientIdentity

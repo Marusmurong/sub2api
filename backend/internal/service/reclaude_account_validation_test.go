@@ -27,7 +27,7 @@ func validReclaudeInput() ReclaudeAccountInput {
 		GatewayURL:     "https://la.route.reclaude.ai",
 		ClientVersion:  "v1.4.0",
 		ClientPlatform: "linux/amd64",
-		DailyTokenCap:  5_000_000,
+		PlanTier:       "20x",
 		DeviceHostname: "mbp-dev",
 	}
 }
@@ -127,13 +127,13 @@ func TestValidateReclaudeAccountInput(t *testing.T) {
 	})
 
 	// V-5：包络未标定就售卖 = 超卖。这个模型里超卖是庞氏，不是运营弹性。
-	t.Run("V-5 日 token 上限必须大于 0", func(t *testing.T) {
+	t.Run("V-5 必须选定套餐档位", func(t *testing.T) {
 		input := validReclaudeInput()
-		input.DailyTokenCap = 0
+		input.PlanTier = ""
 
 		_, err := ValidateReclaudeAccountInput(input)
 
-		require.ErrorIs(t, err, ErrReclaudeDailyCapRequired)
+		require.ErrorIs(t, err, ErrReclaudePlanTierRequired)
 	})
 
 	// V-9：默认配置下 SSRF 校验不生效，节点硬白名单是唯一的防线。

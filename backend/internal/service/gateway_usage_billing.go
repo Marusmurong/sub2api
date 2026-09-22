@@ -126,7 +126,15 @@ func (p *postUsageBillingParams) shouldUpdateRateLimits() bool {
 }
 
 func (p *postUsageBillingParams) shouldUpdateAccountQuota() bool {
-	return p.Cost.TotalCost > 0 && p.Account.IsAPIKeyOrBedrock() && p.Account.HasAnyQuotaLimit()
+	// reclaude 一并计入：它的日限额按套餐档位换算成美元，走的就是这套配额。
+	//
+	// 🔴 读写必须同时认这个类型。只加调度端（isAccountSchedulableForQuota）
+	// 而漏掉这里，quota_daily_used 恒为 0，闸门永不触发 —— 页面上限额显示得
+	// 好好的，实际无限跑。
+	if !p.Account.IsAPIKeyOrBedrock() && !p.Account.IsReclaude() {
+		return false
+	}
+	return p.Cost.TotalCost > 0 && p.Account.HasAnyQuotaLimit()
 }
 
 // postUsageBilling is the legacy fallback billing path used when the unified

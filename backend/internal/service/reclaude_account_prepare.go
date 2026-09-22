@@ -21,8 +21,11 @@ const (
 	// 的作息与它自洽 —— 一台时区在上海的设备却按洛杉矶作息合盖，本身就是破绽。
 	CredKeyReclaudeTimezone = "reclaude_timezone"
 
-	// ExtraKeyReclaudeDailyTokenCap 是该设备的日 token 硬闸。
-	// 0 = 未标定 = 禁止调度、禁止对外售卖。
+	// ExtraKeyReclaudeDailyTokenCap 是该设备的日 token 硬闸（已弃用）。
+	//
+	// 🔴 保留仅为读取历史账号：限额已改为按档位换算的**美元**日限额
+	// （ExtraKeyReclaudePlanTier → quota_daily_limit），走既有配额子系统。
+	// 新建账号不再写这个键。
 	ExtraKeyReclaudeDailyTokenCap = "reclaude_daily_token_cap"
 )
 
@@ -76,7 +79,7 @@ func PrepareReclaudeAccountCreate(
 		ClientVersion:  credentialString(input.Credentials, CredKeyReclaudeClientVersion),
 		ClientPlatform: credentialString(input.Credentials, CredKeyReclaudeClientPlatform),
 		UserEmail:      credentialString(input.Credentials, CredKeyReclaudeUserEmail),
-		DailyTokenCap:  credentialInt64(extra, ExtraKeyReclaudeDailyTokenCap),
+		PlanTier:       credentialString(extra, ExtraKeyReclaudePlanTier),
 		DeviceHostname: credentialString(input.Credentials, CredKeyReclaudeDeviceHostname),
 	}
 
@@ -105,7 +108,7 @@ func PrepareReclaudeAccountCreate(
 
 	prepared.Name = BuildReclaudeAccountName(validationInput.DeviceHostname, validationInput.DeviceID)
 	prepared.Credentials = encrypted
-	prepared.Extra = prepareReclaudeExtra(extra, credentialString(credentials, CredKeyReclaudeTimezone))
+	prepared.Extra = prepareReclaudeExtra(extra, credentialString(credentials, CredKeyReclaudeTimezone), validated.DailyLimitUSD)
 	prepared.Warnings = validated.Warnings
 	return prepared, nil
 }
@@ -114,11 +117,14 @@ func PrepareReclaudeAccountCreate(
 //
 // 目前只有「模拟关机」作息：不在建号时生成的话，这台设备就是 24h 不休 ——
 // 而「从不关机」正是这套机制要消除的特征。已配置则保留，不覆盖运维的手工调整。
-func prepareReclaudeExtra(extra map[string]any, timezone string) map[string]any {
-	out := make(map[string]any, len(extra)+1)
+func prepareReclaudeExtra(extra map[string]any, timezone string, dailyLimitUSD float64) map[string]any {
+	out := make(map[string]any, len(extra)+2)
 	for key, value := range extra {
 		out[key] = value
 	}
+	// 档位换算出的美元日限额直接落库，由既有的 IsQuotaExceeded 执行。
+	// 不保留运维手改的值：档位是限额的唯一入口。
+	out["quota_daily_limit"] = dailyLimitUSD
 	if _, ok := out[ExtraKeyReclaudeOfflineWindow]; !ok {
 		out[ExtraKeyReclaudeOfflineWindow] = GenerateReclaudeOfflineWindow(timezone)
 	}
