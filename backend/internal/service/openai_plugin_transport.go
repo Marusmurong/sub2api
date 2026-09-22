@@ -43,11 +43,10 @@ func (s *AccountTestService) doOpenAIAccountTestUpstream(
 		}
 	}
 	if useTLSFallback {
-		return s.httpUpstream.DoWithTLS(
+		return s.doUpstream(
 			request,
 			proxyURL,
-			account.ID,
-			account.Concurrency,
+			account,
 			s.tlsFPProfileService.ResolveTLSProfile(account),
 		)
 	}

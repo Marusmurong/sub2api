@@ -58,7 +58,11 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	if s.settingService != nil {
 		enableFP, enableMPT, _ = s.settingService.GetGatewayForwardingSettings(ctx)
 	}
-	if account.IsOAuth() && s.identityService != nil {
+	// 谓词化（身份收敛前置缺口 1）：这一处原本是 account.IsOAuth()，
+	// reclaude 不在其中 ⇒ RewriteUserIDWithMasking 根本不执行，
+	// 「一台设备底下挂 50 个不同 user_id」这条最直接的定性证据完全没被处理。
+	// 且它是**静默失效**——不执行重写不报任何错。
+	if account.UsesClaudeCodeMimicry() && s.identityService != nil {
 		// 1. 获取或创建指纹（包含随机生成的ClientID）
 		fp, err := s.identityService.GetOrCreateFingerprint(ctx, account, clientHeaders)
 		if err != nil {

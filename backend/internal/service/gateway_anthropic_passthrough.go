@@ -109,7 +109,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 			input.Body = input.Parsed.Body.Bytes()
 		}
 
-		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+		resp, err = s.doUpstream(upstreamReq, proxyURL, account, s.tlsFPProfileService.ResolveTLSProfile(account))
 		if err != nil {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
@@ -279,7 +279,7 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	return &ForwardResult{
 		// 同 gateway_forward.go：RequestID 必须走 upstreamRequestID（Anthropic 的头名是
 		// request-id，x-request-id 实测恒为空），同时保留上游新增的响应模型审计字段。
-		RequestID:                     upstreamRequestID(resp.Header),
+		RequestID: upstreamRequestID(resp.Header),
 		// UpstreamHeaders 采自上游 v0.2.1。
 		UpstreamHeaders:               resp.Header,
 		Usage:                         *usage,

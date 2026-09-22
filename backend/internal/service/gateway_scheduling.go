@@ -1336,6 +1336,17 @@ func (s *GatewayService) withWindowCostPrefetch(ctx context.Context, accounts []
 // isAccountSchedulableForQuota 检查账号是否在配额限制内
 // 适用于配置了 quota_limit 的 apikey 和 bedrock 类型账号
 func (s *GatewayService) isAccountSchedulableForQuota(account *Account) bool {
+	// reclaude 走独立的日 token 硬闸：既有配额子系统对它**完全不生效**
+	// （调度端只查 apikey/bedrock、写入端也只给这两类累加、且语义是美元计）。
+	if account.IsReclaude() {
+		// 运行时总开关先判。关闭的语义是**立即不可调度**，不是「照跑到自然结束」——
+		// 出事的时候需要的是止血，不是优雅退场。开关缺席一律按关处理。
+		ctx := context.Background()
+		if s.reclaudeEnabled == nil || !s.reclaudeEnabled(ctx) {
+			return false
+		}
+		return !s.reclaudeQuota.IsDailyCapExceeded(ctx, account)
+	}
 	if !account.IsAPIKeyOrBedrock() {
 		return true
 	}

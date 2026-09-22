@@ -61,6 +61,7 @@ const (
 	AccountTypeUpstream       = "upstream"        // 上游透传类型账号（通过 Base URL + API Key 连接上游）
 	AccountTypeBedrock        = "bedrock"         // AWS Bedrock 类型账号（通过 SigV4 签名或 API Key 连接 Bedrock，由 credentials.auth_mode 区分）
 	AccountTypeServiceAccount = "service_account" // Google Service Account 类型账号（用于 Vertex AI）
+	AccountTypeReclaude       = "reclaude"        // reclaude 中转订阅（设备凭据 sk + ed25519 seed，请求走信封协议转发）
 )
 
 // Redeem type constants

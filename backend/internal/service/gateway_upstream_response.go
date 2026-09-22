@@ -376,7 +376,6 @@ func (s *GatewayService) handleErrorResponse(ctx context.Context, resp *http.Res
 	logger.LegacyPrintf("service.gateway", "[Forward] Upstream error (non-retryable): Account=%d(%s) Status=%d RequestID=%s Body=%s",
 		account.ID, account.Name, resp.StatusCode, upstreamRequestID(resp.Header), truncateString(string(body), 1000))
 
-
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(body))
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 

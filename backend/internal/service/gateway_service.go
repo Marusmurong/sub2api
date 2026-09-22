@@ -653,6 +653,12 @@ type ForwardResult struct {
 	// cheaper tier (see ResolveBillingServiceTier).
 	ServiceTier *string
 
+	// UpstreamTraceID 是 reclaude 信封里的 traceId，落到 usage_logs.upstream_trace_id。
+	//
+	// 统一 user_id / session_id 之后，**我们自己也分不清上游报错是哪个下游客户
+	// 触发的了** —— 这是那个映射唯一的锚点。非 reclaude 链路恒为空。
+	UpstreamTraceID string
+
 	// 图片生成计费字段（图片生成模型使用）
 	ImageCount         int    // 生成的图片数量
 	ImageSize          string // 最终计费尺寸 "1K", "2K", "4K"
@@ -798,28 +804,38 @@ type GatewayService struct {
 	billingCacheService        *BillingCacheService
 	identityService            *IdentityService
 	httpUpstream               HTTPUpstream
-	deferredService            *DeferredService
-	concurrencyService         *ConcurrencyService
-	claudeTokenProvider        *ClaudeTokenProvider
-	sessionLimitCache          SessionLimitCache // 会话数量限制缓存（仅 Anthropic OAuth/SetupToken）
-	deviceLimitCache           DeviceLimitCache  // 设备数量限制缓存（仅 Anthropic OAuth/SetupToken）
-	rpmCache                   RPMCache          // RPM 计数缓存（仅 Anthropic OAuth/SetupToken）
-	userGroupRateResolver      *userGroupRateResolver
-	userGroupRateCache         *gocache.Cache
-	userGroupRateSF            singleflight.Group
-	modelsListCache            *gocache.Cache
-	modelsListCacheTTL         time.Duration
-	settingService             *SettingService
-	responseHeaderFilter       *responseheaders.CompiledHeaderFilter
-	debugModelRouting          atomic.Bool
-	debugClaudeMimic           atomic.Bool
-	channelService             *ChannelService
-	resolver                   *ModelPricingResolver
-	compositeResolver          *CompositeRouteResolver
-	debugGatewayBodyFile       atomic.Pointer[os.File] // non-nil when SUB2API_DEBUG_GATEWAY_BODY is set
-	tlsFPProfileService        *TLSFingerprintProfileService
-	balanceNotifyService       *BalanceNotifyService
-	userPlatformQuotaRepo      UserPlatformQuotaRepository
+	// reclaudeUpstream 处理 reclaude 账号的信封转发；可为 nil
+	// （此时 reclaude 账号的请求会**报错**，而不是退回裸 DoWithTLS 把明文
+	// 打到 api.anthropic.com）。
+	reclaudeUpstream *ReclaudeUpstream
+	// reclaudeQuota 是 reclaude 的日 token 硬闸；可为 nil
+	// （此时 reclaude 账号一律判定为超闸而不可调度 —— 宁可停，也不能因为
+	// 计数器缺席就无限放行）。
+	reclaudeQuota *ReclaudeQuotaGate
+	// reclaudeEnabled 是运行时总开关；为 nil 时一律判定为关闭（fail-closed）。
+	reclaudeEnabled       func(context.Context) bool
+	deferredService       *DeferredService
+	concurrencyService    *ConcurrencyService
+	claudeTokenProvider   *ClaudeTokenProvider
+	sessionLimitCache     SessionLimitCache // 会话数量限制缓存（仅 Anthropic OAuth/SetupToken）
+	deviceLimitCache      DeviceLimitCache  // 设备数量限制缓存（仅 Anthropic OAuth/SetupToken）
+	rpmCache              RPMCache          // RPM 计数缓存（仅 Anthropic OAuth/SetupToken）
+	userGroupRateResolver *userGroupRateResolver
+	userGroupRateCache    *gocache.Cache
+	userGroupRateSF       singleflight.Group
+	modelsListCache       *gocache.Cache
+	modelsListCacheTTL    time.Duration
+	settingService        *SettingService
+	responseHeaderFilter  *responseheaders.CompiledHeaderFilter
+	debugModelRouting     atomic.Bool
+	debugClaudeMimic      atomic.Bool
+	channelService        *ChannelService
+	resolver              *ModelPricingResolver
+	compositeResolver     *CompositeRouteResolver
+	debugGatewayBodyFile  atomic.Pointer[os.File] // non-nil when SUB2API_DEBUG_GATEWAY_BODY is set
+	tlsFPProfileService   *TLSFingerprintProfileService
+	balanceNotifyService  *BalanceNotifyService
+	userPlatformQuotaRepo UserPlatformQuotaRepository
 }
 
 // NewGatewayService creates a new GatewayService
@@ -1465,6 +1481,14 @@ func (s *GatewayService) GetAccessToken(ctx context.Context, account *Account) (
 		return apiKey, "apikey", nil
 	case AccountTypeBedrock:
 		return "", "bedrock", nil // Bedrock 使用 SigV4 签名或 API Key，由 forwardBedrock 处理
+	case AccountTypeReclaude:
+		// 两处都是刻意的：
+		// ① 空 token —— Anthropic 侧的凭据由 reclaude 网关用他们自己的号填，
+		//    我们不持有也不发 Authorization 头（见 buildUpstreamRequest 的特判）。
+		// ② tokenType="oauth" —— 它是 gateway_upstream_request.go 里十余处 CC 伪装
+		//    门控的共同钥匙。发给 reclaude 的**内层**请求必须是合格的 Claude Code
+		//    请求，否则他们再转给 Anthropic 时会被判 third-party。
+		return "", "oauth", nil
 	case AccountTypeServiceAccount:
 		if account.Platform != PlatformAnthropic {
 			return "", "", fmt.Errorf("unsupported service account platform: %s", account.Platform)

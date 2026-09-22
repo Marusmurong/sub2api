@@ -572,7 +572,7 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := s.doAdminProbeWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	resp, err := s.doAdminProbeWithTLS(req, proxyURL, account, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}
@@ -599,14 +599,13 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 func (s *AccountTestService) doAdminProbeWithTLS(
 	req *http.Request,
 	proxyURL string,
-	accountID int64,
-	accountConcurrency int,
+	account *Account,
 	profile *tlsfingerprint.Profile,
 ) (*http.Response, error) {
 	if req != nil {
 		adminprobe.Apply(req.Header)
 	}
-	return s.httpUpstream.DoWithTLS(req, proxyURL, accountID, accountConcurrency, profile)
+	return s.doUpstream(req, proxyURL, account, profile)
 }
 
 // doAdminProbe 同 doAdminProbeWithTLS，用于不走 TLS 指纹伪装的测试路径。
@@ -672,7 +671,7 @@ func (s *AccountTestService) testClaudeVertexServiceAccountConnection(c *gin.Con
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := s.doAdminProbeWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	resp, err := s.doAdminProbeWithTLS(req, proxyURL, account, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}
@@ -758,7 +757,7 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := s.doAdminProbeWithTLS(req, proxyURL, account.ID, account.Concurrency, nil)
+	resp, err := s.doAdminProbeWithTLS(req, proxyURL, account, nil)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}
@@ -2153,7 +2152,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := s.doAdminProbeWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	resp, err := s.doAdminProbeWithTLS(req, proxyURL, account, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions API (/v1/chat/completions) request failed: %s", err.Error()))
 	}
@@ -2434,7 +2433,7 @@ func (s *AccountTestService) testGeminiAccountConnection(c *gin.Context, account
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := s.doAdminProbeWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	resp, err := s.doAdminProbeWithTLS(req, proxyURL, account, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}
@@ -3062,7 +3061,7 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := s.doAdminProbeWithTLS(req, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	resp, err := s.doAdminProbeWithTLS(req, proxyURL, account, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Request failed: %s", err.Error()))
 	}

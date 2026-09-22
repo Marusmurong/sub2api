@@ -108,7 +108,9 @@ func (s *GatewayService) lookupPrevRequestID(ctx context.Context, account *Accou
 	if store == nil || account == nil || sessionID == "" {
 		return ""
 	}
-	id, err := store.GetPrevRequestID(ctx, account.ID, sessionID)
+	// 按身份纪元分命名空间：reclaude 换号时 account.ID 不变，光靠 accountID
+	// 做 key 会取到【旧上游账号】的 request id，形成一条可被证伪的假 parent-link。
+	id, err := store.GetPrevRequestID(ctx, account.ID, NamespaceSessionByIdentityEpoch(account, sessionID))
 	if err != nil || !upstreamRequestIDPattern.MatchString(id) {
 		return ""
 	}
@@ -180,5 +182,5 @@ func (s *GatewayService) rememberUpstreamRequestID(ctx context.Context, c *gin.C
 		return
 	}
 
-	_ = store.SetPrevRequestID(ctx, account.ID, sid, requestID, ccPrevReqTTL)
+	_ = store.SetPrevRequestID(ctx, account.ID, NamespaceSessionByIdentityEpoch(account, sid), requestID, ccPrevReqTTL)
 }

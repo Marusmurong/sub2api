@@ -1388,7 +1388,9 @@ func (s *GatewayService) shouldInjectAnthropicCacheTTL1h(ctx context.Context, ac
 // scoped to Anthropic OAuth/SetupToken accounts only; API-Key accounts and
 // non-Anthropic platforms bypass this step entirely.
 func (s *GatewayService) shouldNormalizeClientDateline(ctx context.Context, account *Account) bool {
-	if account == nil || !account.IsAnthropicOAuthOrSetupToken() || s == nil || s.settingService == nil {
+	// 谓词化（批次 0）：UsesAnthropicClientIdentity 对现有账号与
+	// IsAnthropicOAuthOrSetupToken() 等价，额外覆盖 reclaude。
+	if account == nil || !account.UsesAnthropicClientIdentity() || s == nil || s.settingService == nil {
 		return false
 	}
 	return s.settingService.IsClientDatelineNormalizationEnabled(ctx)

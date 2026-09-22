@@ -34,6 +34,18 @@ const (
 )
 
 func (s *GatewayService) shouldRetryUpstreamError(account *Account, statusCode int) bool {
+	// reclaude 账号：一律不重试。
+	//
+	// **每次重试都是从一个有限的配额包里扣钱，而这个包加不了号** —— 失败的
+	// 调用不产生 usage、不进计费链路，对方的配额却实打实扣了。
+	//
+	// 现状下不加这一条结果也碰巧是 false（ShouldHandleErrorCode 恒 true，因为
+	// IsCustomErrorCodesEnabled 要求 Type == apikey）。但那是**意外而不是设计**：
+	// 将来有人动那个门控，这里就会悄悄变成"会重试"，且没有任何测试会红。
+	if account.IsReclaude() {
+		return false
+	}
+
 	// OAuth/Setup Token 账号：仅 403 重试
 	if account.IsOAuth() {
 		return statusCode == 403
@@ -118,6 +130,22 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	if parsed == nil {
 		return nil, fmt.Errorf("parse request: empty request")
 	}
+	// reclaude 的 traceId 捕获器。
+	//
+	// 🔴 装在 Forward 的最外层，而不是某条具体路径上：统一 user_id / session_id
+	// 之后，**我们自己也分不清上游报错是哪个下游客户触发的了**，traceId 是唯一
+	// 的排障锚点。它必须覆盖全部返回点（主路径、透传、Bedrock、部分流），
+	// 任何一条漏掉的路径上排障就断线。
+	//
+	// 走 context 而不是改 ReclaudeUpstream.Do 的返回值：那个函数返回 *http.Response
+	// 是整条链路零改动的支点，不能为了带一个字符串把它破坏掉。
+	ctx, reclaudeTrace := WithReclaudeTraceCapture(ctx)
+	defer func() {
+		if result != nil {
+			result.UpstreamTraceID = reclaudeTrace.TraceID()
+		}
+	}()
+
 	// Anthropic Fast is requested with speed=fast rather than OpenAI's
 	// service_tier. Attach it at this shared boundary so passthrough, OAuth and
 	// partial-stream results all use the same billing and usage-log path.
@@ -228,7 +256,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 	//
 	// 越是真 CC 客户端泄漏得越彻底，判定条件与目的正好相反，故取消。
 	// isClaudeCode 本身仍保留：group.claude_code_only 路由门槛与客户端版本闸还在用它。
-	shouldMimicClaudeCode := account.IsOAuth()
+	// 谓词化（批次 0）：伪装的适用范围与「是不是 OAuth 凭据」本就是两件事。
+	// UsesClaudeCodeMimicry 对现有账号与 IsOAuth() 逐个等价，额外覆盖 reclaude
+	// —— 发给 reclaude 的内层请求必须是合格的 CC 请求，否则他们转给 Anthropic
+	// 时会被判 third-party。
+	shouldMimicClaudeCode := account.UsesClaudeCodeMimicry()
 
 	if shouldMimicClaudeCode {
 		// 与 Parrot 对齐：OAuth 账号无条件重写 system（即使客户端已发了 Claude Code
@@ -461,7 +493,11 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		SignatureOwnerAccountIDFromContext(ctx),
 	)
 	sessionTainted := s.isSessionSignatureTainted(ctx, c)
-	if shouldPreStripThinking(signatureOwner, account.ID, sessionTainted) {
+	// reclaude 换号时 account.ID 不变 ⇒ 上面那条「跨账号」判据对它整个失效。
+	// 靠账号上的「最近换号时间」反推：窗口内的每个会话第一次出现时就被永久标记，
+	// 窗口外的退回既有的「一次 400 再学会」路径。
+	reclaudeSwitched := ReclaudeSignatureTaintedAfterSwitch(account, time.Now())
+	if shouldPreStripThinking(signatureOwner, account.ID, sessionTainted || reclaudeSwitched) {
 		// 本轮换了账号：这个对话的历史从此永久混有别的账号的签名，打上标记，
 		// 之后即使一直待在同一个账号上也要继续剥离。
 		if !sessionTainted {
@@ -509,7 +545,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		lastWireBody = wireBody
 
 		// 发送请求
-		resp, err = s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+		resp, err = s.doUpstream(upstreamReq, proxyURL, account, tlsProfile)
 		if err != nil {
 			if resp != nil && resp.Body != nil {
 				_ = resp.Body.Close()
@@ -575,7 +611,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					retryReq, retryWireBody, buildErr := s.buildUpstreamRequest(retryCtx, c, account, filteredBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 					releaseRetryCtx()
 					if buildErr == nil {
-						retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+						retryResp, retryErr := s.doUpstream(retryReq, proxyURL, account, tlsProfile)
 						if retryErr == nil {
 							if retryResp.StatusCode < 400 {
 								// 重试请求被上游接受后同步 ParsedRequest，保证 usage/日志看到真实请求体。
@@ -618,7 +654,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 									retryReq2, retryWireBody2, buildErr2 := s.buildUpstreamRequest(retryCtx2, c, account, filteredBody2, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 									releaseRetryCtx2()
 									if buildErr2 == nil {
-										retryResp2, retryErr2 := s.httpUpstream.DoWithTLS(retryReq2, proxyURL, account.ID, account.Concurrency, tlsProfile)
+										retryResp2, retryErr2 := s.doUpstream(retryReq2, proxyURL, account, tlsProfile)
 										if retryErr2 == nil {
 											if retryResp2.StatusCode < 400 {
 												// 二阶段工具块降级成功时也必须更新当前 body。
@@ -701,7 +737,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						budgetRetryReq, budgetWireBody, buildErr := s.buildUpstreamRequest(budgetRetryCtx, c, account, rectifiedBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 						releaseBudgetRetryCtx()
 						if buildErr == nil {
-							budgetRetryResp, retryErr := s.httpUpstream.DoWithTLS(budgetRetryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+							budgetRetryResp, retryErr := s.doUpstream(budgetRetryReq, proxyURL, account, tlsProfile)
 							if retryErr == nil {
 								if budgetRetryResp.StatusCode < 400 {
 									// budget 修正请求成功后，ParsedRequest 也要描述被接受的修正版。
@@ -753,7 +789,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 						samplingRetryReq, samplingWireBody, buildErr := s.buildUpstreamRequest(samplingRetryCtx, c, account, strippedBody, token, tokenType, reqModel, reqStream, shouldMimicClaudeCode)
 						releaseSamplingRetryCtx()
 						if buildErr == nil {
-							samplingRetryResp, retryErr := s.httpUpstream.DoWithTLS(samplingRetryReq, proxyURL, account.ID, account.Concurrency, tlsProfile)
+							samplingRetryResp, retryErr := s.doUpstream(samplingRetryReq, proxyURL, account, tlsProfile)
 							if retryErr == nil {
 								if samplingRetryResp.StatusCode < 400 {
 									// 重试被接受后同步 ParsedRequest，保证 usage/日志看到真实请求体。

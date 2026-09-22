@@ -57,7 +57,9 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 
 	// 与 /v1/messages 保持一致：OAuth 账号一律统一伪装，不因下游像 CC 就透传其身份。
 	// count_tokens 与 messages 打同一批账号，放过它等于给身份泄漏留后门。
-	shouldMimicClaudeCode := account.IsOAuth()
+	// 谓词化：count_tokens 有自己的一整套请求构造，与主转发路径并行存在。
+	// 这里退回 IsOAuth() 会让发给 reclaude 的内层请求不是 CC 请求，且静默无错。
+	shouldMimicClaudeCode := account.UsesClaudeCodeMimicry()
 
 	if shouldMimicClaudeCode {
 		// count_tokens 是严格 schema，出现 max_tokens/temperature 会被 400
@@ -155,7 +157,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 	}
 
 	// 发送请求
-	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	resp, err := s.doCountTokensUpstream(upstreamReq, proxyURL, account, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(err.Error()), "")
 		s.countTokensError(c, http.StatusBadGateway, "upstream_error", "Request failed")
@@ -182,7 +184,7 @@ func (s *GatewayService) ForwardCountTokens(ctx context.Context, c *gin.Context,
 		filteredBody := FilterThinkingBlocksForRetry(body, reqModel)
 		retryReq, retryWireBody, buildErr := s.buildCountTokensRequest(ctx, c, account, filteredBody, token, tokenType, reqModel, shouldMimicClaudeCode)
 		if buildErr == nil {
-			retryResp, retryErr := s.httpUpstream.DoWithTLS(retryReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+			retryResp, retryErr := s.doCountTokensUpstream(retryReq, proxyURL, account, s.tlsFPProfileService.ResolveTLSProfile(account))
 			if retryErr == nil {
 				if retryResp.StatusCode < 400 {
 					// count_tokens 签名重试成功后记录最终 wire body，错误响应仍保留原 body 便于后续处理。
@@ -279,7 +281,7 @@ func (s *GatewayService) forwardCountTokensAnthropicAPIKeyPassthrough(ctx contex
 		proxyURL = account.Proxy.URL()
 	}
 
-	resp, err := s.httpUpstream.DoWithTLS(upstreamReq, proxyURL, account.ID, account.Concurrency, s.tlsFPProfileService.ResolveTLSProfile(account))
+	resp, err := s.doCountTokensUpstream(upstreamReq, proxyURL, account, s.tlsFPProfileService.ResolveTLSProfile(account))
 	if err != nil {
 		setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(err.Error()), "")
 		appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
@@ -485,7 +487,8 @@ func (s *GatewayService) buildCountTokensRequest(ctx context.Context, c *gin.Con
 		ctEnableFP, ctEnableMPT, _ = s.settingService.GetGatewayForwardingSettings(ctx)
 	}
 	var ctFingerprint *Fingerprint
-	if account.IsOAuth() && s.identityService != nil {
+	// 谓词化：同主转发路径，退回 IsOAuth() 会让 user_id 不被归一。
+	if account.UsesClaudeCodeMimicry() && s.identityService != nil {
 		fp, err := s.identityService.GetOrCreateFingerprint(ctx, account, clientHeaders)
 		if err == nil {
 			ctFingerprint = fp

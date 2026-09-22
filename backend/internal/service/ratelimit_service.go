@@ -149,11 +149,21 @@ func (s *RateLimitService) IsOpenAIAdvancedSchedulerStickyWeightedEnabled(ctx co
 	return gateway.isOpenAIAdvancedSchedulerStickyWeightedEnabled(ctx)
 }
 
+// setAccountRateLimited 写限流冷却，并对 reclaude 账号封顶。
+//
+// 收成一个助手而不是在每个分支各判一次：handle429 有五条分支会写冷却，
+// 漏掉任何一条，那条路径上的 reclaude 账号就会按底层账号的窗口躺几个小时。
+func (s *RateLimitService) setAccountRateLimited(ctx context.Context, account *Account, resetAt time.Time) error {
+	return s.accountRepo.SetRateLimited(ctx, account.ID, CapReclaudeCooldown(account, resetAt, time.Now()))
+}
+
 func (s *RateLimitService) notifyAccountSchedulingBlocked(account *Account, until time.Time, reason string) {
 	if s == nil || s.runtimeBlocker == nil || account == nil {
 		return
 	}
-	s.runtimeBlocker.BlockAccountScheduling(account, until, reason)
+	// 运行时拦截也要封顶：它与 DB 冷却是两套状态，只压住 DB 那一边的话，
+	// 账号在内存里照样被挡到底层账号的窗口结束。
+	s.runtimeBlocker.BlockAccountScheduling(account, CapReclaudeCooldown(account, until, time.Now()), reason)
 }
 
 func (s *RateLimitService) notifyAccountSchedulingBlockCleared(accountID int64) {
@@ -1280,7 +1290,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 		notifyOpenAIAutoReset(account.ID)
 		if resetAt := s.calculateOpenAI429ResetTime(headers); resetAt != nil {
 			s.notifyAccountSchedulingBlocked(account, *resetAt, "429")
-			if err := s.accountRepo.SetRateLimited(ctx, account.ID, *resetAt); err != nil {
+			if err := s.setAccountRateLimited(ctx, account, *resetAt); err != nil {
 				slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 				return
 			}
@@ -1292,7 +1302,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	// 2. Anthropic 平台：尝试解析 per-window 头（5h / 7d），选择实际触发的窗口
 	if result := calculateAnthropic429ResetTime(headers); result != nil {
 		s.notifyAccountSchedulingBlocked(account, result.resetAt, "429")
-		if err := s.accountRepo.SetRateLimited(ctx, account.ID, result.resetAt); err != nil {
+		if err := s.setAccountRateLimited(ctx, account, result.resetAt); err != nil {
 			slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 			return
 		}
@@ -1322,7 +1332,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 			if resetAt := parseOpenAIRateLimitResetTime(responseBody); resetAt != nil {
 				resetTime := time.Unix(*resetAt, 0)
 				s.notifyAccountSchedulingBlocked(account, resetTime, "429")
-				if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetTime); err != nil {
+				if err := s.setAccountRateLimited(ctx, account, resetTime); err != nil {
 					slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 					return
 				}
@@ -1334,7 +1344,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 			if resetAt := ParseGeminiRateLimitResetTime(responseBody); resetAt != nil {
 				resetTime := time.Unix(*resetAt, 0)
 				s.notifyAccountSchedulingBlocked(account, resetTime, "429")
-				if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetTime); err != nil {
+				if err := s.setAccountRateLimited(ctx, account, resetTime); err != nil {
 					slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 					return
 				}
@@ -1373,7 +1383,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 
 	// 标记限流状态
 	s.notifyAccountSchedulingBlocked(account, resetAt, "429")
-	if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
+	if err := s.setAccountRateLimited(ctx, account, resetAt); err != nil {
 		slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 		return
 	}
@@ -1398,7 +1408,7 @@ func (s *RateLimitService) apply429FallbackRateLimit(ctx context.Context, accoun
 	resetAt := time.Now().Add(cooldown)
 	slog.Warn("rate_limit_429_fallback_used", "account_id", account.ID, "platform", account.Platform, "reason", reason, "using_default", cooldown.String())
 	s.notifyAccountSchedulingBlocked(account, resetAt, "429_fallback")
-	if err := s.accountRepo.SetRateLimited(ctx, account.ID, resetAt); err != nil {
+	if err := s.setAccountRateLimited(ctx, account, resetAt); err != nil {
 		slog.Warn("rate_limit_set_failed", "account_id", account.ID, "error", err)
 	}
 }
@@ -1576,7 +1586,7 @@ func (s *RateLimitService) persistAnthropicExhaustedWindowLimit(ctx context.Cont
 	}
 
 	s.notifyAccountSchedulingBlocked(account, limit.resetAt, limit.reason)
-	if err := s.accountRepo.SetRateLimited(ctx, account.ID, limit.resetAt); err != nil {
+	if err := s.setAccountRateLimited(ctx, account, limit.resetAt); err != nil {
 		slog.Warn("anthropic_window_rate_limit_set_failed",
 			"account_id", account.ID,
 			"window", limit.window,
@@ -2057,6 +2067,16 @@ func (s *RateLimitService) handle529(ctx context.Context, account *Account) {
 
 // UpdateSessionWindow 从成功响应更新5h窗口状态
 func (s *RateLimitService) UpdateSessionWindow(ctx context.Context, account *Account, headers http.Header) {
+	// 🔴 reclaude 账号一律跳过。
+	//
+	// anthropic-ratelimit-unified-* 反映的是**底层那个 Claude 账号**的窗口，
+	// 不是我们配额包的；而底层账号会被静默换掉 ⇒ 窗口还会毫无征兆地跳变。
+	// 写进来等于把一个陌生账号的 5h 窗口原样显示在管理端「5h 窗口」栏，
+	// 直接违反「上游拿不到的东西，界面上不许显示」这条红线。
+	if account.IsReclaude() {
+		return
+	}
+
 	status := headers.Get("anthropic-ratelimit-unified-5h-status")
 	if status == "" {
 		return

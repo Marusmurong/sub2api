@@ -246,6 +246,39 @@ func (a *Account) IsOAuth() bool {
 	return a.Type == AccountTypeOAuth || a.Type == AccountTypeSetupToken
 }
 
+// IsReclaude 判断账号是否为 reclaude 中转订阅。
+// 这类账号不持有 Anthropic 凭据：上游认证由 reclaude 网关用他们自己的号完成，
+// 我们只持有设备凭据（sk + ed25519 seed），请求走信封协议转发。
+func (a *Account) IsReclaude() bool {
+	return a != nil && a.Type == AccountTypeReclaude
+}
+
+// UsesClaudeCodeMimicry 判断账号是否需要走 Claude Code 伪装链路
+// （system 重写、billing attribution 归一、统一指纹、客户端 header 不透传等）。
+//
+// 取代散落各处的 account.IsOAuth() 判定：伪装的适用范围与「是不是 OAuth 凭据」
+// 本就是两件事，reclaude 账号同样需要伪装——发给 reclaude 的**内层**请求必须
+// 是一个合格的 Claude Code 请求，否则他们再转给 Anthropic 时会被判 third-party。
+func (a *Account) UsesClaudeCodeMimicry() bool {
+	if a == nil {
+		return false
+	}
+	return a.IsOAuth() || a.IsReclaude()
+}
+
+// UsesAnthropicClientIdentity 判断出站请求是否要按 Claude Code 身份清洗
+// （目前只有客户端 dateline 隐写归一）。
+//
+// 与 UsesClaudeCodeMimicry 分开是因为两者作用域今天确实不同：本谓词限定
+// Anthropic 平台。与 IsAnthropicOAuthOrSetupToken 分开是因为后者还管着 5h 窗口
+// 额度、会话数控制与 TLS 指纹，扩大它会顺带改掉那三样。
+func (a *Account) UsesAnthropicClientIdentity() bool {
+	if a == nil {
+		return false
+	}
+	return a.IsAnthropicOAuthOrSetupToken() || a.IsReclaude()
+}
+
 // IsPrivacySet 检查账号的 privacy 是否已成功设置。
 // OpenAI: privacy_mode == "training_off"
 // Antigravity: privacy_mode == "privacy_set"
@@ -1039,7 +1072,22 @@ func (a *Account) GetAccountUUID() string {
 	if v := strings.TrimSpace(a.GetExtraString("account_uuid")); v != "" {
 		return v
 	}
-	return strings.TrimSpace(a.GetCredential("account_uuid"))
+	if v := strings.TrimSpace(a.GetCredential("account_uuid")); v != "" {
+		return v
+	}
+
+	// reclaude 回落到**我们自己生成的**稳定 UUID。
+	//
+	// account_uuid 本来来自 Anthropic OAuth 流程，而 reclaude 不给我们这个值，
+	// 且底层账号会被静默换掉 ⇒ 根本不存在一个稳定的真实值。取不到时
+	// RewriteUserIDWithMasking 整段会被跳过，身份统一直接落空 —— 而那是
+	// 「一台设备底下挂 50 个不同 user_id」这条最直接的定性证据。
+	//
+	// 代价是上游看到的 user_id 哈希与自建号池不同源。**这是刻意的。**
+	if a.IsReclaude() {
+		return strings.TrimSpace(a.GetCredential(CredKeyReclaudeSyntheticAccountUUID))
+	}
+	return ""
 }
 
 // matchAntigravityWildcard 通配符匹配（仅支持末尾 *）
