@@ -97,9 +97,16 @@ func deviceLimitsFor(account *Account) DeviceLimits {
 	}
 }
 
-// isDeviceLimitApplicable 报告账号是否启用了任一层设备限制（仅 Anthropic OAuth/SetupToken）。
+// isDeviceLimitApplicable 报告账号是否启用了任一层设备限制。
+//
+// 适用范围：Anthropic OAuth/SetupToken 与 reclaude。
+//
+// 🔴 reclaude 走的是 SupportsDeviceLimit() 这个**窄谓词**，而不是放宽
+// IsAnthropicOAuthOrSetupToken —— 后者还管着 5h 窗口额度、会话数控制与
+// TLS 指纹，扩大它会顺带把那三样一起打开，而 reclaude 刻意不写会话窗口
+// （上游返回的窗口属于底层那个 Claude 账号，不是我们的配额包）。
 func isDeviceLimitApplicable(account *Account) bool {
-	return account != nil && account.IsAnthropicOAuthOrSetupToken() &&
+	return account != nil && account.SupportsDeviceLimit() &&
 		(account.GetMaxDevices() > 0 || account.GetMaxDevicesDaily() > 0)
 }
 

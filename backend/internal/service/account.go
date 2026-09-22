@@ -279,6 +279,60 @@ func (a *Account) UsesAnthropicClientIdentity() bool {
 	return a.IsAnthropicOAuthOrSetupToken() || a.IsReclaude()
 }
 
+// SupportsRPMLimit 报告账号是否适用 RPM 限制。
+//
+// RPM 是 **sub 端准入控制**：Redis 里数每分钟请求数，在请求被装进信封发给
+// 上游之前就判完了。因此它与「上游能看见什么」无关，reclaude 同样适用。
+func (a *Account) SupportsRPMLimit() bool {
+	if a == nil {
+		return false
+	}
+	return a.IsAnthropicOAuthOrSetupToken() || a.IsReclaude()
+}
+
+// SupportsSessionLimit 报告账号是否适用会话数限制。
+//
+// 同 SupportsRPMLimit：Redis 里按粘性会话 hash 占槽 + 空闲超时，纯 sub 端。
+// 与上游的 5h 会话窗口是两回事 —— 后者 reclaude 刻意不记录。
+func (a *Account) SupportsSessionLimit() bool {
+	if a == nil {
+		return false
+	}
+	return a.IsAnthropicOAuthOrSetupToken() || a.IsReclaude()
+}
+
+// SupportsWindowCostLimit 报告账号是否适用窗口费用限制。
+//
+// 🔴 这一项**对 reclaude 不适用**，且理由与前两个不同：它不是「上游看不看得见」
+// 的问题，而是**窗口锚点不存在**。窗口费用按 GetCurrentWindowStartTime() 取窗口
+// 起点，而那个函数读 SessionWindowStart/End —— reclaude 从不写这两个字段
+// （上游返回的窗口属于底层那个 Claude 账号，不是我们的配额包），于是会静默
+// 回落到「当前整点起」，把一个 5h 窗口的限额悄悄变成小时窗。
+// 那不是不生效，是语义错乱，比关掉更糟。
+func (a *Account) SupportsWindowCostLimit() bool {
+	if a == nil {
+		return false
+	}
+	return a.IsAnthropicOAuthOrSetupToken()
+}
+
+// SupportsDeviceLimit 报告账号是否适用「窗口内设备数」限制。
+//
+// 与 IsAnthropicOAuthOrSetupToken 分开的理由同 UsesAnthropicClientIdentity：
+// 那个谓词还管着 5h 窗口额度、会话数控制与 TLS 指纹，不能为了开设备闸就扩大它。
+//
+// reclaude 需要设备闸有两个理由：
+//   - 暴露面：信封统一了 HTTP 层身份，但 system 环境块是逐请求透传的，
+//     下游客户端的多样性仍会到达上游。
+//   - 商业：拼车档位（20X拼车-2 / -4）本质是「一份订阅切给 N 个人」，
+//     设备闸是唯一能把这个约束落到实处的地方。
+func (a *Account) SupportsDeviceLimit() bool {
+	if a == nil {
+		return false
+	}
+	return a.IsAnthropicOAuthOrSetupToken() || a.IsReclaude()
+}
+
 // IsPrivacySet 检查账号的 privacy 是否已成功设置。
 // OpenAI: privacy_mode == "training_off"
 // Antigravity: privacy_mode == "privacy_set"

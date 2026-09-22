@@ -1971,9 +1971,14 @@
         </div>
 
         <div>
-          <label class="input-label">{{ t('admin.accounts.reclaudeDailyTokenCap') }}</label>
-          <input v-model="reclaudeForm.dailyTokenCap" type="text" inputmode="numeric" class="input" placeholder="2000000" />
-          <p class="input-hint">{{ t('admin.accounts.reclaudeDailyTokenCapHint') }}</p>
+          <label class="input-label">{{ t('admin.accounts.reclaudePlanTier') }}</label>
+          <select v-model="reclaudeForm.planTier" class="input">
+            <option value="">{{ t('admin.accounts.reclaudePlanTierPlaceholder') }}</option>
+            <option v-for="tier in RECLAUDE_PLAN_TIERS" :key="tier.id" :value="tier.id">
+              {{ tier.label }} — ${{ tier.dailyLimitUsd }}/{{ t('admin.accounts.reclaudePlanTierPerDay') }}
+            </option>
+          </select>
+          <p class="input-hint">{{ t('admin.accounts.reclaudePlanTierHint') }}</p>
         </div>
       </div>
 
@@ -2750,9 +2755,14 @@
         </div>
       </div>
 
-      <!-- 配额控制 (Anthropic OAuth/SetupToken: 亲和 + 窗口费用 + 会话 + RPM 等) -->
+      <!-- 配额控制。reclaude 只开设备数限制：
+           窗口费用与会话数都绑在 5h 会话窗口上，而 reclaude 刻意不写会话窗口
+           （上游返回的窗口属于底层那个 Claude 账号，不是我们的配额包）。 -->
       <div
-        v-if="form.platform === 'anthropic' && accountCategory === 'oauth-based'"
+        v-if="
+          form.platform === 'anthropic' &&
+          (accountCategory === 'oauth-based' || accountCategory === 'reclaude')
+        "
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -2763,7 +2773,7 @@
         </div>
 
         <!-- Window Cost Limit -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+        <div v-if="accountCategory === 'oauth-based'" class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
           <div class="mb-3 flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.windowCost.label') }}</label>
@@ -4168,6 +4178,7 @@ import {
   buildReclaudeCredentials,
   buildReclaudeExtra,
   RECLAUDE_GATEWAY_HOSTS,
+  RECLAUDE_PLAN_TIERS,
   validateReclaudeForm,
   type ReclaudeFormValues
 } from '@/components/account/reclaudeCredentials'
@@ -4373,7 +4384,7 @@ const reclaudeForm = reactive<ReclaudeFormValues>({
   deviceHostname: '',
   timezone: '',
   userEmail: '',
-  dailyTokenCap: '',
+  planTier: '',
   proxyId: null
 })
 

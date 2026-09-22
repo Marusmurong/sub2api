@@ -381,40 +381,41 @@ func (h *AccountHandler) buildAccountResponseWithRuntime(ctx context.Context, ac
 		}
 	}
 
-	if account.IsAnthropicOAuthOrSetupToken() {
-		if h.accountUsageService != nil && account.GetWindowCostLimit() > 0 {
-			startTime := account.GetCurrentWindowStartTime()
-			if stats, err := h.accountUsageService.GetAccountWindowStats(ctx, account.ID, startTime); err == nil && stats != nil {
-				cost := stats.StandardCost
-				item.CurrentWindowCost = &cost
+	// 四项计数各按自己的适用谓词取，不能共用一个外层判断：
+	// 漏采的表现是详情页那一栏空白，而「空白」会被读成「没有用量」。
+	if account.SupportsWindowCostLimit() && h.accountUsageService != nil && account.GetWindowCostLimit() > 0 {
+		startTime := account.GetCurrentWindowStartTime()
+		if stats, err := h.accountUsageService.GetAccountWindowStats(ctx, account.ID, startTime); err == nil && stats != nil {
+			cost := stats.StandardCost
+			item.CurrentWindowCost = &cost
+		}
+	}
+
+	if account.SupportsSessionLimit() && h.sessionLimitCache != nil && account.GetMaxSessions() > 0 {
+		idleTimeout := time.Duration(account.GetSessionIdleTimeoutMinutes()) * time.Minute
+		idleTimeouts := map[int64]time.Duration{account.ID: idleTimeout}
+		if sessions, err := h.sessionLimitCache.GetActiveSessionCountBatch(ctx, []int64{account.ID}, idleTimeouts); err == nil {
+			if count, ok := sessions[account.ID]; ok {
+				item.ActiveSessions = &count
 			}
 		}
+	}
 
-		if h.sessionLimitCache != nil && account.GetMaxSessions() > 0 {
-			idleTimeout := time.Duration(account.GetSessionIdleTimeoutMinutes()) * time.Minute
-			idleTimeouts := map[int64]time.Duration{account.ID: idleTimeout}
-			if sessions, err := h.sessionLimitCache.GetActiveSessionCountBatch(ctx, []int64{account.ID}, idleTimeouts); err == nil {
-				if count, ok := sessions[account.ID]; ok {
-					item.ActiveSessions = &count
-				}
+	if account.SupportsDeviceLimit() && h.deviceLimitCache != nil &&
+		(account.GetMaxDevices() > 0 || account.GetMaxDevicesDaily() > 0) {
+		windows := map[int64]time.Duration{account.ID: time.Duration(account.GetDeviceWindowMinutes()) * time.Minute}
+		if devices, err := h.deviceLimitCache.GetDeviceCountsBatch(ctx, []int64{account.ID}, windows); err == nil {
+			if counts, ok := devices[account.ID]; ok {
+				active, daily := counts.Active, counts.Daily
+				item.ActiveDevices = &active
+				item.ActiveDevicesDaily = &daily
 			}
 		}
+	}
 
-		if h.deviceLimitCache != nil && (account.GetMaxDevices() > 0 || account.GetMaxDevicesDaily() > 0) {
-			windows := map[int64]time.Duration{account.ID: time.Duration(account.GetDeviceWindowMinutes()) * time.Minute}
-			if devices, err := h.deviceLimitCache.GetDeviceCountsBatch(ctx, []int64{account.ID}, windows); err == nil {
-				if counts, ok := devices[account.ID]; ok {
-					active, daily := counts.Active, counts.Daily
-					item.ActiveDevices = &active
-					item.ActiveDevicesDaily = &daily
-				}
-			}
-		}
-
-		if h.rpmCache != nil && account.GetBaseRPM() > 0 {
-			if rpm, err := h.rpmCache.GetRPM(ctx, account.ID); err == nil {
-				item.CurrentRPM = &rpm
-			}
+	if account.SupportsRPMLimit() && h.rpmCache != nil && account.GetBaseRPM() > 0 {
+		if rpm, err := h.rpmCache.GetRPM(ctx, account.ID); err == nil {
+			item.CurrentRPM = &rpm
 		}
 	}
 
@@ -744,21 +745,21 @@ func (h *AccountHandler) List(c *gin.Context) {
 	deviceWindows := make(map[int64]time.Duration) // 各账号的设备释放窗口配置
 	for i := range accounts {
 		acc := &accounts[i]
-		if acc.IsAnthropicOAuthOrSetupToken() {
-			if acc.GetWindowCostLimit() > 0 {
-				windowCostAccountIDs = append(windowCostAccountIDs, acc.ID)
-			}
-			if acc.GetMaxSessions() > 0 {
-				sessionLimitAccountIDs = append(sessionLimitAccountIDs, acc.ID)
-				sessionIdleTimeouts[acc.ID] = time.Duration(acc.GetSessionIdleTimeoutMinutes()) * time.Minute
-			}
-			if acc.GetMaxDevices() > 0 || acc.GetMaxDevicesDaily() > 0 {
-				deviceLimitAccountIDs = append(deviceLimitAccountIDs, acc.ID)
-				deviceWindows[acc.ID] = time.Duration(acc.GetDeviceWindowMinutes()) * time.Minute
-			}
-			if acc.GetBaseRPM() > 0 {
-				rpmAccountIDs = append(rpmAccountIDs, acc.ID)
-			}
+		// 按各自的适用谓词采集：漏掉一类的表现是列表页那一列永远空白，
+		// 而「空白」会被读成「没有用量」，不是「我们没查」。
+		if acc.SupportsWindowCostLimit() && acc.GetWindowCostLimit() > 0 {
+			windowCostAccountIDs = append(windowCostAccountIDs, acc.ID)
+		}
+		if acc.SupportsSessionLimit() && acc.GetMaxSessions() > 0 {
+			sessionLimitAccountIDs = append(sessionLimitAccountIDs, acc.ID)
+			sessionIdleTimeouts[acc.ID] = time.Duration(acc.GetSessionIdleTimeoutMinutes()) * time.Minute
+		}
+		if acc.SupportsDeviceLimit() && (acc.GetMaxDevices() > 0 || acc.GetMaxDevicesDaily() > 0) {
+			deviceLimitAccountIDs = append(deviceLimitAccountIDs, acc.ID)
+			deviceWindows[acc.ID] = time.Duration(acc.GetDeviceWindowMinutes()) * time.Minute
+		}
+		if acc.SupportsRPMLimit() && acc.GetBaseRPM() > 0 {
+			rpmAccountIDs = append(rpmAccountIDs, acc.ID)
 		}
 	}
 
@@ -793,7 +794,7 @@ func (h *AccountHandler) List(c *gin.Context) {
 
 		for i := range accounts {
 			acc := &accounts[i]
-			if !acc.IsAnthropicOAuthOrSetupToken() || acc.GetWindowCostLimit() <= 0 {
+			if !acc.SupportsWindowCostLimit() || acc.GetWindowCostLimit() <= 0 {
 				continue
 			}
 			accCopy := acc // 闭包捕获

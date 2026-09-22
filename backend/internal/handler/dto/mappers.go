@@ -280,20 +280,27 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		QuotaDimension:          a.QuotaDimension,
 	}
 
-	// 提取 5h 窗口费用控制和会话数量控制配置（仅 Anthropic OAuth/SetupToken 账号有效）
-	if a.IsAnthropicOAuthOrSetupToken() {
+	// 准入控制配置按**各自的适用谓词**输出，而不是一把 oauth 判断包住全部。
+	//
+	// 🔴 只写不读是个静默的破坏：编辑弹窗打开时字段是空的，运维点保存就把
+	// 已生效的限额抹了 —— 而抹掉之后的表现是「这个号不再受限」，没有任何报错。
+	if a.SupportsWindowCostLimit() {
 		if limit := a.GetWindowCostLimit(); limit > 0 {
 			out.WindowCostLimit = &limit
 		}
 		if reserve := a.GetWindowCostStickyReserve(); reserve > 0 {
 			out.WindowCostStickyReserve = &reserve
 		}
+	}
+	if a.SupportsSessionLimit() {
 		if maxSessions := a.GetMaxSessions(); maxSessions > 0 {
 			out.MaxSessions = &maxSessions
 		}
 		if idleTimeout := a.GetSessionIdleTimeoutMinutes(); idleTimeout > 0 {
 			out.SessionIdleTimeoutMin = &idleTimeout
 		}
+	}
+	if a.SupportsDeviceLimit() {
 		if maxDevices := a.GetMaxDevices(); maxDevices > 0 {
 			out.MaxDevices = &maxDevices
 			windowMinutes := a.GetDeviceWindowMinutes()
@@ -302,6 +309,8 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		if maxDaily := a.GetMaxDevicesDaily(); maxDaily > 0 {
 			out.MaxDevicesDaily = &maxDaily
 		}
+	}
+	if a.SupportsRPMLimit() {
 		if rpm := a.GetBaseRPM(); rpm > 0 {
 			out.BaseRPM = &rpm
 			strategy := a.GetRPMStrategy()
@@ -309,6 +318,10 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 			buffer := a.GetRPMStickyBuffer()
 			out.RPMStickyBuffer = &buffer
 		}
+	}
+	// UMQ 与 TLS 指纹仍限 oauth：前者是发包节奏伪装，后者的指纹档案按 oauth
+	// 客户端标定 —— 两者对 reclaude 是否适用没有评估过，不顺手放开。
+	if a.IsAnthropicOAuthOrSetupToken() {
 		// 用户消息队列模式
 		if mode := a.GetUserMsgQueueMode(); mode != "" {
 			out.UserMsgQueueMode = &mode

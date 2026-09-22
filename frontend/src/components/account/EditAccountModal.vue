@@ -1151,9 +1151,14 @@
         </div>
 
         <div>
-          <label class="input-label">{{ t('admin.accounts.reclaudeDailyTokenCap') }}</label>
-          <input v-model="editReclaudeDailyTokenCap" type="text" inputmode="numeric" class="input" />
-          <p class="input-hint">{{ t('admin.accounts.reclaudeDailyTokenCapHint') }}</p>
+          <label class="input-label">{{ t('admin.accounts.reclaudePlanTier') }}</label>
+          <select v-model="editReclaudePlanTier" class="input">
+            <option value="">{{ t('admin.accounts.reclaudePlanTierPlaceholder') }}</option>
+            <option v-for="tier in RECLAUDE_PLAN_TIERS" :key="tier.id" :value="tier.id">
+              {{ tier.label }} — ${{ tier.dailyLimitUsd }}/{{ t('admin.accounts.reclaudePlanTierPerDay') }}
+            </option>
+          </select>
+          <p class="input-hint">{{ t('admin.accounts.reclaudePlanTierHint') }}</p>
         </div>
       </div>
 
@@ -2561,9 +2566,14 @@
         <p class="input-hint">{{ t('admin.accounts.autoResetCredit.thresholdHint') }}</p>
       </div>
 
-      <!-- 配额控制 (Anthropic OAuth/SetupToken: 亲和 + 窗口费用 + 会话 + RPM 等) -->
+      <!-- 配额控制。reclaude 只开设备数限制：窗口费用与会话数都绑在 5h 会话窗口上，
+           而 reclaude 刻意不写会话窗口（上游返回的窗口属于底层那个 Claude 账号，
+           不是我们的配额包）。 -->
       <div
-        v-if="account?.platform === 'anthropic' && (account?.type === 'oauth' || account?.type === 'setup-token')"
+        v-if="
+          account?.platform === 'anthropic' &&
+          (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'reclaude')
+        "
         class="border-t border-gray-200 pt-4 dark:border-dark-600 space-y-4"
       >
         <div class="mb-3">
@@ -2574,7 +2584,10 @@
         </div>
 
         <!-- Window Cost Limit -->
-        <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+        <div
+          v-if="account?.type === 'oauth' || account?.type === 'setup-token'"
+          class="rounded-lg border border-gray-200 p-4 dark:border-dark-600"
+        >
           <div class="mb-3 flex items-center justify-between">
             <div>
               <label class="input-label mb-0">{{ t('admin.accounts.quotaControl.windowCost.label') }}</label>
@@ -3213,7 +3226,9 @@ import {
 } from '@/components/account/credentialsBuilder'
 import {
   isAllowedReclaudeGateway,
-  RECLAUDE_DAILY_TOKEN_CAP_EXTRA_KEY,
+  RECLAUDE_PLAN_TIERS,
+  RECLAUDE_PLAN_TIER_EXTRA_KEY,
+  findReclaudePlanTier,
   RECLAUDE_GATEWAY_HOSTS
 } from '@/components/account/reclaudeCredentials'
 import {
@@ -3469,7 +3484,7 @@ const editReclaudeBoundEmail = ref('')
 const editReclaudeGatewayUrl = ref(reclaudeGatewayOptions[0])
 const editReclaudeClientVersion = ref('')
 const editReclaudeClientPlatform = ref('')
-const editReclaudeDailyTokenCap = ref('')
+const editReclaudePlanTier = ref('')
 
 const editBedrockRegion = ref('')
 const editBedrockForceGlobal = ref(false)
@@ -4471,7 +4486,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       (creds.reclaude_gateway_url as string) || reclaudeGatewayOptions[0]
     editReclaudeClientVersion.value = (creds.reclaude_client_version as string) || ''
     editReclaudeClientPlatform.value = (creds.reclaude_client_platform as string) || ''
-    editReclaudeDailyTokenCap.value = String(extra.reclaude_daily_token_cap ?? '')
+    editReclaudePlanTier.value = String(extra.reclaude_plan_tier ?? '')
 
   } else if (newAccount.type === 'bedrock' && newAccount.credentials) {
     const bedrockCreds = newAccount.credentials as Record<string, unknown>
@@ -5383,9 +5398,9 @@ const handleSubmit = async () => {
         appStore.showError(t('admin.accounts.reclaudeGatewayInvalid'))
         return
       }
-      const dailyCap = Number(editReclaudeDailyTokenCap.value.trim())
-      if (!Number.isFinite(dailyCap) || dailyCap <= 0) {
-        appStore.showError(t('admin.accounts.reclaudeDailyCapRequired'))
+      const tier = findReclaudePlanTier(editReclaudePlanTier.value)
+      if (!tier) {
+        appStore.showError(t('admin.accounts.reclaudePlanTierRequired'))
         return
       }
       if (
@@ -5401,9 +5416,11 @@ const handleSubmit = async () => {
       newCredentials.reclaude_client_platform = editReclaudeClientPlatform.value.trim()
 
       updatePayload.credentials = newCredentials
+      // 只提交档位 id：日限额由后端按档位换算写进 quota_daily_limit。
+      // 前端也算一遍的话，两处换算表迟早漂移，而漂移的方向是超卖。
       updatePayload.extra = {
         ...((props.account.extra as Record<string, unknown>) || {}),
-        [RECLAUDE_DAILY_TOKEN_CAP_EXTRA_KEY]: dailyCap
+        [RECLAUDE_PLAN_TIER_EXTRA_KEY]: tier.id
       }
     } else if (props.account.type === 'bedrock') {
       const currentCredentials = (props.account.credentials as Record<string, unknown>) || {}

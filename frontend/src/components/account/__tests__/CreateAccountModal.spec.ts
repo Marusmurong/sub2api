@@ -712,3 +712,52 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(createOpenAICodexPATMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(false)
   })
 })
+
+// 设备数限制对 reclaude 同样适用：
+//  - 暴露面：信封统一了 HTTP 层身份，但 system 环境块逐请求透传，
+//    下游客户端的多样性仍会到达上游。
+//  - 商业：拼车档位（20X拼车-2 / -4）本质是「一份订阅切给 N 个人」，
+//    设备闸是唯一能把这个约束落到实处的地方 —— 否则「拼车-4」只是个限额数字。
+describe('CreateAccountModal — reclaude 设备数限制', () => {
+  it('选中 reclaude 分类后能看到设备数限制', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'admin.accounts.reclaudeLabel')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('admin.accounts.quotaControl.deviceLimit.label')
+  })
+
+  it('会话数与 RPM 同样出现：它们是 sub 端准入控制', async () => {
+    // 这三项都在请求被装进信封发给 rec **之前**就判完了，跟上游看不看得见无关：
+    //   设备数 / RPM / 会话数 —— 都是 Redis 里的计数。
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'admin.accounts.reclaudeLabel')
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('admin.accounts.quotaControl.sessionLimit.label')
+    expect(text).toContain('admin.accounts.quotaControl.rpmLimit.label')
+  })
+
+  it('唯独窗口费用不出现：窗口锚点不存在', async () => {
+    // 🔴 理由与其它三项不同：窗口费用按 SessionWindowStart/End 取窗口起点，
+    // 而 reclaude 从不写这两个字段 —— 会静默回落到「当前整点起」，
+    // 把 5h 窗口的限额悄悄变成小时窗。那不是不生效，是语义错乱。
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'admin.accounts.reclaudeLabel')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('admin.accounts.quotaControl.windowCost.label')
+  })
+
+  it('oauth 账号仍然看得到完整的配额控制', async () => {
+    // 防回归：不能为了给 reclaude 开设备闸而把 oauth 的其它控制项改没了。
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'admin.accounts.claudeCode')
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('admin.accounts.quotaControl.deviceLimit.label')
+    expect(text).toContain('admin.accounts.quotaControl.windowCost.label')
+  })
+})

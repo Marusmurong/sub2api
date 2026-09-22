@@ -391,3 +391,39 @@ func TestDeviceLimitRequest_NilSafety(t *testing.T) {
 	var nilSvc *GatewayService
 	require.True(t, nilSvc.checkAndRegisterDevice(context.Background(), newDeviceLimitTestAccount(1)))
 }
+
+// reclaude 账号同样要受设备闸约束。
+//
+// 两条理由：
+//  1. 暴露面：下游客户端的多样性会经 system 环境块透传到上游（§上游暴露面审计），
+//     信封本身统一了 HTTP 层身份，但环境块是逐请求的。
+//  2. 商业：拼车档位（20X拼车-2 / -4）本质就是「一份订阅切给 N 个人」，
+//     设备闸是唯一能把这个约束落到实处的地方 —— 否则「拼车-4」只是个
+//     限额数字，谁都能接 40 台机器。
+//
+// 🔴 不能靠放宽 IsAnthropicOAuthOrSetupToken 来实现：那个谓词还管着 5h 窗口
+// 额度、会话数控制与 TLS 指纹，扩大它会顺带把那三样也打开，而 reclaude
+// **刻意不写会话窗口**（上游返回的窗口属于底层那个 Claude 账号，不是我们的配额包）。
+func TestIsDeviceLimitApplicable_Reclaude(t *testing.T) {
+	reclaude := func(extra map[string]any) *Account {
+		return &Account{Platform: PlatformAnthropic, Type: AccountTypeReclaude, Extra: extra}
+	}
+
+	t.Run("设了上限就生效", func(t *testing.T) {
+		require.True(t, isDeviceLimitApplicable(reclaude(map[string]any{"max_devices": 4})))
+		require.True(t, isDeviceLimitApplicable(reclaude(map[string]any{"max_devices_daily": 8})))
+	})
+
+	t.Run("没设上限时不生效", func(t *testing.T) {
+		// 与其它类型一致：不设 = 不限制，而不是 0 = 全禁。
+		require.False(t, isDeviceLimitApplicable(reclaude(nil)))
+		require.False(t, isDeviceLimitApplicable(reclaude(map[string]any{})))
+	})
+
+	t.Run("不得顺带打开会话窗口相关能力", func(t *testing.T) {
+		// reclaude 刻意不写会话窗口；这里断言我们没有靠放宽那个谓词来实现设备闸。
+		account := reclaude(map[string]any{"max_devices": 4})
+
+		require.False(t, account.IsAnthropicOAuthOrSetupToken())
+	})
+}
