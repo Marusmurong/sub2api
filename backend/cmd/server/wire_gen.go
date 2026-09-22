@@ -216,6 +216,9 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	pluginManager := service.NewPluginManager(pluginRepository, secretEncryptor, configConfig, pluginHostInfo, pluginKVStore)
 	pluginManager.SetAccountDirectory(openAIGatewayService)
 	accountTestService := service.ProvideAccountTestService(accountRepository, geminiTokenProvider, claudeTokenProvider, grokTokenProvider, antigravityGatewayService, httpUpstream, configConfig, tlsFingerprintProfileService, openAIGatewayService, settingService, pluginManager)
+	// reclaude 账号的「测试」按钮走三步自检，而不是通用 Claude 路径
+	// （那条路径打明文 api.anthropic.com，对 reclaude 必然 401）。
+	accountTestService.SetReclaudeSelfChecker(reclaudeRuntime.SelfChecker)
 	crsSyncService := service.NewCRSSyncService(accountRepository, proxyRepository, oAuthService, openAIOAuthService, geminiOAuthService, configConfig)
 	accountHandler := admin.ProvideAccountHandler(configConfig, adminService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, rateLimitService, accountUsageService, accountTestService, concurrencyService, crsSyncService, sessionLimitCache, rpmCache, compositeTokenCacheInvalidator, grokQuotaService, deviceLimitCache)
 	accountHandler.SetReclaudeRuntime(reclaudeRuntime)

@@ -221,3 +221,79 @@ describe('AccountTestModal', () => {
     })
   })
 })
+
+// reclaude 账号的「测试」= 三步自检（网关可达 / 凭据有效 / 信封可签），
+// 不经过任何模型。
+//
+// 🔴 模型下拉在这里不只是多余，而是**会挡住按钮**：canStartTest 要求
+// selectedModelId 非空，而 reclaude 账号取不到模型列表 —— 结果是按钮永远
+// 灰着，号建好了却没有任何办法验证。
+describe('AccountTestModal — reclaude', () => {
+  const reclaudeAccount = {
+    id: 7,
+    name: 'rec/mbp-3448',
+    platform: 'anthropic',
+    type: 'reclaude',
+    status: 'active'
+  }
+
+  beforeEach(() => {
+    // reclaude 没有模型清单接口，真实环境下这里会失败。
+    getAvailableModels.mockRejectedValue(new Error('no model catalog for reclaude'))
+    global.fetch = vi.fn().mockResolvedValue(
+      createStreamResponse([
+        'data: {"type":"test_start","model":"reclaude self-check"}\n',
+        'data: {"type":"content","text":"✓ gateway_reachable"}\n',
+        'data: {"type":"content","text":"✓ credential_valid"}\n',
+        'data: {"type":"content","text":"✓ envelope_signable"}\n',
+        'data: {"type":"test_complete","success":true}\n'
+      ])
+    ) as any
+  })
+
+  it('不显示模型下拉', async () => {
+    const wrapper = mountModal(reclaudeAccount)
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    expect(wrapper.find('.select-stub').exists()).toBe(false)
+  })
+
+  it('取不到模型也能发起测试', async () => {
+    const wrapper = mountModal(reclaudeAccount)
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    const startButton = wrapper.findAll('button').find((b) => b.text().includes('startTest'))
+    expect(startButton?.attributes('disabled')).toBeUndefined()
+  })
+
+  it('自检三步逐条显示出来', async () => {
+    const wrapper = mountModal(reclaudeAccount)
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    const startButton = wrapper.findAll('button').find((b) => b.text().includes('startTest'))
+    await startButton?.trigger('click')
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('gateway_reachable')
+    expect(text).toContain('credential_valid')
+    expect(text).toContain('envelope_signable')
+  })
+
+  it('请求体不带 model_id', async () => {
+    // 后端对 reclaude 完全忽略 model_id；带一个上去只会让人以为它有用。
+    const wrapper = mountModal(reclaudeAccount)
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    const startButton = wrapper.findAll('button').find((b) => b.text().includes('startTest'))
+    await startButton?.trigger('click')
+    await flushPromises()
+
+    const body = JSON.parse((global.fetch as any).mock.calls[0][1].body)
+    expect(body.model_id).toBe('')
+  })
+})

@@ -424,6 +424,10 @@ const imageFileInput = ref<HTMLInputElement | null>(null)
 const audioFileInput = ref<HTMLInputElement | null>(null)
 const isOpenAIAccount = computed(() => props.account?.platform === 'openai')
 const isGrokAccount = computed(() => props.account?.platform === 'grok')
+
+// reclaude 的「测试」是三步自检（网关可达 / 凭据有效 / 信封可签），不经过模型：
+// 自检打的是对方的控制面端点与 count_tokens，选什么模型都不影响结果。
+const isReclaudeAccount = computed(() => props.account?.type === 'reclaude')
 const openAITestModeOptions = computed(() => [
   { value: 'default', label: t('admin.accounts.openai.testModeDefault') },
   { value: 'compact', label: t('admin.accounts.openai.testModeCompact') }
@@ -478,6 +482,7 @@ const supportsImageTest = computed(
 
 // Model select only when the mode needs a model.
 const showModelSelect = computed(() => {
+  if (isReclaudeAccount.value) return false
   if (!isGrokAccount.value) return true
   return grokTestMode.value === 'text' || grokTestMode.value === 'image' || grokTestMode.value === 'video'
 })
@@ -675,6 +680,9 @@ const testModeSummary = computed(() => {
 
 const canStartTest = computed(() => {
   if (status.value === 'connecting') return false
+  // 🔴 不能要求选中模型：reclaude 没有模型清单接口，取不到 ⇒ 按钮永远灰着 ⇒
+  // 号建好了却没有任何办法验证它能不能用。
+  if (isReclaudeAccount.value) return true
   if (isGrokAccount.value) {
     if (
       grokTestMode.value === 'search' ||
@@ -762,6 +770,13 @@ watch(grokTestMode, () => {
 
 const loadAvailableModels = async () => {
   if (!props.account) return
+  // reclaude 没有模型清单：请求它只会拿到一个错误，还会在控制台留下
+  // 一条误导性的报错。
+  if (isReclaudeAccount.value) {
+    availableModels.value = []
+    selectedModelId.value = ''
+    return
+  }
 
   loadingModels.value = true
   selectedModelId.value = '' // Reset selection before loading

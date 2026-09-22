@@ -168,6 +168,8 @@ type AccountTestService struct {
 	// grokWSDialer is optional; realtime account tests use the default OpenAI-style
 	// WS dialer when nil (supports proxy + coder/websocket handshake).
 	grokWSDialer openAIWSClientDialer
+	// reclaudeSelfChecker 给 reclaude 账号的测试按钮用（见 reclaude_account_test.go）。
+	reclaudeSelfChecker ReclaudeSelfCheckRunner
 }
 
 func (s *AccountTestService) SetSettingService(settingService *SettingService) {
@@ -400,6 +402,12 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 
 	if account.IsOpenCodeGo() {
 		return s.testOpenCodeGoAccountConnection(c, account, modelID, prompt)
+	}
+
+	// reclaude 必须在通用 Claude 路径之前拦下：它的请求要封信封 + 设备签名，
+	// 走通用路径必然 401，且白白消耗一次对方配额。
+	if account.IsReclaude() {
+		return s.testReclaudeAccountConnection(c, account)
 	}
 
 	return s.testClaudeAccountConnection(c, account, modelID)
