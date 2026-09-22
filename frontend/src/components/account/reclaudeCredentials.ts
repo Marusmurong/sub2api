@@ -1,0 +1,251 @@
+/**
+ * reclaude 设备凭据的表单模型、校验与提交构造。
+ *
+ * 为什么单独一个文件而不是塞进 CreateAccountModal：这些校验是**建号后不可逆**
+ * 的约束（禁止二次 login、人设只有一次机会），录错了只能重新买一份订阅。
+ * 它们值得被单测锁住，而 7000 行的模态框里没法单测。
+ *
+ * ⚠️ 这里是**第一道**闸，不是唯一一道。后端 ValidateReclaudeAccountInput 会
+ * 重做同样的校验，两边必须保持一致；前端这层只是为了让人在点「创建」之前
+ * 就看到错在哪。
+ */
+
+/** 网关节点硬白名单。与后端 ReclaudeAllowedGatewayHosts 一一对应。 */
+export const RECLAUDE_GATEWAY_HOSTS = [
+  'asia.route.reclaude.ai',
+  'la.route.reclaude.ai',
+  'misaka.route.reclaude.ai',
+  'cloudfront.route.reclaude.ai'
+] as const
+
+/** SK 的固定前缀（设备页面上可见）。 */
+export const RECLAUDE_SK_PREFIX = 'sk-rec-'
+
+/** ed25519 seed 解码后必须恰好 32 字节。 */
+const RECLAUDE_SEED_BYTES = 32
+
+export interface ReclaudeFormValues {
+  sk: string
+  seed: string
+  deviceId: string
+  fingerprint: string
+  gatewayUrl: string
+  clientVersion: string
+  clientPlatform: string
+  deviceHostname: string
+  timezone: string
+  userEmail: string
+  dailyTokenCap: string
+  proxyId: number | null
+}
+
+export type ReclaudeValidationError =
+  | 'proxyRequired'
+  | 'skInvalid'
+  | 'seedInvalid'
+  | 'deviceIdInvalid'
+  | 'dailyCapRequired'
+  | 'gatewayInvalid'
+  | 'clientIdentityRequired'
+
+const HOSTNAME_ILLEGAL = /[^a-z0-9]+/g
+
+/**
+ * 生成账号名：`rec/<hostname slug>-<device_id 后四位>`。
+ *
+ * 与后端 BuildReclaudeAccountName 同构。前端算一份只为**预览**——
+ * 落库的名字以后端生成的为准，避免两边算法漂移时用户看到的和库里的不一致。
+ *
+ * 三段各有理由：`rec/` 前缀让号池列表一眼分得出自建号；hostname 能与 reclaude
+ * 设备页面直接对账；device_id 后缀让同一台机器人设下建多个时不撞名。
+ */
+export function buildReclaudeAccountName(hostname: string, deviceId: string): string {
+  const slug =
+    hostname.trim().toLowerCase().replace(HOSTNAME_ILLEGAL, '-').replace(/^-+|-+$/g, '') || 'device'
+
+  const digits = deviceId.trim()
+  const suffix = digits.length > 4 ? digits.slice(-4) : digits
+  return `rec/${slug}-${suffix}`
+}
+
+/** decodeSeedByteLength 返回 seed 解码后的字节数；无法解码时返回 -1。 */
+function decodeSeedByteLength(encoded: string): number {
+  const trimmed = encoded.trim()
+  if (trimmed === '') return -1
+
+  if (/^[0-9a-fA-F]+$/.test(trimmed) && trimmed.length % 2 === 0) {
+    return trimmed.length / 2
+  }
+
+  try {
+    const binary = atob(trimmed.replace(/-/g, '+').replace(/_/g, '/'))
+    return binary.length
+  } catch {
+    return -1
+  }
+}
+
+/**
+ * validateReclaudeForm 返回第一条不通过的校验；全部通过时返回 null。
+ *
+ * 全部是**拒绝创建**而不是警告：这些约束错了之后没有修复路径。
+ * 唯一的例外是指纹自校验（V-3），推导算法还没结案，后端按警告处理，前端不拦。
+ */
+export function validateReclaudeForm(values: ReclaudeFormValues): ReclaudeValidationError | null {
+  // V-1：无代理 = 直接用机房 IP。
+  if (!values.proxyId || values.proxyId <= 0) return 'proxyRequired'
+
+  if (!values.sk.trim().startsWith(RECLAUDE_SK_PREFIX)) return 'skInvalid'
+
+  // V-2：长度不对说明从 keychain / device.key 里抠错了东西，签名必然全挂。
+  if (decodeSeedByteLength(values.seed) !== RECLAUDE_SEED_BYTES) return 'seedInvalid'
+
+  // V-4 的应用层部分；全局唯一性由 DB partial unique index 兜底。
+  const deviceId = Number(values.deviceId.trim())
+  if (!Number.isInteger(deviceId) || deviceId <= 0) return 'deviceIdInvalid'
+
+  // V-5：包络未标定就售卖 = 超卖。
+  const dailyCap = Number(values.dailyTokenCap.trim())
+  if (!Number.isFinite(dailyCap) || dailyCap <= 0) return 'dailyCapRequired'
+
+  // V-9：https + 四节点硬白名单。默认配置下后端 SSRF 校验不生效，这是唯一防线。
+  if (!isAllowedReclaudeGateway(values.gatewayUrl)) return 'gatewayInvalid'
+
+  if (values.clientVersion.trim() === '' || values.clientPlatform.trim() === '') {
+    return 'clientIdentityRequired'
+  }
+
+  return null
+}
+
+/** isAllowedReclaudeGateway 判断网关地址是否是白名单里的 https 节点。 */
+export function isAllowedReclaudeGateway(rawUrl: string): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(rawUrl.trim())
+  } catch {
+    return false
+  }
+  if (parsed.protocol !== 'https:') return false
+  return (RECLAUDE_GATEWAY_HOSTS as readonly string[]).includes(parsed.hostname)
+}
+
+/**
+ * buildReclaudeCredentials 构造提交给后端的 credentials。
+ *
+ * 🔴 不生成 `reclaude_synthetic_account_uuid`：那个值由后端建号时随机生成一次、
+ * 永不变。前端塞一个进来会被当成人工指定，而它是上游眼里「这台设备是谁」的唯一锚点。
+ *
+ * sk 与 seed 以**明文**提交，由后端加密落库（V-8 会先确认加密密钥已显式配置，
+ * 否则拒绝创建 —— 密钥未配置时每次启动随机生成，重启即导致凭据永久不可解密）。
+ */
+export function buildReclaudeCredentials(values: ReclaudeFormValues): Record<string, unknown> {
+  const credentials: Record<string, unknown> = {
+    reclaude_sk: values.sk.trim(),
+    reclaude_ed25519_seed: values.seed.trim(),
+    reclaude_device_id: Number(values.deviceId.trim()),
+    reclaude_fingerprint: values.fingerprint.trim(),
+    reclaude_gateway_url: values.gatewayUrl.trim(),
+    reclaude_client_version: values.clientVersion.trim(),
+    reclaude_client_platform: values.clientPlatform.trim(),
+    reclaude_device_hostname: values.deviceHostname.trim()
+  }
+
+  // 时区决定「模拟关机」作息的生成，留空则后端按默认时区生成。
+  if (values.timezone.trim() !== '') {
+    credentials.reclaude_timezone = values.timezone.trim()
+  }
+  if (values.userEmail.trim() !== '') {
+    credentials.reclaude_user_email = values.userEmail.trim()
+  }
+
+  return credentials
+}
+
+/** RECLAUDE_DAILY_TOKEN_CAP_EXTRA_KEY 是日闸上限在 Account.Extra 里的键。 */
+export const RECLAUDE_DAILY_TOKEN_CAP_EXTRA_KEY = 'reclaude_daily_token_cap'
+
+/** buildReclaudeExtra 构造账号级 extra（目前只有日闸上限）。 */
+export function buildReclaudeExtra(values: ReclaudeFormValues): Record<string, unknown> {
+  return { [RECLAUDE_DAILY_TOKEN_CAP_EXTRA_KEY]: Number(values.dailyTokenCap.trim()) }
+}
+
+/**
+ * 控制台导出的建号凭据。字段名与后端 credentials key 一一对应 ——
+ * 两边共用同一个契约（见 reclaude-lab/console/export.go 的 CredentialBundle）。
+ */
+export interface ReclaudeBundle {
+  reclaude_sk: string
+  reclaude_ed25519_seed: string
+  reclaude_device_id: number | string
+  reclaude_fingerprint: string
+  reclaude_gateway_url: string
+  reclaude_client_version: string
+  reclaude_client_platform: string
+  reclaude_device_hostname: string
+  reclaude_timezone?: string
+  reclaude_user_email?: string
+}
+
+export type ReclaudeParseResult =
+  | { ok: true; values: Partial<ReclaudeFormValues> }
+  | { ok: false; error: 'invalidJson' | 'rawDeviceJson' | 'missingFields'; missing?: string[] }
+
+/** 必填字段。缺任何一个都不该静默通过 —— 建号后才发现就晚了。 */
+const REQUIRED_BUNDLE_KEYS: (keyof ReclaudeBundle)[] = [
+  'reclaude_sk',
+  'reclaude_ed25519_seed',
+  'reclaude_device_id',
+  'reclaude_fingerprint',
+  'reclaude_gateway_url',
+  'reclaude_client_version',
+  'reclaude_client_platform'
+]
+
+/**
+ * parseReclaudeBundle 解析粘贴进来的建号 JSON。
+ *
+ * 🔴 拒绝原始 `device.json`：它的 `gateway_url` 是默认值
+ * （`https://www.reclaude.ai`，daemon 会 auto-pick），而我们**不做 auto-pick**，
+ * 必须固定一个 route 节点。直接拿原始文件建号，账号会指向一个我们没选定的节点。
+ * 正确做法是用本地控制台的「生成建号 JSON」，那里会带上选定的节点。
+ */
+export function parseReclaudeBundle(raw: string): ReclaudeParseResult {
+  let parsed: Record<string, unknown>
+  try {
+    parsed = JSON.parse(raw.trim()) as Record<string, unknown>
+  } catch {
+    return { ok: false, error: 'invalidJson' }
+  }
+  if (!parsed || typeof parsed !== 'object') return { ok: false, error: 'invalidJson' }
+
+  // 原始 device.json 的特征：有 sk/device_id 但没有 reclaude_ 前缀的键。
+  if (parsed.sk !== undefined && parsed.reclaude_sk === undefined) {
+    return { ok: false, error: 'rawDeviceJson' }
+  }
+
+  const text = (key: string): string => {
+    const value = parsed[key]
+    if (typeof value === 'number') return String(value)
+    return typeof value === 'string' ? value.trim() : ''
+  }
+
+  const missing = REQUIRED_BUNDLE_KEYS.filter(key => text(key) === '')
+  if (missing.length > 0) return { ok: false, error: 'missingFields', missing }
+
+  return {
+    ok: true,
+    values: {
+      sk: text('reclaude_sk'),
+      seed: text('reclaude_ed25519_seed'),
+      deviceId: text('reclaude_device_id'),
+      fingerprint: text('reclaude_fingerprint'),
+      gatewayUrl: text('reclaude_gateway_url'),
+      clientVersion: text('reclaude_client_version'),
+      clientPlatform: text('reclaude_client_platform'),
+      deviceHostname: text('reclaude_device_hostname'),
+      timezone: text('reclaude_timezone'),
+      userEmail: text('reclaude_user_email')
+    }
+  }
+}

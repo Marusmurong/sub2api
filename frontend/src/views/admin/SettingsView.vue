@@ -591,6 +591,90 @@
             </div>
           </div>
 
+          <!-- reclaude 中转通道 -->
+          <div class="card">
+            <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+                {{ t("admin.settings.reclaude.title") }}
+              </h2>
+              <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {{ t("admin.settings.reclaude.description") }}
+              </p>
+            </div>
+            <div class="space-y-5 p-6">
+              <div
+                v-if="reclaudeLoading"
+                class="flex items-center gap-2 text-gray-500"
+              >
+                <div
+                  class="h-4 w-4 animate-spin rounded-full border-b-2 border-primary-600"
+                ></div>
+                {{ t("common.loading") }}
+              </div>
+
+              <template v-else>
+                <div class="flex items-center justify-between">
+                  <div>
+                    <label class="font-medium text-gray-900 dark:text-white">{{
+                      t("admin.settings.reclaude.enabled")
+                    }}</label>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.reclaude.enabledHint") }}
+                    </p>
+                  </div>
+                  <Toggle v-model="reclaudeForm.enabled" />
+                </div>
+
+                <div
+                  v-if="!reclaudeForm.enabled"
+                  class="rounded-lg bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-900/20 dark:text-amber-200"
+                >
+                  {{ t("admin.settings.reclaude.disabledWarning") }}
+                </div>
+
+                <div class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700">
+                  <div>
+                    <label class="font-medium text-gray-900 dark:text-white">{{
+                      t("admin.settings.reclaude.unknownEventAlert")
+                    }}</label>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">
+                      {{ t("admin.settings.reclaude.unknownEventAlertHint") }}
+                    </p>
+                  </div>
+                  <Toggle v-model="reclaudeForm.unknown_event_alert" />
+                </div>
+
+                <div class="border-t border-gray-100 pt-4 dark:border-dark-700">
+                  <label class="input-label">{{
+                    t("admin.settings.reclaude.oversellRatio")
+                  }}</label>
+                  <input
+                    v-model.number="reclaudeForm.oversell_ratio"
+                    type="number"
+                    step="0.05"
+                    min="0.05"
+                    max="1"
+                    class="input"
+                  />
+                  <p class="input-hint">
+                    {{ t("admin.settings.reclaude.oversellRatioHint") }}
+                  </p>
+                </div>
+
+                <div class="flex justify-end">
+                  <button
+                    type="button"
+                    class="btn-primary"
+                    :disabled="reclaudeSaving"
+                    @click="saveReclaudeSettings"
+                  >
+                    {{ reclaudeSaving ? t("common.saving") : t("common.save") }}
+                  </button>
+                </div>
+              </template>
+            </div>
+          </div>
+
           <!-- Request Rectifier Settings -->
           <div class="card">
             <div
@@ -9075,6 +9159,15 @@ const streamTimeoutForm = reactive({
 });
 
 // Rectifier 状态
+// reclaude 中转通道。enabled 是紧急止血开关：关闭后 rec 账号立即不可调度。
+const reclaudeLoading = ref(true);
+const reclaudeSaving = ref(false);
+const reclaudeForm = reactive({
+  enabled: false,
+  unknown_event_alert: true,
+  oversell_ratio: 0.7,
+});
+
 const rectifierLoading = ref(true);
 const rectifierSaving = ref(false);
 const rectifierForm = reactive({
@@ -12037,6 +12130,41 @@ async function saveStreamTimeoutSettings() {
   }
 }
 
+// reclaude 通道方法
+async function loadReclaudeSettings() {
+  reclaudeLoading.value = true;
+  try {
+    Object.assign(reclaudeForm, await adminAPI.settings.getReclaudeSettings());
+  } catch (_error: unknown) {
+    // 读失败时保留表单默认值（关闭）。这条通道宁可显示成关的，
+    // 也不要让人以为它开着。
+  } finally {
+    reclaudeLoading.value = false;
+  }
+}
+
+async function saveReclaudeSettings() {
+  reclaudeSaving.value = true;
+  try {
+    // 回写后端返回值：越界的超卖率会被后端修正，表单要显示真正生效的值。
+    Object.assign(
+      reclaudeForm,
+      await adminAPI.settings.updateReclaudeSettings({
+        enabled: reclaudeForm.enabled,
+        unknown_event_alert: reclaudeForm.unknown_event_alert,
+        oversell_ratio: reclaudeForm.oversell_ratio,
+      }),
+    );
+    appStore.showSuccess(t("admin.settings.reclaude.saved"));
+  } catch (error: unknown) {
+    appStore.showError(
+      extractApiErrorMessage(error, t("admin.settings.reclaude.saveFailed")),
+    );
+  } finally {
+    reclaudeSaving.value = false;
+  }
+}
+
 // Rectifier 方法
 async function loadRectifierSettings() {
   rectifierLoading.value = true;
@@ -12651,6 +12779,7 @@ onMounted(() => {
   loadRateLimit429CooldownSettings();
   loadPanelRateLimitSettings();
   loadStreamTimeoutSettings();
+  loadReclaudeSettings();
   loadRectifierSettings();
   loadBetaPolicySettings();
   loadProviders();

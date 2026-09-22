@@ -532,6 +532,8 @@ export default {
       upstreamRequestId: 'Upstream ID',
       requestIdCopied: 'Request ID copied',
       upstreamRequestIdCopied: 'Upstream ID copied',
+      upstreamTraceId: 'Relay traceId',
+      upstreamTraceIdCopied: 'traceId copied',
       allModels: 'All Models',
       allAccounts: 'All Accounts',
       allGroups: 'All Groups',

@@ -1060,6 +1060,23 @@ export default {
         saved: '流超时设置保存成功',
         saveFailed: '保存流超时设置失败'
       },
+      reclaude: {
+        title: 'reclaude 中转通道',
+        description:
+          '通过第三方设备订阅转发 Claude 请求。这条通道会把**完整 prompt** 发给 reclaude 网关，默认关闭。',
+        enabled: '启用通道',
+        enabledHint: '关闭后全部 rec 账号立即不可调度（不是跑完当前请求再停）。这是紧急止血开关。',
+        disabledWarning:
+          '当前为关闭状态：即使已经录入 rec 账号，它们也不会被调度。首次启用前请先确认协议验证（Gate A）与成本体检（Gate B）都已通过。',
+        unknownEventAlert: '未知事件告警',
+        unknownEventAlertHint:
+          '网关返回未知事件类型时告警。出现新类型意味着对方协议变了，静默丢弃等于放弃唯一的预警。',
+        oversellRatio: '超卖安全系数',
+        oversellRatioHint:
+          '已售 token ≤ 可交付量 × 该系数。留余量是因为配额消耗只有我们自己的计数这一个信源，对方不提供用量接口。',
+        saved: 'reclaude 通道配置已保存',
+        saveFailed: '保存 reclaude 通道配置失败'
+      },
       rectifier: {
         title: '请求整流器',
         description: '当上游返回特定错误时，自动修正请求参数并重试，提高请求成功率',

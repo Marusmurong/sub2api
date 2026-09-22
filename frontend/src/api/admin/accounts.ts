@@ -307,6 +307,56 @@ export async function testAccount(id: number): Promise<{
 }
 
 /**
+ * reclaude 建号后连通性自检。
+ *
+ * 三步：网关可达 → 凭据有效 → 信封可签。全绿才会把账号置为可调度；
+ * 失败不改动账号状态（自检可以随便点，不该有破坏力）。
+ */
+export interface ReclaudeSelfCheckStep {
+  name: string
+  ok: boolean
+  detail?: string
+}
+
+export interface ReclaudeSelfCheckResult {
+  steps: ReclaudeSelfCheckStep[]
+  passed: boolean
+  bound_email?: string
+  activated: boolean
+}
+
+export async function reclaudeSelfCheck(id: number): Promise<ReclaudeSelfCheckResult> {
+  const { data } = await apiClient.post<ReclaudeSelfCheckResult>(
+    `/admin/accounts/${id}/reclaude-self-check`
+  )
+  return data
+}
+
+/**
+ * reclaude 今日配额包水位。
+ *
+ * 读不到时接口会**报错**而不是回零 —— 水位只有我们自己的计数这一个信源，
+ * 回 0 会被读成「今天还没用」，而真相是「我们不知道」。
+ */
+export interface ReclaudeDailyUsageSnapshot {
+  usage: {
+    tokens: number
+    upstream_calls: number
+    failed_upstream_calls: number
+  }
+  daily_cap: number
+  effective_tokens: number
+  weekly_soft_limit: number
+}
+
+export async function getReclaudeDailyUsage(id: number): Promise<ReclaudeDailyUsageSnapshot> {
+  const { data } = await apiClient.get<ReclaudeDailyUsageSnapshot>(
+    `/admin/accounts/${id}/reclaude-usage`
+  )
+  return data
+}
+
+/**
  * Refresh account credentials
  * @param id - Account ID
  * @returns Updated account
@@ -1093,6 +1143,8 @@ export const accountsAPI = {
   delete: deleteAccount,
   toggleStatus,
   testAccount,
+  reclaudeSelfCheck,
+  getReclaudeDailyUsage,
   refreshCredentials,
   applyOAuthCredentials,
   getStats,

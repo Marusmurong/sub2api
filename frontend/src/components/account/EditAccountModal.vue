@@ -1107,6 +1107,56 @@
         </div>
       </div>
 
+      <!-- reclaude：只暴露可改的运维字段 -->
+      <div v-if="account.type === 'reclaude'" class="space-y-4">
+        <p class="rounded-lg bg-gray-50 p-3 text-xs text-gray-600 dark:bg-dark-700 dark:text-gray-300">
+          {{ t('admin.accounts.reclaudeEditHint') }}
+        </p>
+
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label class="input-label">{{ t('admin.accounts.reclaudeDeviceId') }}</label>
+            <input :value="editReclaudeDeviceId" type="text" class="input font-mono" readonly disabled />
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.reclaudeFingerprint') }}</label>
+            <input :value="editReclaudeFingerprint" type="text" class="input font-mono" readonly disabled />
+          </div>
+        </div>
+
+        <div v-if="editReclaudeBoundEmail">
+          <label class="input-label">{{ t('admin.accounts.reclaudeBoundEmail') }}</label>
+          <input :value="editReclaudeBoundEmail" type="text" class="input" readonly disabled />
+          <p class="input-hint">{{ t('admin.accounts.reclaudeBoundEmailHint') }}</p>
+        </div>
+
+        <div>
+          <label class="input-label">{{ t('admin.accounts.reclaudeGatewayUrl') }}</label>
+          <select v-model="editReclaudeGatewayUrl" class="input">
+            <option v-for="host in reclaudeGatewayOptions" :key="host" :value="host">{{ host }}</option>
+          </select>
+          <p class="input-hint">{{ t('admin.accounts.reclaudeGatewayUrlHint') }}</p>
+        </div>
+
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label class="input-label">{{ t('admin.accounts.reclaudeClientVersion') }}</label>
+            <input v-model="editReclaudeClientVersion" type="text" class="input" />
+            <p class="input-hint">{{ t('admin.accounts.reclaudeClientVersionHint') }}</p>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.reclaudeClientPlatform') }}</label>
+            <input v-model="editReclaudeClientPlatform" type="text" class="input" />
+          </div>
+        </div>
+
+        <div>
+          <label class="input-label">{{ t('admin.accounts.reclaudeDailyTokenCap') }}</label>
+          <input v-model="editReclaudeDailyTokenCap" type="text" inputmode="numeric" class="input" />
+          <p class="input-hint">{{ t('admin.accounts.reclaudeDailyTokenCapHint') }}</p>
+        </div>
+      </div>
+
       <!-- Bedrock fields (for bedrock type, both SigV4 and API Key modes) -->
       <div v-if="account.type === 'bedrock'" class="space-y-4">
         <!-- SigV4 fields -->
@@ -3162,6 +3212,11 @@ import {
   type OpenCodeGoProtocolRule
 } from '@/components/account/credentialsBuilder'
 import {
+  isAllowedReclaudeGateway,
+  RECLAUDE_DAILY_TOKEN_CAP_EXTRA_KEY,
+  RECLAUDE_GATEWAY_HOSTS
+} from '@/components/account/reclaudeCredentials'
+import {
   formatDateTime,
   formatDateTimeLocalInput,
   getBrowserTimeZone,
@@ -3405,6 +3460,17 @@ function onCnPresetSelect(preset: { mode: CnAccountMode; protocol: CnApiProtocol
 const editBedrockAccessKeyId = ref('')
 const editBedrockSecretAccessKey = ref('')
 const editBedrockSessionToken = ref('')
+// reclaude：sk / seed / device_id 建号后不可改（R-4 禁止二次 login），
+// 这里只暴露运维字段，后端 ValidateReclaudeCredentialUpdate 会再拦一道。
+const reclaudeGatewayOptions = RECLAUDE_GATEWAY_HOSTS.map(host => `https://${host}`)
+const editReclaudeDeviceId = ref('')
+const editReclaudeFingerprint = ref('')
+const editReclaudeBoundEmail = ref('')
+const editReclaudeGatewayUrl = ref(reclaudeGatewayOptions[0])
+const editReclaudeClientVersion = ref('')
+const editReclaudeClientPlatform = ref('')
+const editReclaudeDailyTokenCap = ref('')
+
 const editBedrockRegion = ref('')
 const editBedrockForceGlobal = ref(false)
 const editBedrockApiKeyValue = ref('')
@@ -4394,6 +4460,19 @@ const syncFormFromAccount = (newAccount: Account | null) => {
       selectedErrorCodes.value = []
     }
 
+  } else if (newAccount.type === 'reclaude') {
+    const creds = (newAccount.credentials as Record<string, unknown>) || {}
+    const extra = (newAccount.extra as Record<string, unknown>) || {}
+    editReclaudeDeviceId.value = String(creds.reclaude_device_id ?? '')
+    editReclaudeFingerprint.value = String(creds.reclaude_fingerprint ?? '')
+    // 「当前绑定的 Claude 邮箱」是会变的展示字段，不是账号固有属性 —— 只读。
+    editReclaudeBoundEmail.value = String(extra.reclaude_bound_email ?? '')
+    editReclaudeGatewayUrl.value =
+      (creds.reclaude_gateway_url as string) || reclaudeGatewayOptions[0]
+    editReclaudeClientVersion.value = (creds.reclaude_client_version as string) || ''
+    editReclaudeClientPlatform.value = (creds.reclaude_client_platform as string) || ''
+    editReclaudeDailyTokenCap.value = String(extra.reclaude_daily_token_cap ?? '')
+
   } else if (newAccount.type === 'bedrock' && newAccount.credentials) {
     const bedrockCreds = newAccount.credentials as Record<string, unknown>
     const authMode = (bedrockCreds.auth_mode as string) || 'sigv4'
@@ -5294,6 +5373,38 @@ const handleSubmit = async () => {
       }
 
       updatePayload.credentials = newCredentials
+    } else if (props.account.type === 'reclaude') {
+      // 🔴 原样带上 sk / seed / device_id：前端拿到的是脱敏值，不回传由后端合并
+      // 保留；device_id 不在敏感键里，**不带回就真的没了**。
+      const currentCredentials = (props.account.credentials as Record<string, unknown>) || {}
+      const newCredentials: Record<string, unknown> = { ...currentCredentials }
+
+      if (!isAllowedReclaudeGateway(editReclaudeGatewayUrl.value)) {
+        appStore.showError(t('admin.accounts.reclaudeGatewayInvalid'))
+        return
+      }
+      const dailyCap = Number(editReclaudeDailyTokenCap.value.trim())
+      if (!Number.isFinite(dailyCap) || dailyCap <= 0) {
+        appStore.showError(t('admin.accounts.reclaudeDailyCapRequired'))
+        return
+      }
+      if (
+        editReclaudeClientVersion.value.trim() === '' ||
+        editReclaudeClientPlatform.value.trim() === ''
+      ) {
+        appStore.showError(t('admin.accounts.reclaudeClientIdentityRequired'))
+        return
+      }
+
+      newCredentials.reclaude_gateway_url = editReclaudeGatewayUrl.value
+      newCredentials.reclaude_client_version = editReclaudeClientVersion.value.trim()
+      newCredentials.reclaude_client_platform = editReclaudeClientPlatform.value.trim()
+
+      updatePayload.credentials = newCredentials
+      updatePayload.extra = {
+        ...((props.account.extra as Record<string, unknown>) || {}),
+        [RECLAUDE_DAILY_TOKEN_CAP_EXTRA_KEY]: dailyCap
+      }
     } else if (props.account.type === 'bedrock') {
       const currentCredentials = (props.account.credentials as Record<string, unknown>) || {}
       const newCredentials: Record<string, unknown> = { ...currentCredentials }

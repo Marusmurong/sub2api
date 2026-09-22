@@ -1324,6 +1324,37 @@ export async function updateRateLimit429CooldownSettings(
   return data;
 }
 
+// ==================== reclaude Relay Settings ====================
+
+/**
+ * reclaude 中转通道的运行时配置。
+ *
+ * `enabled` 是紧急止血开关：关闭后全部 rec 账号**立即**不可调度
+ * （不是「照跑到自然结束」）。默认关 —— 这条通道把全量明文 prompt
+ * 发给第三方网关，不该因为升级就自己活过来。
+ */
+export interface ReclaudeSettings {
+  enabled: boolean;
+  unknown_event_alert: boolean;
+  oversell_ratio: number;
+}
+
+export async function getReclaudeSettings(): Promise<ReclaudeSettings> {
+  const { data } = await apiClient.get<ReclaudeSettings>("/admin/settings/reclaude");
+  return data;
+}
+
+/**
+ * 局部更新：只传要改的字段。后端按指针区分「没传」与「设成零值」，
+ * 所以传 `{ enabled: false }` 不会把告警开关和超卖率一并清零。
+ */
+export async function updateReclaudeSettings(
+  settings: Partial<ReclaudeSettings>,
+): Promise<ReclaudeSettings> {
+  const { data } = await apiClient.put<ReclaudeSettings>("/admin/settings/reclaude", settings);
+  return data;
+}
+
 // ==================== Panel Rate Limit Settings ====================
 
 /**
@@ -1587,6 +1618,8 @@ export const settingsAPI = {
   updatePanelRateLimitSettings,
   getStreamTimeoutSettings,
   updateStreamTimeoutSettings,
+  getReclaudeSettings,
+  updateReclaudeSettings,
   getRectifierSettings,
   updateRectifierSettings,
   getBetaPolicySettings,

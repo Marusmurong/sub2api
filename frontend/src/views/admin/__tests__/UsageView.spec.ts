@@ -520,7 +520,7 @@ describe('admin UsageView request ID column visibility', () => {
     )
     expect(localStorage.setItem).toHaveBeenCalledWith(
       'usage-hidden-columns-version',
-      'upstream-request-id-hidden-by-default',
+      'upstream-trace-id-hidden-by-default',
     )
   })
 
@@ -562,6 +562,39 @@ describe('admin UsageView request ID column visibility', () => {
 
     expect(usageTable.props('columns')).toEqual(
       expect.arrayContaining([expect.objectContaining({ key: 'upstream_request_id', label: 'Upstream ID' })]),
+    )
+  })
+
+  it('keeps the relay traceId column hidden by default', async () => {
+    // traceId 是排障锚点，不是日常要看的列：只有 reclaude 链路写它，
+    // 其余每一行都是空的，默认展开只会挤掉真正有用的列。
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: UsageTableStub,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          AuditLogModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: true,
+          GroupDistributionChart: true,
+          EndpointDistributionChart: true,
+          UserTokenRanking: true,
+        },
+      },
+    })
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.findComponent(UsageTableStub).props('columns')).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ key: 'upstream_trace_id' })]),
     )
   })
 })

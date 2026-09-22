@@ -109,6 +109,10 @@ const typeLabel = computed(() => {
       return 'AWS'
     case 'service_account':
       return 'Vertex'
+    case 'reclaude':
+      // 号池列表里一眼分得出「自建号」与「rec 中转」：两类账号的运维规则是互斥的
+      // （自建号可粘性、可混池、可复制、无日闸；rec 全部相反），看错就会操作错。
+      return 'rec'
     default:
       return props.type
   }
@@ -204,6 +208,11 @@ const platformClass = computed(() => {
 })
 
 const typeClass = computed(() => {
+  // reclaude 的 platform 仍是 anthropic，但来源完全不同 —— 颜色必须区分开，
+  // 否则在一屏橙色的 Anthropic 账号里它是隐形的。
+  if (props.type === 'reclaude') {
+    return 'bg-teal-100 text-teal-600 dark:bg-teal-900/30 dark:text-teal-400'
+  }
   if (props.platform === 'anthropic') {
     return 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400'
   }

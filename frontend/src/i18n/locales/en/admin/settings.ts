@@ -1066,6 +1066,24 @@ export default {
         saved: 'Stream timeout settings saved',
         saveFailed: 'Failed to save stream timeout settings'
       },
+      reclaude: {
+        title: 'reclaude relay channel',
+        description:
+          'Relays Claude requests through third-party device subscriptions. This channel sends the **full prompt** to the reclaude gateway and is disabled by default.',
+        enabled: 'Enable channel',
+        enabledHint:
+          'Disabling makes every rec account unschedulable immediately (not "after the current request finishes"). This is the emergency kill switch.',
+        disabledWarning:
+          'Currently disabled: rec accounts will not be scheduled even if they are already configured. Before enabling for the first time, confirm the protocol gate (Gate A) and the cost review (Gate B) have both passed.',
+        unknownEventAlert: 'Alert on unknown events',
+        unknownEventAlertHint:
+          'Alert when the gateway returns an unknown event kind. A new kind means their protocol changed; dropping it silently gives up the only early warning.',
+        oversellRatio: 'Oversell safety factor',
+        oversellRatioHint:
+          'Sold tokens must stay under deliverable capacity x this factor. The margin exists because our own counter is the only source of truth — they expose no usage API.',
+        saved: 'reclaude channel settings saved',
+        saveFailed: 'Failed to save reclaude channel settings'
+      },
       rectifier: {
         title: 'Request Rectifier',
         description: 'Automatically fix request parameters and retry when upstream returns specific errors',

@@ -297,6 +297,36 @@
 
           <button
             type="button"
+            @click="accountCategory = 'reclaude'"
+            :class="[
+              'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
+              accountCategory === 'reclaude'
+                ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/20'
+                : 'border-gray-200 hover:border-teal-300 dark:border-dark-600 dark:hover:border-teal-700'
+            ]"
+          >
+            <div
+              :class="[
+                'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
+                accountCategory === 'reclaude'
+                  ? 'bg-teal-500 text-white'
+                  : 'bg-gray-100 text-gray-500 dark:bg-dark-600 dark:text-gray-400'
+              ]"
+            >
+              <Icon name="server" size="sm" />
+            </div>
+            <div>
+              <span class="block text-sm font-medium text-gray-900 dark:text-white">{{
+                t('admin.accounts.reclaudeLabel')
+              }}</span>
+              <span class="text-xs text-gray-500 dark:text-gray-400">{{
+                t('admin.accounts.reclaudeDesc')
+              }}</span>
+            </div>
+          </button>
+
+          <button
+            type="button"
             @click="accountCategory = 'bedrock'"
             :class="[
               'flex items-center gap-3 rounded-lg border-2 p-3 text-left transition-all',
@@ -1843,6 +1873,108 @@
           </div>
         </div>
 
+      </div>
+
+      <!-- reclaude 设备凭据 -->
+      <div v-if="form.platform === 'anthropic' && accountCategory === 'reclaude'" class="space-y-4">
+        <p class="rounded-lg bg-amber-50 p-3 text-xs text-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
+          {{ t('admin.accounts.reclaudeSectionHint') }}
+        </p>
+
+        <!-- 粘贴建号 JSON：八个字段一次填好，避免手抄两个长字符串 -->
+        <div class="rounded-lg border border-dashed border-teal-400 p-3 dark:border-teal-700">
+          <label class="input-label">{{ t('admin.accounts.reclaudePasteLabel') }}</label>
+          <textarea
+            v-model="reclaudePasteText"
+            rows="3"
+            class="input font-mono text-xs"
+            :placeholder="t('admin.accounts.reclaudePastePlaceholder')"
+            @paste="onReclaudePaste"
+          ></textarea>
+          <div class="mt-2 flex items-center gap-2">
+            <button type="button" class="btn-secondary text-xs" @click="applyReclaudePaste">
+              {{ t('admin.accounts.reclaudePasteApply') }}
+            </button>
+            <span v-if="reclaudePasteMessage" class="text-xs" :class="reclaudePasteOk
+              ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">
+              {{ reclaudePasteMessage }}
+            </span>
+          </div>
+          <p class="input-hint">{{ t('admin.accounts.reclaudePasteHint') }}</p>
+        </div>
+
+        <div>
+          <label class="input-label">{{ t('admin.accounts.reclaudeGeneratedName') }}</label>
+          <input :value="reclaudeGeneratedName" type="text" class="input" readonly disabled />
+        </div>
+
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label class="input-label">{{ t('admin.accounts.reclaudeDeviceHostname') }}</label>
+            <input v-model="reclaudeForm.deviceHostname" type="text" class="input" placeholder="mbp-dev" />
+            <p class="input-hint">{{ t('admin.accounts.reclaudeDeviceHostnameHint') }}</p>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.reclaudeDeviceId') }}</label>
+            <input v-model="reclaudeForm.deviceId" type="text" inputmode="numeric" class="input" placeholder="43448" />
+          </div>
+        </div>
+
+        <div>
+          <label class="input-label">{{ t('admin.accounts.reclaudeSk') }}</label>
+          <input v-model="reclaudeForm.sk" type="password" autocomplete="off" class="input" placeholder="sk-rec-..." />
+          <p class="input-hint">{{ t('admin.accounts.reclaudeSkHint') }}</p>
+        </div>
+
+        <div>
+          <label class="input-label">{{ t('admin.accounts.reclaudeSeed') }}</label>
+          <input v-model="reclaudeForm.seed" type="password" autocomplete="off" class="input" />
+          <p class="input-hint">{{ t('admin.accounts.reclaudeSeedHint') }}</p>
+        </div>
+
+        <div>
+          <label class="input-label">{{ t('admin.accounts.reclaudeFingerprint') }}</label>
+          <input v-model="reclaudeForm.fingerprint" type="text" class="input" placeholder="0123456789abcdef" />
+          <p class="input-hint">{{ t('admin.accounts.reclaudeFingerprintHint') }}</p>
+        </div>
+
+        <div>
+          <label class="input-label">{{ t('admin.accounts.reclaudeGatewayUrl') }}</label>
+          <select v-model="reclaudeForm.gatewayUrl" class="input">
+            <option v-for="host in reclaudeGatewayOptions" :key="host" :value="host">{{ host }}</option>
+          </select>
+          <p class="input-hint">{{ t('admin.accounts.reclaudeGatewayUrlHint') }}</p>
+        </div>
+
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label class="input-label">{{ t('admin.accounts.reclaudeClientVersion') }}</label>
+            <input v-model="reclaudeForm.clientVersion" type="text" class="input" placeholder="v1.4.0" />
+            <p class="input-hint">{{ t('admin.accounts.reclaudeClientVersionHint') }}</p>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.reclaudeClientPlatform') }}</label>
+            <input v-model="reclaudeForm.clientPlatform" type="text" class="input" placeholder="linux/amd64" />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label class="input-label">{{ t('admin.accounts.reclaudeTimezone') }}</label>
+            <input v-model="reclaudeForm.timezone" type="text" class="input" placeholder="America/Los_Angeles" />
+            <p class="input-hint">{{ t('admin.accounts.reclaudeTimezoneHint') }}</p>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.reclaudeUserEmail') }}</label>
+            <input v-model="reclaudeForm.userEmail" type="email" class="input" />
+          </div>
+        </div>
+
+        <div>
+          <label class="input-label">{{ t('admin.accounts.reclaudeDailyTokenCap') }}</label>
+          <input v-model="reclaudeForm.dailyTokenCap" type="text" inputmode="numeric" class="input" placeholder="2000000" />
+          <p class="input-hint">{{ t('admin.accounts.reclaudeDailyTokenCapHint') }}</p>
+        </div>
       </div>
 
       <!-- Bedrock credentials (only for Anthropic Bedrock type) -->
@@ -4031,6 +4163,15 @@ import {
   type OpenCodeGoProtocolRule
 } from '@/components/account/credentialsBuilder'
 import {
+  buildReclaudeAccountName,
+  parseReclaudeBundle,
+  buildReclaudeCredentials,
+  buildReclaudeExtra,
+  RECLAUDE_GATEWAY_HOSTS,
+  validateReclaudeForm,
+  type ReclaudeFormValues
+} from '@/components/account/reclaudeCredentials'
+import {
   formatDateTimeLocalInput,
   getBrowserTimeZone,
   parseDateTimeLocalInput
@@ -4216,7 +4357,60 @@ interface TempUnschedRuleForm {
 // State
 const step = ref(1)
 const submitting = ref(false)
-const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_account'>('oauth-based') // UI selection for account category
+const accountCategory = ref<'oauth-based' | 'apikey' | 'bedrock' | 'service_account' | 'reclaude'>('oauth-based') // UI selection for account category
+
+// reclaude 设备凭据表单。校验与提交构造在 reclaudeCredentials.ts 里（有单测）——
+// 这些约束建号后不可逆，录错只能重新采购一份订阅。
+const reclaudeGatewayOptions = RECLAUDE_GATEWAY_HOSTS.map(host => `https://${host}`)
+const reclaudeForm = reactive<ReclaudeFormValues>({
+  sk: '',
+  seed: '',
+  deviceId: '',
+  fingerprint: '',
+  gatewayUrl: reclaudeGatewayOptions[0],
+  clientVersion: '',
+  clientPlatform: '',
+  deviceHostname: '',
+  timezone: '',
+  userEmail: '',
+  dailyTokenCap: '',
+  proxyId: null
+})
+
+// 账号名是**预览**：落库的以后端生成的为准，两边算法同构。
+const reclaudeGeneratedName = computed(() =>
+  buildReclaudeAccountName(reclaudeForm.deviceHostname, reclaudeForm.deviceId)
+)
+
+// 粘贴建号 JSON。sk/seed 会填进表单（仍是 password 框），
+// 让人在提交前能核对与修改 —— 建号是不可逆动作的下游，多一道肉眼确认不亏。
+const reclaudePasteText = ref('')
+const reclaudePasteMessage = ref('')
+const reclaudePasteOk = ref(false)
+
+const onReclaudePaste = (event: ClipboardEvent) => {
+  const text = event.clipboardData?.getData('text') ?? ''
+  if (!text.trim()) return
+  event.preventDefault()
+  reclaudePasteText.value = text
+  applyReclaudePaste()
+}
+
+const applyReclaudePaste = () => {
+  const result = parseReclaudeBundle(reclaudePasteText.value)
+  if (!result.ok) {
+    reclaudePasteOk.value = false
+    reclaudePasteMessage.value = result.error === 'missingFields'
+      ? t('admin.accounts.reclaudePasteMissing', { fields: (result.missing ?? []).join(', ') })
+      : t(`admin.accounts.reclaudePaste${result.error === 'rawDeviceJson' ? 'RawJson' : 'Invalid'}`)
+    return
+  }
+  Object.assign(reclaudeForm, result.values)
+  reclaudePasteOk.value = true
+  reclaudePasteMessage.value = t('admin.accounts.reclaudePasteOk')
+  // 解析成功后清空原文：凭据不必在两个地方同时留着。
+  reclaudePasteText.value = ''
+}
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
@@ -4901,6 +5095,11 @@ watch(
       form.type = 'apikey'
       return
     }
+    // reclaude 中转订阅
+    if (form.platform === 'anthropic' && category === 'reclaude') {
+      form.type = 'reclaude' as AccountType
+      return
+    }
     // Bedrock 类型
     if (form.platform === 'anthropic' && category === 'bedrock') {
       form.type = 'bedrock' as AccountType
@@ -4966,6 +5165,9 @@ watch(
       accountCategory.value = 'oauth-based'
     }
     if (newPlatform !== 'anthropic' && accountCategory.value === 'bedrock') {
+      accountCategory.value = 'oauth-based'
+    }
+    if (newPlatform !== 'anthropic' && accountCategory.value === 'reclaude') {
       accountCategory.value = 'oauth-based'
     }
     // Reset Bedrock fields when switching platforms
@@ -5725,6 +5927,28 @@ const handleSubmit = async () => {
       return
     }
     step.value = 2
+    return
+  }
+
+  // reclaude：直接创建。账号名由后端生成，这里只把预览值填进请求（handler 要求 name 非空）。
+  if (form.platform === 'anthropic' && accountCategory.value === 'reclaude') {
+    reclaudeForm.proxyId = form.proxy_id ?? null
+
+    const invalid = validateReclaudeForm(reclaudeForm)
+    if (invalid) {
+      // 后端会重做同样的校验；前端这层只是让人在点「创建」之前就看到错在哪。
+      appStore.showError(t(`admin.accounts.reclaude${invalid.charAt(0).toUpperCase()}${invalid.slice(1)}`))
+      return
+    }
+
+    form.name = reclaudeGeneratedName.value
+
+    await createAccountAndFinish(
+      'anthropic',
+      'reclaude' as AccountType,
+      buildReclaudeCredentials(reclaudeForm),
+      buildReclaudeExtra(reclaudeForm)
+    )
     return
   }
 

@@ -320,7 +320,11 @@
             </div>
           </template>
           <template #cell-usage="{ row }">
+            <!-- rec 账号刻意不写会话窗口（上游返回的是底层账号的窗口，不是我们的
+                 配额包），AccountUsageCell 对它恒为空。换成配额包自己的指标。 -->
+            <ReclaudeStatusCell v-if="row.type === 'reclaude'" :account="row" />
             <AccountUsageCell
+              v-else
               :account="row"
               :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
               :today-stats-loading="todayStatsLoading"
@@ -463,7 +467,13 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @reclaude-self-check="handleReclaudeSelfCheck" />
+    <ReclaudeSelfCheckModal
+      :show="reclaudeSelfCheck.show"
+      :account="reclaudeSelfCheck.account"
+      @close="reclaudeSelfCheck.show = false"
+      @activated="refreshAccountsIncrementally"
+    />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -523,6 +533,8 @@ import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
+import ReclaudeStatusCell from '@/components/account/ReclaudeStatusCell.vue'
+import ReclaudeSelfCheckModal from '@/components/account/ReclaudeSelfCheckModal.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
 import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
@@ -2321,6 +2333,20 @@ const accountExportStepUp = useStepUp()
 const closeTestModal = () => { showTest.value = false; testingAcc.value = null }
 const closeStatsModal = () => { showStats.value = false; statsAcc.value = null }
 const closeReAuthModal = () => { showReAuth.value = false; reAuthAcc.value = null }
+// reclaude 建号后自检。三步全绿后端会把账号置为可调度，所以通过后要刷列表 ——
+// 否则看到的还是 disabled。
+const reclaudeSelfCheck = reactive<{ show: boolean; account: Account | null }>({
+  show: false,
+  account: null
+})
+
+const handleReclaudeSelfCheck = async (a: AccountListItem) => {
+  const account = await loadAccountDetails(a)
+  if (!account) return
+  reclaudeSelfCheck.account = account
+  reclaudeSelfCheck.show = true
+}
+
 const handleTest = async (a: AccountListItem) => {
   const account = await loadAccountDetails(a)
   if (!account) return
