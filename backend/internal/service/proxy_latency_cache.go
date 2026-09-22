@@ -6,26 +6,26 @@ import (
 )
 
 type ProxyLatencyInfo struct {
-	Success          bool      `json:"success"`
-	LatencyMs        *int64    `json:"latency_ms,omitempty"`
-	Message          string    `json:"message,omitempty"`
-	IPAddress        string    `json:"ip_address,omitempty"`
-	Country          string    `json:"country,omitempty"`
-	CountryCode      string    `json:"country_code,omitempty"`
-	Region           string    `json:"region,omitempty"`
-	City             string    `json:"city,omitempty"`
-	QualityStatus    string    `json:"quality_status,omitempty"`
-	QualityScore     *int      `json:"quality_score,omitempty"`
-	QualityGrade     string    `json:"quality_grade,omitempty"`
-	QualitySummary   string    `json:"quality_summary,omitempty"`
-	QualityCheckedAt *int64    `json:"quality_checked_at,omitempty"`
-	QualityCFRay     string    `json:"quality_cf_ray,omitempty"`
+	Success          bool   `json:"success"`
+	LatencyMs        *int64 `json:"latency_ms,omitempty"`
+	Message          string `json:"message,omitempty"`
+	IPAddress        string `json:"ip_address,omitempty"`
+	Country          string `json:"country,omitempty"`
+	CountryCode      string `json:"country_code,omitempty"`
+	Region           string `json:"region,omitempty"`
+	City             string `json:"city,omitempty"`
+	QualityStatus    string `json:"quality_status,omitempty"`
+	QualityScore     *int   `json:"quality_score,omitempty"`
+	QualityGrade     string `json:"quality_grade,omitempty"`
+	QualitySummary   string `json:"quality_summary,omitempty"`
+	QualityCheckedAt *int64 `json:"quality_checked_at,omitempty"`
+	QualityCFRay     string `json:"quality_cf_ray,omitempty"`
 	// 出口 IP 网络类型快照，随质量检测一起写入，列表页直接读，不重复调用数据源。
 	NetworkType       string    `json:"network_type,omitempty"`
 	NetworkTypeSource string    `json:"network_type_source,omitempty"`
 	ISP               string    `json:"isp,omitempty"`
 	ASN               string    `json:"asn,omitempty"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type ProxyLatencyCache interface {
