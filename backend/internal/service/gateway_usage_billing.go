@@ -598,6 +598,10 @@ func writeUsageLogBestEffort(ctx context.Context, repo UsageLogRepository, usage
 
 // RecordUsage 记录使用量并扣费（或更新订阅用量）
 func (s *GatewayService) RecordUsage(ctx context.Context, input *RecordUsageInput) error {
+	// reclaude 的日水位与计费是两套口径（token 计 vs 美元计），但都以一次成功请求
+	// 为单位，所以搭在同一个入口上。放在扣费之前：扣费失败不该让水位漏记。
+	s.recordReclaudeQuota(ctx, input.Account, input.Result)
+
 	return s.recordUsageCore(ctx, &recordUsageCoreInput{
 		Result:             input.Result,
 		APIKey:             input.APIKey,
@@ -1145,6 +1149,7 @@ func (s *GatewayService) buildRecordUsageLog(
 		AccountID:                account.ID,
 		RequestID:                requestID,
 		UpstreamRequestID:        usageUpstreamRequestIDPtr(account, result.UpstreamHeaders, false),
+		UpstreamTraceID:          reclaudeUsageTraceIDPtr(result),
 		Model:                    result.Model,
 		RequestedModel:           requestedModel,
 		UpstreamModel:            optionalTrimmedStringPtr(result.UpstreamModel),

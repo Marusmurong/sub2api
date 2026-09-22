@@ -63,10 +63,12 @@ type AccountHandler struct {
 	deviceLimitCache        service.DeviceLimitCache
 	rpmCache                service.RPMCache
 	tokenCacheInvalidator   service.TokenCacheInvalidator
-	grokImportProber        grokImportProber
-	upstreamBillingProbe    *service.UpstreamBillingProbeService
-	ollamaCloudUsage        *service.OllamaCloudUsageService
-	cfg                     *config.Config
+	// reclaudeRuntime 由启动装配阶段注入（见 SetReclaudeRuntime）；可为 nil。
+	reclaudeRuntime      *service.ReclaudeRuntime
+	grokImportProber     grokImportProber
+	upstreamBillingProbe *service.UpstreamBillingProbeService
+	ollamaCloudUsage     *service.OllamaCloudUsageService
+	cfg                  *config.Config
 }
 
 // SetUpstreamBillingProbeService attaches the optional remote billing probe service.
@@ -118,7 +120,7 @@ type CreateAccountRequest struct {
 	Name                    string         `json:"name" binding:"required"`
 	Notes                   *string        `json:"notes"`
 	Platform                string         `json:"platform" binding:"required"`
-	Type                    string         `json:"type" binding:"required,oneof=oauth setup-token apikey upstream bedrock service_account"`
+	Type                    string         `json:"type" binding:"required,oneof=oauth setup-token apikey upstream bedrock service_account reclaude"`
 	Credentials             map[string]any `json:"credentials" binding:"required"`
 	Extra                   map[string]any `json:"extra"`
 	ProxyID                 *int64         `json:"proxy_id"`
@@ -138,7 +140,7 @@ type CreateAccountRequest struct {
 type UpdateAccountRequest struct {
 	Name                    string         `json:"name"`
 	Notes                   *string        `json:"notes"`
-	Type                    string         `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account"`
+	Type                    string         `json:"type" binding:"omitempty,oneof=oauth setup-token apikey upstream bedrock service_account reclaude"`
 	Credentials             map[string]any `json:"credentials"`
 	Extra                   map[string]any `json:"extra"`
 	ProxyID                 *int64         `json:"proxy_id"`

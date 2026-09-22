@@ -517,6 +517,28 @@ func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccou
 		}
 	}
 
+	// V-6：reclaude 与自建号的分组隔离。**不能复用 checkMixedChannelRisk** ——
+	// 那个比的是 platform，而 reclaude 的 platform 仍是 anthropic，现状不会触发
+	// 任何告警。两类账号的运维规则互斥（粘性 / 混池 / 复制 / 日闸全相反），
+	// 分组是名字被改乱之后的最后一道防线，所以这里不提供"确认后跳过"的口子。
+	if err := s.checkReclaudeGroupIsolation(ctx, 0, input.Type == AccountTypeReclaude, groupIDs); err != nil {
+		return nil, err
+	}
+
+	// reclaude 建号前置处理：V-8 闸 → 硬校验 → 账号名 → 合成 uuid → 凭据加密。
+	if input.Type == AccountTypeReclaude {
+		prepared, err := PrepareReclaudeAccountCreate(s.cfg, NewReclaudeCredentialCipher(s.secretEncryptor), input, accountExtra)
+		if err != nil {
+			return nil, err
+		}
+		input.Name = prepared.Name
+		input.Credentials = prepared.Credentials
+		accountExtra = prepared.Extra
+		for _, warning := range prepared.Warnings {
+			logger.LegacyPrintf("service.admin", "reclaude account create warning: %s", warning)
+		}
+	}
+
 	// 校验并规范化请求头覆写配置（header 名小写化、格式检查）
 	if err := NormalizeHeaderOverrideCredentials(input.Credentials); err != nil {
 		return nil, err
@@ -645,7 +667,14 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 	} else if len(input.Credentials) > 0 {
 		// 敏感子键采用"incoming 没提供就保留"的合并语义：前端响应已脱敏，
 		// 全对象 PUT 编辑时不会再带回 token，避免覆盖时清空已有凭证。
+		existingCredentials := account.Credentials
 		account.Credentials = MergePreservingSensitiveCreds(account.Credentials, input.Credentials)
+		// reclaude：设备身份与凭据建号后不可改，网关节点必须仍在白名单内。
+		if account.IsReclaude() {
+			if err := ValidateReclaudeCredentialUpdate(existingCredentials, account.Credentials); err != nil {
+				return nil, err
+			}
+		}
 		// 校验并规范化请求头覆写配置（header 名小写化、格式检查）
 		if err := NormalizeHeaderOverrideCredentials(account.Credentials); err != nil {
 			return nil, err
@@ -830,6 +859,12 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 			return nil, err
 		}
 		if err := s.ValidateAccountGroupBindings(ctx, *input.GroupIDs); err != nil {
+			return nil, err
+		}
+
+		// V-6 与分片约束在改组路径同样成立 —— 否则「建号时拦住、改组时放行」
+		// 等于没有防线。这里不提供跳过开关（与混合渠道风险不同）。
+		if err := s.checkReclaudeGroupIsolation(ctx, account.ID, account.IsReclaude(), *input.GroupIDs); err != nil {
 			return nil, err
 		}
 
@@ -1048,6 +1083,20 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 				continue
 			}
 			if err := s.checkMixedChannelRisk(ctx, accountID, platform, *input.GroupIDs); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	// V-6 与分片约束：批量改分组是第三条能改变分组归属的路径。
+	// 它不看 needMixedChannelCheck —— 那个开关是给「确认后跳过混合渠道风险」
+	// 用的，而本条不可跳过。
+	if input.GroupIDs != nil {
+		for _, account := range cachedTargets {
+			if account == nil {
+				continue
+			}
+			if err := s.checkReclaudeGroupIsolation(ctx, account.ID, account.IsReclaude(), *input.GroupIDs); err != nil {
 				return nil, err
 			}
 		}
@@ -1529,6 +1578,44 @@ func (s *adminServiceImpl) checkMixedChannelRisk(ctx context.Context, currentAcc
 		}
 	}
 
+	return nil
+}
+
+// checkReclaudeGroupIsolation 执行 V-6：rec 分组不得混入自建号，自建号分组
+// 不得混入 rec 账号。双向成立。
+//
+// 与 checkMixedChannelRisk 并列而不是合并：后者按 platform 判定且允许用户确认后
+// 跳过，本条按 Type 判定且**不可跳过**。
+func (s *adminServiceImpl) checkReclaudeGroupIsolation(
+	ctx context.Context, currentAccountID int64, currentIsReclaude bool, groupIDs []int64,
+) error {
+	if len(groupIDs) == 0 {
+		return nil
+	}
+
+	current := &Account{ID: currentAccountID}
+	if currentIsReclaude {
+		current.Type = AccountTypeReclaude
+	}
+
+	for _, groupID := range groupIDs {
+		accounts, err := s.accountRepo.ListByGroup(ctx, groupID)
+		if err != nil {
+			return fmt.Errorf("get accounts in group %d: %w", groupID, err)
+		}
+		members := make([]*Account, 0, len(accounts))
+		for i := range accounts {
+			members = append(members, &accounts[i])
+		}
+		if err := CheckReclaudeGroupIsolation(current, members); err != nil {
+			return fmt.Errorf("group %d: %w", groupID, err)
+		}
+		// 分片约束：1 台设备 1 个 group。组内 failover 是自动的，
+		// 两台 rec 设备同组 = 默认开启了被禁止的跨设备兜底。
+		if err := CheckReclaudeSingleAccountPerGroup(current, members); err != nil {
+			return fmt.Errorf("group %d: %w", groupID, err)
+		}
+	}
 	return nil
 }
 

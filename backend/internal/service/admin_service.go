@@ -733,6 +733,9 @@ type adminServiceImpl struct {
 	// 建号时按配额自动定型要读的观察计数；可为 nil（此时按默认平台定型）。
 	// 与 GatewayService 一样由 handler 构造时注入，免改 wire。
 	clientPlatformStats ClientPlatformStatsCache
+	// secretEncryptor 用于 reclaude 设备凭据的加解密；可为 nil
+	// （此时创建 reclaude 账号会被拒绝，而不是明文落库）。
+	secretEncryptor SecretEncryptor
 }
 
 // SetClientPlatformStatsCache 注入平台观察计数存储，供建号时的自动定型使用。
@@ -784,6 +787,7 @@ func NewAdminService(
 	compositeResolver *CompositeRouteResolver,
 	channelCacheInvalidator ChannelCacheInvalidator,
 	clientPlatformStats ClientPlatformStatsCache,
+	secretEncryptor SecretEncryptor,
 ) AdminService {
 	return &adminServiceImpl{
 		cfg:                  cfg,
@@ -816,5 +820,6 @@ func NewAdminService(
 
 		channelCacheInvalidator: channelCacheInvalidator,
 		clientPlatformStats:     clientPlatformStats,
+		secretEncryptor:         secretEncryptor,
 	}
 }

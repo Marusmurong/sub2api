@@ -120,6 +120,12 @@ type UsageLog struct {
 	// UpstreamModelMismatch is nil when no upstream model was observed. Otherwise
 	// it compares UpstreamResponseModel with the actual model sent upstream.
 	UpstreamModelMismatch *bool
+	// UpstreamTraceID 是 reclaude 信封里的 traceId。
+	//
+	// 统一 user_id / session_id 之后，**我们自己也分不清上游报错是哪个下游客户
+	// 触发的了** —— 拿着上游报错里的 traceId 反查只剩这一条路。
+	// 非 reclaude 链路恒为 nil。
+	UpstreamTraceID *string
 	// ChannelID 渠道 ID
 	ChannelID *int64
 	// ModelMappingChain 模型映射链，如 "a→b→c"

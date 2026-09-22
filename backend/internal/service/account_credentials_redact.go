@@ -12,6 +12,9 @@ var SensitiveCredentialKeys = []string{
 	// 云服务凭据
 	"aws_secret_access_key", "aws_session_token",
 	"service_account_json", "service_account", "private_key",
+	// reclaude 设备凭据：sk 是 Bearer 凭证，seed 是设备私钥种子。
+	// 两者泄漏 = 订阅被白嫖 + 设备可被顶掉，且凭据终身不换（禁止二次 login）。
+	CredKeyReclaudeSK, CredKeyReclaudeSeed,
 }
 
 var sensitiveCredentialKeySet = func() map[string]struct{} {

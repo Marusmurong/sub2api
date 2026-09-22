@@ -16,77 +16,107 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-// usageLogInsertArgTypes must stay in the same order as:
+// usageLogInsertColumn 把列名与 PG 类型绑在一起。
+//
+// 之前只有一个类型数组、列名写在行尾注释里 —— 注释对机器不可见，加列时错位
+// 不会有任何测试变红，而错位的后果是整行计费数据串位。现在列名是可断言的。
+type usageLogInsertColumn struct {
+	name   string
+	pgType string
+}
+
+// usageLogInsertColumns must stay in the same order as:
 //  1. prepareUsageLogInsert().args
 //  2. every INSERT/CTE VALUES column list in this file
 //  3. execUsageLogInsertNoResult placeholder positions
 //  4. scanUsageLog selected column order (via usageLogSelectColumns)
 //
 // When adding a usage_logs column, update all of those call sites together.
-var usageLogInsertArgTypes = [...]string{
-	"bigint",      // user_id
-	"bigint",      // api_key_id
-	"bigint",      // account_id
-	"text",        // request_id
-	"text",        // model
-	"text",        // requested_model
-	"text",        // upstream_model
-	"text",        // upstream_response_model
-	"boolean",     // upstream_model_mismatch
-	"bigint",      // group_id
-	"bigint",      // subscription_id
-	"integer",     // input_tokens
-	"integer",     // output_tokens
-	"integer",     // cache_creation_tokens
-	"integer",     // cache_read_tokens
-	"integer",     // cache_creation_5m_tokens
-	"integer",     // cache_creation_1h_tokens
-	"integer",     // image_output_tokens
-	"numeric",     // image_output_cost
-	"integer",     // image_input_tokens
-	"numeric",     // image_input_cost
-	"numeric",     // input_cost
-	"numeric",     // output_cost
-	"numeric",     // cache_creation_cost
-	"numeric",     // cache_read_cost
-	"numeric",     // total_cost
-	"numeric",     // actual_cost
-	"numeric",     // rate_multiplier
-	"numeric",     // account_rate_multiplier
-	"smallint",    // billing_type
-	"smallint",    // request_type
-	"boolean",     // stream
-	"boolean",     // openai_ws_mode
-	"integer",     // duration_ms
-	"integer",     // first_token_ms
-	"text",        // user_agent
-	"text",        // ip_address
-	"integer",     // image_count
-	"text",        // image_size
-	"text",        // image_input_size
-	"text",        // image_output_size
-	"text",        // image_size_source
-	"jsonb",       // image_size_breakdown
-	"integer",     // video_count
-	"text",        // video_resolution
-	"integer",     // video_duration_seconds
-	"text",        // service_tier
-	"text",        // reasoning_effort
-	"text",        // requested_reasoning_effort
-	"text",        // inbound_endpoint
-	"text",        // upstream_endpoint
-	"boolean",     // cache_ttl_overridden
-	"boolean",     // long_context_billing_applied
-	"bigint",      // channel_id
-	"text",        // model_mapping_chain
-	"text",        // billing_tier
-	"text",        // billing_mode
-	"numeric",     // account_stats_cost
-	"text",        // upstream_request_id
-	"text",        // session_id
-	"boolean",     // native_compaction_v2
-	"timestamptz", // created_at
+// TestUsageLogInsertColumnListsMatchArgTypes 会逐条核对 2 与本表。
+var usageLogInsertColumns = [...]usageLogInsertColumn{
+	{name: "user_id", pgType: "bigint"},
+	{name: "api_key_id", pgType: "bigint"},
+	{name: "account_id", pgType: "bigint"},
+	{name: "request_id", pgType: "text"},
+	{name: "model", pgType: "text"},
+	{name: "requested_model", pgType: "text"},
+	{name: "upstream_model", pgType: "text"},
+	{name: "upstream_response_model", pgType: "text"},
+	{name: "upstream_model_mismatch", pgType: "boolean"},
+	{name: "group_id", pgType: "bigint"},
+	{name: "subscription_id", pgType: "bigint"},
+	{name: "input_tokens", pgType: "integer"},
+	{name: "output_tokens", pgType: "integer"},
+	{name: "cache_creation_tokens", pgType: "integer"},
+	{name: "cache_read_tokens", pgType: "integer"},
+	{name: "cache_creation_5m_tokens", pgType: "integer"},
+	{name: "cache_creation_1h_tokens", pgType: "integer"},
+	{name: "image_output_tokens", pgType: "integer"},
+	{name: "image_output_cost", pgType: "numeric"},
+	{name: "image_input_tokens", pgType: "integer"},
+	{name: "image_input_cost", pgType: "numeric"},
+	{name: "input_cost", pgType: "numeric"},
+	{name: "output_cost", pgType: "numeric"},
+	{name: "cache_creation_cost", pgType: "numeric"},
+	{name: "cache_read_cost", pgType: "numeric"},
+	{name: "total_cost", pgType: "numeric"},
+	{name: "actual_cost", pgType: "numeric"},
+	{name: "rate_multiplier", pgType: "numeric"},
+	{name: "account_rate_multiplier", pgType: "numeric"},
+	{name: "billing_type", pgType: "smallint"},
+	{name: "request_type", pgType: "smallint"},
+	{name: "stream", pgType: "boolean"},
+	{name: "openai_ws_mode", pgType: "boolean"},
+	{name: "duration_ms", pgType: "integer"},
+	{name: "first_token_ms", pgType: "integer"},
+	{name: "user_agent", pgType: "text"},
+	{name: "ip_address", pgType: "text"},
+	{name: "image_count", pgType: "integer"},
+	{name: "image_size", pgType: "text"},
+	{name: "image_input_size", pgType: "text"},
+	{name: "image_output_size", pgType: "text"},
+	{name: "image_size_source", pgType: "text"},
+	{name: "image_size_breakdown", pgType: "jsonb"},
+	{name: "video_count", pgType: "integer"},
+	{name: "video_resolution", pgType: "text"},
+	{name: "video_duration_seconds", pgType: "integer"},
+	{name: "service_tier", pgType: "text"},
+	{name: "reasoning_effort", pgType: "text"},
+	{name: "requested_reasoning_effort", pgType: "text"},
+	{name: "inbound_endpoint", pgType: "text"},
+	{name: "upstream_endpoint", pgType: "text"},
+	{name: "cache_ttl_overridden", pgType: "boolean"},
+	{name: "long_context_billing_applied", pgType: "boolean"},
+	{name: "channel_id", pgType: "bigint"},
+	{name: "model_mapping_chain", pgType: "text"},
+	{name: "billing_tier", pgType: "text"},
+	{name: "billing_mode", pgType: "text"},
+	{name: "account_stats_cost", pgType: "numeric"},
+	{name: "upstream_request_id", pgType: "text"},
+	{name: "upstream_trace_id", pgType: "text"},
+	{name: "session_id", pgType: "text"},
+	{name: "native_compaction_v2", pgType: "boolean"},
+	{name: "created_at", pgType: "timestamptz"},
 }
+
+// usageLogInsertArgTypes 是列类型的投影，供 CTE 的 VALUES 段做显式类型标注。
+var usageLogInsertArgTypes = func() []string {
+	out := make([]string, len(usageLogInsertColumns))
+	for i, column := range usageLogInsertColumns {
+		out[i] = column.pgType
+	}
+	return out
+}()
+
+// usageLogInsertArgNames 是列名的投影，供测试按名字定位下标 ——
+// 写死下标会在下次加列时静默指向别的列。
+var usageLogInsertArgNames = func() []string {
+	out := make([]string, len(usageLogInsertColumns))
+	for i, column := range usageLogInsertColumns {
+		out[i] = column.name
+	}
+	return out
+}()
 
 const (
 	usageLogCreateBatchMaxSize  = 64
@@ -284,6 +314,7 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			billing_mode,
 			account_stats_cost,
 			upstream_request_id,
+			upstream_trace_id,
 			session_id,
 			native_compaction_v2,
 			created_at
@@ -293,7 +324,7 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			$12, $13, $14, $15,
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25,
-			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62
+			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 		RETURNING id, created_at
@@ -744,14 +775,15 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 			billing_mode,
 			account_stats_cost,
 			upstream_request_id,
+			upstream_trace_id,
 			session_id,
 			native_compaction_v2,
 			created_at
 		) AS (VALUES `)
 
-	// Each batch row prepends the synthetic input_index before the 60
+	// Each batch row prepends the synthetic input_index before the
 	// usage-log column values.
-	args := make([]any, 0, len(keys)*61)
+	args := make([]any, 0, len(keys)*(len(usageLogInsertColumns)+1))
 	argPos := 1
 	for idx, key := range keys {
 		if idx > 0 {
@@ -839,6 +871,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				billing_mode,
 				account_stats_cost,
 				upstream_request_id,
+				upstream_trace_id,
 				session_id,
 				native_compaction_v2,
 				created_at
@@ -903,6 +936,7 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				billing_mode,
 				account_stats_cost,
 				upstream_request_id,
+				upstream_trace_id,
 				session_id,
 				native_compaction_v2,
 				created_at
@@ -1007,12 +1041,13 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			billing_mode,
 			account_stats_cost,
 			upstream_request_id,
+			upstream_trace_id,
 			session_id,
 			native_compaction_v2,
 			created_at
 		) AS (VALUES `)
 
-	args := make([]any, 0, len(preparedList)*60)
+	args := make([]any, 0, len(preparedList)*len(usageLogInsertColumns))
 	argPos := 1
 	for idx, prepared := range preparedList {
 		if idx > 0 {
@@ -1097,6 +1132,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			billing_mode,
 			account_stats_cost,
 			upstream_request_id,
+			upstream_trace_id,
 			session_id,
 			native_compaction_v2,
 			created_at
@@ -1161,6 +1197,7 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			billing_mode,
 			account_stats_cost,
 			upstream_request_id,
+			upstream_trace_id,
 			session_id,
 			native_compaction_v2,
 			created_at
@@ -1233,6 +1270,7 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			billing_mode,
 			account_stats_cost,
 			upstream_request_id,
+			upstream_trace_id,
 			session_id,
 			native_compaction_v2,
 			created_at
@@ -1242,7 +1280,7 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			$12, $13, $14, $15,
 			$16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25,
-			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62
+			$26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56, $57, $58, $59, $60, $61, $62, $63
 		)
 		ON CONFLICT (request_id, api_key_id) DO NOTHING
 	`, prepared.args...)
@@ -1285,6 +1323,9 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 	billingTier := nullString(log.BillingTier)
 	billingMode := nullString(log.BillingMode)
 	upstreamRequestID := nullString(log.UpstreamRequestID)
+	// 非 reclaude 链路恒为 NULL。落空串会让 partial index 收下每一行，
+	// 而那个索引的前提正是「绝大多数行为 NULL」。
+	upstreamTraceID := nullString(log.UpstreamTraceID)
 	sessionID := nullString(log.SessionID)
 	requestedModel := strings.TrimSpace(log.RequestedModel)
 	if requestedModel == "" {
@@ -1364,6 +1405,7 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 			billingMode,
 			log.AccountStatsCost, // account_stats_cost
 			upstreamRequestID,    // upstream_request_id
+			upstreamTraceID,      // upstream_trace_id
 			sessionID,            // session_id
 			log.NativeCompactionV2,
 			createdAt,

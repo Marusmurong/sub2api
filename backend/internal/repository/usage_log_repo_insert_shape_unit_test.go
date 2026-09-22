@@ -129,7 +129,9 @@ func TestPrepareUsageLogInsert_UpstreamRequestIDArgWiring(t *testing.T) {
 	})
 	require.Len(t, prepared.args, len(usageLogInsertArgTypes))
 
-	idx := len(prepared.args) - 4
+	// 按名字定位而不是写死末尾偏移：加列时写死的下标会静默指向别的列，
+	// 而串位的后果只在集成测试或生产才暴露。
+	idx := usageLogInsertArgIndex(t, "upstream_request_id")
 	arg, ok := prepared.args[idx].(sql.NullString)
 	require.True(t, ok, "upstream_request_id arg should be sql.NullString, got %T", prepared.args[idx])
 	require.True(t, arg.Valid)
@@ -142,4 +144,16 @@ func TestPrepareUsageLogInsert_UpstreamRequestIDArgWiring(t *testing.T) {
 	require.False(t, nullArg.Valid, "absent upstream request id must be NULL")
 
 	require.Contains(t, usageLogSelectColumns, "upstream_request_id")
+}
+
+// usageLogInsertArgIndex 按列名找参数下标。
+func usageLogInsertArgIndex(t *testing.T, name string) int {
+	t.Helper()
+	for i, column := range usageLogInsertArgNames {
+		if column == name {
+			return i
+		}
+	}
+	t.Fatalf("column %q is missing from usageLogInsertColumns", name)
+	return -1
 }

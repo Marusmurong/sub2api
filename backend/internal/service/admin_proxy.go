@@ -605,19 +605,19 @@ func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxyID
 	score := result.Score
 	checkedAt := result.CheckedAt
 	info := &ProxyLatencyInfo{
-		Success:          proxyQualityBaseConnectivityPass(result),
-		Message:          result.Summary,
-		QualityStatus:    proxyQualityOverallStatus(result),
-		QualityScore:     &score,
-		QualityGrade:     result.Grade,
-		QualitySummary:   result.Summary,
-		QualityCheckedAt: &checkedAt,
-		QualityCFRay:     proxyQualityFirstCFRay(result),
+		Success:           proxyQualityBaseConnectivityPass(result),
+		Message:           result.Summary,
+		QualityStatus:     proxyQualityOverallStatus(result),
+		QualityScore:      &score,
+		QualityGrade:      result.Grade,
+		QualitySummary:    result.Summary,
+		QualityCheckedAt:  &checkedAt,
+		QualityCFRay:      proxyQualityFirstCFRay(result),
 		NetworkType:       result.NetworkType,
 		NetworkTypeSource: result.NetworkTypeSource,
 		ISP:               result.ISP,
 		ASN:               result.ASN,
-		UpdatedAt:        time.Now(),
+		UpdatedAt:         time.Now(),
 	}
 	if result.BaseLatencyMs > 0 {
 		latency := result.BaseLatencyMs

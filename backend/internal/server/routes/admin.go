@@ -383,6 +383,9 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/:id/ollama-cloud-usage/refresh", h.Admin.Account.RefreshOllamaCloudUsage)
 		accounts.DELETE("/:id", h.Admin.Account.Delete)
 		accounts.POST("/:id/test", h.Admin.Account.Test)
+		// reclaude：建号后连通性自检（三步全绿才置可调度）与今日配额包水位
+		accounts.POST("/:id/reclaude-self-check", h.Admin.Account.ReclaudeSelfCheck)
+		accounts.GET("/:id/reclaude-usage", h.Admin.Account.ReclaudeDailyUsage)
 		accounts.POST("/:id/recover-state", h.Admin.Account.RecoverState)
 		accounts.POST("/:id/refresh", h.Admin.Account.Refresh)
 		accounts.POST("/:id/apply-oauth-credentials", h.Admin.Account.ApplyOAuthCredentials)
@@ -589,6 +592,9 @@ func registerSettingsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		// 请求整流器配置
 		adminSettings.GET("/rectifier", h.Admin.Setting.GetRectifierSettings)
 		adminSettings.PUT("/rectifier", h.Admin.Setting.UpdateRectifierSettings)
+		// reclaude 中转通道配置（含紧急止血开关：关闭后 rec 账号立即不可调度）
+		adminSettings.GET("/reclaude", h.Admin.Setting.GetReclaudeSettings)
+		adminSettings.PUT("/reclaude", h.Admin.Setting.UpdateReclaudeSettings)
 		// Beta 策略配置
 		adminSettings.GET("/beta-policy", h.Admin.Setting.GetBetaPolicySettings)
 		adminSettings.PUT("/beta-policy", h.Admin.Setting.UpdateBetaPolicySettings)

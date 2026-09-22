@@ -73,6 +73,8 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "usage_logs", "openai_ws_mode", "boolean", 0, false)
 	requireColumn(t, tx, "usage_logs", "native_compaction_v2", "boolean", 0, false)
 	requireColumnDefaultContains(t, tx, "usage_logs", "native_compaction_v2", "false")
+	// 身份收敛之后唯一的排障锚点（迁移 240）。可空：只有 reclaude 链路写它。
+	requireColumn(t, tx, "usage_logs", "upstream_trace_id", "character varying", 64, true)
 	requireColumn(t, tx, "usage_logs", "image_input_size", "character varying", 32, true)
 	requireColumn(t, tx, "usage_logs", "image_output_size", "character varying", 32, true)
 	requireColumn(t, tx, "usage_logs", "image_size_source", "character varying", 16, true)

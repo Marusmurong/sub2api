@@ -708,6 +708,11 @@ type AdminUsageLog struct {
 	ModelMappingChain *string `json:"model_mapping_chain,omitempty"`
 	// UpstreamRequestID 是直接上游声明的请求标识，仅管理端可见。
 	UpstreamRequestID *string `json:"upstream_request_id,omitempty"`
+	// UpstreamTraceID 是 reclaude 信封里的 traceId，仅管理端可见。
+	//
+	// 身份收敛（统一 user_id / session_id）之后，拿着上游报错反查「是哪个下游
+	// 客户触发的」只剩这一条路。非 reclaude 链路恒为 nil。
+	UpstreamTraceID *string `json:"upstream_trace_id,omitempty"`
 	// BillingTier 计费层级标签（per_request/image 模式）
 	BillingTier *string `json:"billing_tier,omitempty"`
 

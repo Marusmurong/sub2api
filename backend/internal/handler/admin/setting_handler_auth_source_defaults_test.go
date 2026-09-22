@@ -35,7 +35,13 @@ func (s *settingHandlerRepoStub) GetValue(ctx context.Context, key string) (stri
 }
 
 func (s *settingHandlerRepoStub) Set(ctx context.Context, key, value string) error {
-	panic("unexpected Set call")
+	// 与 SetMultiple 同语义。单键写入是按类型分组的设置（如 reclaude 通道配置）
+	// 走的路径；再 panic 下去会把这类 handler 的测试全挡在门外。
+	if s.values == nil {
+		s.values = map[string]string{}
+	}
+	s.values[key] = value
+	return nil
 }
 
 func (s *settingHandlerRepoStub) GetMultiple(ctx context.Context, keys []string) (map[string]string, error) {
