@@ -36,6 +36,10 @@ const (
 	BetaPerTurnControl        = "per-turn-control-2026-07-01"
 	BetaAdvisorTool           = "advisor-tool-2026-03-01"
 
+	// 2026-09-23 本机真实 2.1.280 抓包新增：仅 opus/fable 族发，位置在
+	// per-turn-control 之后、advisor-tool 之前。sonnet / haiku 两族的抓样里没有它。
+	BetaMidConversationToolChanges = "mid-conversation-tool-changes-2026-07-01"
+
 	// server-side refusal fallback beta 字段族（beta Messages API 专有）。
 	// 客户端（Claude Code / SDK / OpenCode 等）会默认透传 body.fallbacks /
 	// body.fallback_credit_token，上游仅在 anthropic-beta 携带对应 token 时接受；
@@ -100,7 +104,18 @@ const DefaultCacheControlTTL = "5m"
 // ClientHello（JA3/JA4）全部相同，只有 opus/fable 的 beta 多了
 // per-turn-control-2026-07-01（beta 集合已按三族模板对齐，见 mimicryBetaTemplate*）。
 // 抬版本前必须重抓样本核对头与 TLS，方法见 tlsfingerprint/claudecode_clienthello_test.go。
-const CLICurrentVersion = "2.1.263"
+// 2026-09-23 抬到 2.1.280：上游把新模型的客户端版本下限抬到了 2.1.280，生产以
+// "Claude Code 2.1.263 does not support this model; version 2.1.280 or newer is required"
+// 直接 400。本机 2.1.280（macOS arm64 Bun 1.4.3 原生二进制）重抓核对结果：
+//   - X-Stainless-*（Package 0.112.1 / Runtime node v26.3.0 / arm64 / MacOS / Timeout 600）
+//     与头顺序、Accept-Encoding、Connection 全部与 2.1.263 相同；
+//   - TLS ClientHello 与 profile 6 逐项相同（17 cipher 同序、groups 11ec-001d-0017-0018、
+//     9 sigalg、ALPN 仅 http/1.1、扩展序 23 ff01 10 11 35 16 5 13 18 51 45 43）；
+//   - 唯一差异是 opus/fable 族 beta 多了 mid-conversation-tool-changes-2026-07-01。
+//
+// 注意：只改本常量才有用——identity_service.floorClaudeCLIUserAgentVersion 的存量账号
+// 指纹地板读的就是它，SUB2API_CLAUDE_CLI_VERSION 环境变量抬不动那条地板。
+const CLICurrentVersion = "2.1.280"
 
 // CLIPatchVersion 返回当前伪装 CLI 版本的 patch 段（"2.1.263" → "263"）。
 //
@@ -140,9 +155,10 @@ var (
 		BetaPromptCachingScope,
 		BetaMidConversationSystem,
 		BetaPerTurnControl,
+		BetaMidConversationToolChanges, // 2.1.280 新增，仅本族
 		BetaAdvisorTool,
 		BetaEffort,
-		BetaFallbackCreditLegacy, // * 门控；2.1.263 发的是 2026-06-01 这个 id
+		BetaFallbackCreditLegacy, // * 门控；2.1.263/2.1.280 发的都是 2026-06-01 这个 id
 		BetaExtendedCacheTTL,
 		BetaFastMode, // * body.speed=fast
 	}

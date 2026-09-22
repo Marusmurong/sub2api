@@ -7,8 +7,11 @@ import (
 	"testing"
 )
 
-// 期望值全部来自 2026-09-07 本机真实 Claude Code 2.1.263（macOS arm64 Bun 原生二进制）
+// 期望值全部来自 2026-09-23 本机真实 Claude Code 2.1.280（macOS arm64 Bun 1.4.3 原生二进制）
 // 对本地假端点的抓包：opus/fable、sonnet、haiku 三族各跑一次 -p "hi"。
+// 相对 2026-09-07 的 2.1.263 抓包只有一处变化：opus/fable 族多了
+// mid-conversation-tool-changes-2026-07-01（per-turn-control 之后、advisor-tool 之前），
+// sonnet / haiku 两族逐项不变。
 // 顺序照抄线上 anthropic-beta 头，不能重排——集合的成分、大小、顺序都是客户端指纹。
 //
 // context-1m 与 fallback-credit 是账号级门控（1M 上下文权限 / 额外用量信用），
@@ -16,7 +19,7 @@ import (
 // context-1m 的位置取自 2.1.257 抓包（oauth 之后、interleaved-thinking 之前）。
 
 var (
-	real2_1_263OpusBetas = []string{
+	real2_1_280OpusBetas = []string{
 		"claude-code-20250219",
 		"oauth-2025-04-20",
 		"interleaved-thinking-2025-05-14",
@@ -25,12 +28,13 @@ var (
 		"prompt-caching-scope-2026-01-05",
 		"mid-conversation-system-2026-04-07",
 		"per-turn-control-2026-07-01",
+		"mid-conversation-tool-changes-2026-07-01", // 2.1.280 新增，仅 opus/fable 族
 		"advisor-tool-2026-03-01",
 		"effort-2025-11-24",
 		"fallback-credit-2026-06-01", // 门控：该抓包账号具备
 		"extended-cache-ttl-2025-04-11",
 	}
-	real2_1_263SonnetBetas = []string{
+	real2_1_280SonnetBetas = []string{
 		"claude-code-20250219",
 		"oauth-2025-04-20",
 		"interleaved-thinking-2025-05-14",
@@ -42,7 +46,7 @@ var (
 		"effort-2025-11-24",
 		"extended-cache-ttl-2025-04-11",
 	}
-	real2_1_263HaikuBetas = []string{
+	real2_1_280HaikuBetas = []string{
 		"oauth-2025-04-20",
 		"interleaved-thinking-2025-05-14",
 		"thinking-token-count-2026-05-13",
@@ -64,22 +68,22 @@ func without(list []string, drop string) []string {
 	return out
 }
 
-func TestMimicryBetasForModel_MatchesRealClaudeCode2_1_263(t *testing.T) {
+func TestMimicryBetasForModel_MatchesRealClaudeCode2_1_280(t *testing.T) {
 	cases := []struct {
 		name  string
 		model string
 		gates MimicryBetaGates
 		want  []string
 	}{
-		{"opus 默认不发门控 beta", "claude-opus-5", MimicryBetaGates{}, without(real2_1_263OpusBetas, BetaFallbackCreditLegacy)},
-		{"fable 与 opus 同族", "claude-fable-5-1", MimicryBetaGates{}, without(real2_1_263OpusBetas, BetaFallbackCreditLegacy)},
-		{"opus 账号开了 fallback-credit → 与抓包逐项一致", "claude-fable-5-1", MimicryBetaGates{FallbackCredit: true}, real2_1_263OpusBetas},
-		{"sonnet 10 个", "claude-sonnet-5", MimicryBetaGates{}, real2_1_263SonnetBetas},
-		{"sonnet 带日期后缀同族", "claude-sonnet-5-20260701", MimicryBetaGates{}, real2_1_263SonnetBetas},
-		{"haiku 8 个且 claude-code 排第 6", "claude-haiku-4-5", MimicryBetaGates{}, real2_1_263HaikuBetas},
-		{"bedrock 形式的 haiku 也按族", "us.anthropic.claude-haiku-4-5-v1", MimicryBetaGates{}, real2_1_263HaikuBetas},
-		{"未知模型按 opus 族", "claude-unknown-9", MimicryBetaGates{}, without(real2_1_263OpusBetas, BetaFallbackCreditLegacy)},
-		{"sonnet 上的 fallback-credit 门控不生效（抓包 sonnet 不带）", "claude-sonnet-5", MimicryBetaGates{FallbackCredit: true}, real2_1_263SonnetBetas},
+		{"opus 默认不发门控 beta", "claude-opus-5", MimicryBetaGates{}, without(real2_1_280OpusBetas, BetaFallbackCreditLegacy)},
+		{"fable 与 opus 同族", "claude-fable-5-1", MimicryBetaGates{}, without(real2_1_280OpusBetas, BetaFallbackCreditLegacy)},
+		{"opus 账号开了 fallback-credit → 与抓包逐项一致", "claude-fable-5-1", MimicryBetaGates{FallbackCredit: true}, real2_1_280OpusBetas},
+		{"sonnet 10 个", "claude-sonnet-5", MimicryBetaGates{}, real2_1_280SonnetBetas},
+		{"sonnet 带日期后缀同族", "claude-sonnet-5-20260701", MimicryBetaGates{}, real2_1_280SonnetBetas},
+		{"haiku 8 个且 claude-code 排第 6", "claude-haiku-4-5", MimicryBetaGates{}, real2_1_280HaikuBetas},
+		{"bedrock 形式的 haiku 也按族", "us.anthropic.claude-haiku-4-5-v1", MimicryBetaGates{}, real2_1_280HaikuBetas},
+		{"未知模型按 opus 族", "claude-unknown-9", MimicryBetaGates{}, without(real2_1_280OpusBetas, BetaFallbackCreditLegacy)},
+		{"sonnet 上的 fallback-credit 门控不生效（抓包 sonnet 不带）", "claude-sonnet-5", MimicryBetaGates{FallbackCredit: true}, real2_1_280SonnetBetas},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -112,7 +116,7 @@ func TestMimicryBetasForModel_Context1MSlot(t *testing.T) {
 
 func TestMimicryBetasForModel_FastModeAppendedLast(t *testing.T) {
 	got := MimicryBetasForModel("claude-sonnet-5", "", true, MimicryBetaGates{})
-	if got[len(got)-1] != BetaFastMode || len(got) != len(real2_1_263SonnetBetas)+1 {
+	if got[len(got)-1] != BetaFastMode || len(got) != len(real2_1_280SonnetBetas)+1 {
 		t.Fatalf("fast-mode 应追加在末尾: %v", got)
 	}
 }
@@ -122,7 +126,7 @@ func TestMimicryBetasForRequest_DefaultsToOpusFamily(t *testing.T) {
 	if !reflect.DeepEqual(MimicryBetasForRequest("", false), MimicryBetasForModel("claude-opus-5", "", false, MimicryBetaGates{})) {
 		t.Fatal("MimicryBetasForRequest 应等价于 opus 族默认集合")
 	}
-	if !reflect.DeepEqual(FullClaudeCodeMimicryBetas(), without(real2_1_263OpusBetas, BetaFallbackCreditLegacy)) {
+	if !reflect.DeepEqual(FullClaudeCodeMimicryBetas(), without(real2_1_280OpusBetas, BetaFallbackCreditLegacy)) {
 		t.Fatalf("FullClaudeCodeMimicryBetas 应为 opus 族非门控集合: %v", FullClaudeCodeMimicryBetas())
 	}
 }
