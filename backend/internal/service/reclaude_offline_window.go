@@ -47,6 +47,11 @@ func ReclaudeOfflineUntil(account *Account, at time.Time) (time.Time, bool) {
 	}
 
 	startHour := int(credentialInt64(raw, "start_hour"))
+	// 老账号的 extra 没有这个键 —— 缺席时按整点处理，而不是判成「永不离线」。
+	startMinute := int(credentialInt64(raw, "start_minute"))
+	if startMinute < 0 || startMinute > 59 {
+		startMinute = 0
+	}
 	durationHours := int(credentialInt64(raw, "duration_hours"))
 	if durationHours <= 0 || durationHours >= reclaudeOfflineDurationCap {
 		return time.Time{}, false
@@ -61,7 +66,7 @@ func ReclaudeOfflineUntil(account *Account, at time.Time) (time.Time, bool) {
 	// 同时检查「今天的窗口」和「昨天开始、跨午夜延续到今天的窗口」。
 	for _, dayOffset := range []int{0, -1} {
 		day := local.AddDate(0, 0, dayOffset)
-		start := time.Date(day.Year(), day.Month(), day.Day(), startHour, 0, 0, 0, location)
+		start := time.Date(day.Year(), day.Month(), day.Day(), startHour, startMinute, 0, 0, location)
 		end := start.Add(time.Duration(durationHours) * time.Hour)
 		if !local.Before(start) && local.Before(end) {
 			return end, true
@@ -97,9 +102,16 @@ func GenerateReclaudeOfflineWindow(timezone string) map[string]any {
 	duration := reclaudeOfflineDurationMin +
 		rand.Intn(reclaudeOfflineDurationMax-reclaudeOfflineDurationMin+1)
 
+	// 🔴 分钟级抖动是**人设时区集中的必要补偿**。
+	//
+	// rec 屏蔽中国 IP ⇒ 其客群本来就是中国用户翻墙 ⇒ 人设时区集中在
+	// Asia/*（见 gen-persona.py 的 LOCALES）。此时若作息只精确到整点，
+	// N 台「个人电脑」会在北京时间同一分钟一起合盖 —— §6.10 点名这比
+	// 版本号同步更显眼，因为它每天发生一次。
 	return map[string]any{
 		"timezone":       timezone,
 		"start_hour":     startHour,
+		"start_minute":   rand.Intn(60),
 		"duration_hours": duration,
 	}
 }
