@@ -80,6 +80,8 @@ func PrepareReclaudeAccountCreate(
 		ClientPlatform: credentialString(input.Credentials, CredKeyReclaudeClientPlatform),
 		UserEmail:      credentialString(input.Credentials, CredKeyReclaudeUserEmail),
 		PlanTier:       credentialString(extra, ExtraKeyReclaudePlanTier),
+		ClaudeUserID:   credentialString(input.Credentials, CredKeyReclaudeClaudeUserID),
+		AccountUUID:    credentialString(input.Credentials, CredKeyReclaudeAccountUUID),
 		DeviceHostname: credentialString(input.Credentials, CredKeyReclaudeDeviceHostname),
 	}
 

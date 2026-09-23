@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/reclaude"
 )
@@ -138,7 +139,10 @@ func (c *ReclaudeSelfChecker) checkEndpoint(
 	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Sprintf("status %d", resp.StatusCode)
+		// 🔴 必须带上响应体：只报 "status 400" 等于没报 —— 400 意味着对方
+		// **明确说了原因**（设备已被删、SK 失效、客户端版本不受支持…），
+		// 而这几种的处置完全不同。丢掉正文就只能靠猜。
+		return fmt.Sprintf("status %d%s", resp.StatusCode, describeReclaudeErrorBody(resp.Body))
 	}
 
 	if boundEmail != nil && resp.Body != nil {
@@ -190,4 +194,27 @@ func (c *ReclaudeSelfChecker) activate(ctx context.Context, accountID int64) boo
 		return false
 	}
 	return c.store.SetAccountSchedulable(ctx, accountID, true) == nil
+}
+
+// reclaudeErrorBodyMaxBytes 限制错误正文的读取量。
+// 对方返回 HTML 错误页时正文可能很大，而我们只需要开头那句话。
+const reclaudeErrorBodyMaxBytes = 512
+
+// describeReclaudeErrorBody 把错误响应体压成一行附加说明。
+// 空正文返回空串，避免产生误导性的空引号。
+func describeReclaudeErrorBody(body io.Reader) string {
+	if body == nil {
+		return ""
+	}
+	raw, err := io.ReadAll(io.LimitReader(body, reclaudeErrorBodyMaxBytes))
+	if err != nil {
+		return ""
+	}
+	text := strings.TrimSpace(string(raw))
+	if text == "" {
+		return ""
+	}
+	// 压成单行：错误详情会渲染进 SSE 与日志，换行会把一条记录撑成多条。
+	text = strings.Join(strings.Fields(text), " ")
+	return ": " + text
 }

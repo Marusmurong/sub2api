@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -144,7 +146,44 @@ func (u *ReclaudeUpstream) Do(inner *http.Request, account *Account, proxyURL st
 		return nil, fmt.Errorf("%w: %s", ErrReclaudeGatewayNotAllowed, err.Error())
 	}
 
-	envelope, traceID, err := buildReclaudeEnvelope(inner)
+	// 🔴 内层 Authorization 必须是本设备的 SK。
+	//
+	// GetAccessToken 对 reclaude 账号返回空 token（Anthropic 侧凭据由对方用自己的号
+	// 填），于是 buildUpstreamRequest 根本不写这个头。但 2026-09-23 抓到的真实客户端
+	// 信封里，内层 headers 的 authorization 恰恰是 `Bearer sk-rec-…`（它自己的 SK）——
+	// 对方拿它识别客户端，再在转发给 Anthropic 时换成自己的凭据。缺了这一项，网关回
+	// 400「reclaude 客户端状态异常，请重启 reclaude 后重试」，看起来像设备坏了。
+	//
+	// 只在这里补，不动 GetAccessToken：那个函数的返回值被十余处 CC 伪装门控共用，
+	// 改它会外溢到普通 Claude 账号的链路。
+	//
+	// 🔴 必须用 setHeaderRaw 而不是 Header.Set。伪装路径已经用小写键写过一个
+	// `authorization: "Bearer "`（reclaude 的 token 是空串，只剩前缀和一个空格），
+	// Header.Set 会另建一个规范大小写的 "Authorization" 键 —— 两个键并存，装箱时
+	// 统一转小写互相覆盖，谁赢取决于 map 遍历顺序，于是一半的请求带着空凭据出门，
+	// 网关回 400 bad_envelope。setHeaderRaw 会把两种大小写都删掉再写小写键。
+	setHeaderRaw(inner.Header, "authorization", "Bearer "+sk)
+
+	// daemon 模式：本机真客户端负责封信封与签名，我们只做 CC 伪装。
+	//
+	// 🔴 必须放在 authorization 注入**之后**：daemon 用内层 Authorization 识别
+	// 是哪台设备在调用（真客户端的 ~/.claude/.credentials.json 里 accessToken
+	// 存的就是 SK 本身）。放在前面会发出一个空凭据的请求，daemon 封装时判定
+	// 状态异常，回 400 bad_envelope —— 看起来像信封问题，实际是凭据缺失。
+	// transparent 口优先：正向代理口实测会被回 bad_envelope，
+	// 而 Claude Code 本体打的就是 transparent 口。
+	if endpoint, ok := ReclaudeDaemonEndpoint(account); ok {
+		if err := retargetToReclaudeDaemon(inner, endpoint); err != nil {
+			return nil, err
+		}
+		return u.doViaDaemon(inner, account, "")
+	}
+	if daemonProxy, ok := ReclaudeDaemonProxy(account); ok {
+		normalizeInnerRequestURLForDaemon(inner)
+		return u.doViaDaemon(inner, account, daemonProxy)
+	}
+
+	envelope, traceID, err := buildReclaudeEnvelope(inner, gatewayURL)
 	if err != nil {
 		return nil, err
 	}
@@ -160,6 +199,8 @@ func (u *ReclaudeUpstream) Do(inner *http.Request, account *Account, proxyURL st
 	// tlsProfile 显式传 nil：外层对端是 reclaude 网关，不是 Anthropic，
 	// 套 Anthropic 的 TLS 指纹没有意义。并发参数传 account.Concurrency 而不是 1 ——
 	// 它会被直接设成 MaxConnsPerHost，传 1 等于把推导出来的并发值一行作废。
+	// 排障用：落盘外层请求的完整头部取值（仅在调试环境变量配置时）。
+	dumpOutboundRequest(outer, traceID)
 	resp, err := u.httpUpstream.DoWithTLS(outer, proxyURL, account.ID, account.Concurrency, nil)
 	if err != nil {
 		// 请求已经出网：对端可能已经扣了配额，必须记。
@@ -171,8 +212,28 @@ func (u *ReclaudeUpstream) Do(inner *http.Request, account *Account, proxyURL st
 
 	// 外层非 200 = 网关自己拒绝了我们。映射成账号动作（401/403 停号、429 冷却、
 	// 5xx 短冷却），否则 SK 被撤销后这个账号会被一直调度、每次都 401。
+	// 🔴 任何失败都把**我们实际发出去的信封形状**记下来。
+	//
+	// 对方的错误文案是给终端用户看的（"请重启 reclaude"），对我们零信息量；
+	// 2026-09-23 排查 bad_envelope 时，缺这条日志只能靠一遍遍改代码重部署去猜。
+	// 条件必须覆盖两条路径：网关自己的错误结构（ReclaudeGatewayError）与被合成成
+	// 普通响应的非 2xx —— 只挂在前者上，那次 400 一条日志都没出。
+	// 只记形状不记内容：URL / method / 头名清单 / 各段长度 / 信封头部字节。
+	status := 0
+	if synthesized != nil {
+		status = synthesized.StatusCode
+	}
 	var gatewayErr *ReclaudeGatewayError
-	if errors.As(err, &gatewayErr) && u.events != nil {
+	isGatewayErr := errors.As(err, &gatewayErr)
+	if isGatewayErr {
+		status = gatewayErr.StatusCode
+	}
+	if err != nil || status >= http.StatusBadRequest {
+		logEnvelopeShapeOnReject(inner, outer, envelope, traceID, status)
+		// 排障用：仅在 SUB2API_DEBUG_RECLAUDE_ENVELOPE_DIR 配置时落盘完整字节。
+		dumpRejectedEnvelope(envelope, traceID)
+	}
+	if isGatewayErr && u.events != nil {
 		u.events.HandleReclaudeGatewayError(account, gatewayErr.StatusCode)
 	}
 
@@ -210,7 +271,7 @@ func (u *ReclaudeUpstream) deviceSignerFor(account *Account) (*reclaude.DeviceSi
 //
 // 请求体必须完整 buffer：签名覆盖的是整个信封的 sha256，没法 chunked 流式上传。
 // 对 /v1/messages 无影响（请求体小）。响应侧仍然是流式的。
-func buildReclaudeEnvelope(inner *http.Request) ([]byte, string, error) {
+func buildReclaudeEnvelope(inner *http.Request, gatewayURL string) ([]byte, string, error) {
 	var body []byte
 	if inner.Body != nil {
 		read, err := io.ReadAll(inner.Body)
@@ -221,7 +282,7 @@ func buildReclaudeEnvelope(inner *http.Request) ([]byte, string, error) {
 		body = read
 	}
 
-	headers := make(map[string]string, len(inner.Header))
+	headers := make(map[string]string, len(inner.Header)+2)
 	for name, values := range inner.Header {
 		if len(values) == 0 {
 			continue
@@ -230,17 +291,69 @@ func buildReclaudeEnvelope(inner *http.Request) ([]byte, string, error) {
 		headers[strings.ToLower(name)] = values[0]
 	}
 
+	// 🔴 host / content-length 必须显式补进去。
+	//
+	// Go 把这两项放在 http.Request 的结构体字段（Host / ContentLength）里，不进
+	// Header map，照抄 inner.Header 会把它们漏掉。而 2026-09-23 抓到的真实客户端
+	// 信封里两者都在 —— 对端是拿 headers 原样去重建上游请求的。
+	if inner.Host != "" {
+		headers["host"] = inner.Host
+	} else if inner.URL != nil {
+		headers["host"] = inner.URL.Host
+	}
+	headers["content-length"] = strconv.Itoa(len(body))
+
+	// 🔴 这两个头缺一不可 —— 2026-09-24 抓真实客户端信封实测：少了会被网关
+	// 拒为 {"code":"bad_envelope"}（而信封二进制结构、六个顶层字段、base64
+	// 变体全部一致，差异只在这里）。
+	//
+	// 只在下游没带时补：下游真是 Claude Code 时，它自己的值才是真的。
+	if headers["x-claude-code-request-class"] == "" {
+		headers["x-claude-code-request-class"] = "main"
+	}
+	if headers["x-client-request-id"] == "" {
+		// 逐请求随机：固定值等于给所有请求盖同一个戳。
+		headers["x-client-request-id"] = uuid.NewString()
+	}
+
 	traceID := uuid.NewString()
 	envelope, err := reclaude.EncodeEnvelope(reclaude.ClientRequestMetadata{
 		URL:     inner.URL.String(),
 		Method:  inner.Method,
 		Headers: headers,
 		TraceID: traceID,
+		// 真实客户端恒发这两项（edge="unknown"、keepalive=true）。结构体上它们是
+		// omitempty，不显式赋值整个字段就从 JSON 里消失，信封形状与真值对不上。
+		Edge:      reclaudeEnvelopeEdgeFor(gatewayURL),
+		Keepalive: true,
 	}, body)
 	if err != nil {
 		return nil, "", fmt.Errorf("reclaude upstream: %w", err)
 	}
 	return envelope, traceID, nil
+}
+
+// reclaudeEnvelopeEdgeFallback 是取不到网关主机名时的回落值。
+//
+// 客户端**尚未选定节点**时确实发 "unknown"（2026-09-23 抓到的早期样本就是），
+// 所以这是个合法取值，只是不能当常量用。
+const reclaudeEnvelopeEdgeFallback = "unknown"
+
+// reclaudeEnvelopeEdgeFor 从网关 URL 取出信封 edge 字段该用的标签。
+//
+// 🔴 edge = **实际发往的网关主机名**（逆向报告 §7.2：「网关节点标签」）。
+// 2026-09-24 用 RECLAUDE_GATEWAY_DIAL_ADDR 把 daemon 指向本地 sink 抓到真实
+// 报文，确认 `"edge":"www.reclaude.ai"` 与它连接的网关一致。
+//
+// 早先这里硬编码 "unknown" —— 那来自一份客户端刚启动、还没选定节点时的样本，
+// 被误当成常量。edge 与实际网关不符正是
+// `bad_envelope / reclaude state mismatch` 的字面含义。
+func reclaudeEnvelopeEdgeFor(gatewayURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(gatewayURL))
+	if err != nil || parsed.Hostname() == "" {
+		return reclaudeEnvelopeEdgeFallback
+	}
+	return parsed.Hostname()
 }
 
 // buildProxyRequest 组装打给 /proxy 的外层请求。
@@ -327,3 +440,24 @@ type reclaudeEnvelopeBody struct {
 
 func (b *reclaudeEnvelopeBody) Read(p []byte) (int, error) { return b.reader.Read(p) }
 func (b *reclaudeEnvelopeBody) Close() error               { return b.closer.Close() }
+
+// doViaDaemon 把内层请求经本机 reclaude daemon 的正向代理发出去。
+//
+// 与自研信封路径的区别：这里**不封信封、不签名、不改 URL** —— 请求原样发往
+// api.anthropic.com，daemon 拦下后自己完成信封、签名与节点选择。
+//
+// 🔴 内层 Authorization 必须已经是本设备的 SK（调用方在进入本函数前注入）：
+// daemon 靠它识别设备，缺失时封装失败并回 bad_envelope。
+func (u *ReclaudeUpstream) doViaDaemon(
+	inner *http.Request, account *Account, daemonProxy string,
+) (*http.Response, error) {
+	// 账号绑定的住宅代理在 daemon 那一侧生效（它自己的出站配置），
+	// 这里传 daemon 地址本身作为代理 —— 出站只有回环一跳。
+	resp, err := u.httpUpstream.DoWithTLS(inner, daemonProxy, account.ID, account.Concurrency, nil)
+	if err != nil {
+		// 请求可能已经出网：对端可能已扣配额，必须记。
+		u.recordFailedCall(account)
+		return nil, fmt.Errorf("reclaude daemon transport: %w", err)
+	}
+	return resp, nil
+}

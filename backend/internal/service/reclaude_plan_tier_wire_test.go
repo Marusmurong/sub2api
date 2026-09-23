@@ -60,6 +60,8 @@ func TestValidateReclaudeAccountInput_PlanTier(t *testing.T) {
 			ClientPlatform: "darwin",
 			GatewayURL:     "https://" + ReclaudeAllowedGatewayHosts[0],
 			PlanTier:       "20x",
+			ClaudeUserID:   "c8f2a1b09d3e4f5a6b7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f809a1b2c3",
+			AccountUUID:    "9c67eb02-4001-4cde-a6e2-e40f1a71649e",
 		}
 	}
 

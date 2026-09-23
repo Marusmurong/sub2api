@@ -91,9 +91,9 @@ func TestAddSignatureHeaders(t *testing.T) {
 
 		// Assert：base64 长度是 K-4 的直接体现，变体改了这里会先红
 		require.NotEmpty(t, header.Get(HeaderTimestamp))
-		require.Len(t, header.Get(HeaderNonce), 24, "base64(16B) 应为 24 字符")
-		require.Len(t, header.Get(HeaderBodySHA256), 44, "base64(32B) 应为 44 字符")
-		require.Len(t, header.Get(HeaderSignature), 88, "base64(64B) 应为 88 字符")
+		require.Len(t, header.Get(HeaderNonce), 22, "base64url 无填充 16B 应为 22 字符")
+		require.Len(t, header.Get(HeaderBodySHA256), 43, "base64url 无填充 32B 应为 43 字符")
+		require.Len(t, header.Get(HeaderSignature), 86, "base64url 无填充 64B 应为 86 字符")
 		require.Equal(t, "43448", header.Get(HeaderDeviceID))
 	})
 
@@ -146,15 +146,15 @@ func TestAddSignatureHeaders(t *testing.T) {
 //
 // 所以它同时是一次跨实现验证，而不只是自我一致性回归。
 //
-// ⚠️ 但它锁不住的是 **base64 变体本身**（Std / URL、是否 padded）—— 两边用的都是
-// 我们假定的 Std(padded)。那个真值只能来自 Phase 0 本地 sink 抓到的真实出站头
-// （K-4）。sink 真值到手后回来核对，不一致就改 signatureEncoding 一处。
+// 2026-09-23：base64 变体已由 sink 抓到的真实出站头定案为 **base64url 无填充**
+// （K-4 结案，见 signature.go 的 signatureEncoding 注释）。本向量随之重算 ——
+// nonce/sha/签名三项都用上面那条 python 命令独立生成，仍是跨实现验证。
 func TestSignatureGoldenVector(t *testing.T) {
 	const (
 		fixedTsMillis   = int64(1758412800123)
-		wantNonceB64    = "q6urq6urq6urq6urq6urqw=="
-		wantBodyHashB64 = "kV9/G4SfENqgTgDUoY6rBkM61HpaOOSsfqnt1Gt++/0="
-		wantSignature   = "nq0HoEtjmbcXZD8f8dD9ZQQdcYinSqVHYMA3Rbd3uHkkm1XJpwrIleKCwJsfpNQdghogZ3710wep6N+iPKz+BA=="
+		wantNonceB64    = "q6urq6urq6urq6urq6urqw"
+		wantBodyHashB64 = "kV9_G4SfENqgTgDUoY6rBkM61HpaOOSsfqnt1Gt--_0"
+		wantSignature   = "J3ONOeUbmcZmP_r-pSkk8VPqB1Slg34cOHgR_iAD8JMCLZyyf-MtMzWB4LTFirQoyjuQa0XlPdw_68sPU8WACg"
 	)
 
 	signer, err := NewDeviceSigner(testSeed(), 43448)

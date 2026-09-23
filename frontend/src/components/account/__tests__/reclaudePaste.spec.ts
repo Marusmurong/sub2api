@@ -10,6 +10,8 @@ const validBundle = {
   reclaude_gateway_url: 'https://la.route.reclaude.ai',
   reclaude_client_version: 'v1.4.0',
   reclaude_client_platform: 'linux/arm64',
+    reclaude_claude_user_id: 'c'.repeat(64),
+    reclaude_account_uuid: '9c67eb02-4001-4cde-a6e2-e40f1a71649e',
   reclaude_device_hostname: 'sunqi-dev',
   reclaude_timezone: 'America/New_York',
   reclaude_user_email: 'owner@example.com'
@@ -88,5 +90,53 @@ describe('parseReclaudeBundle', () => {
     void reclaude_user_email
 
     expect(parseReclaudeBundle(JSON.stringify(withoutEmail)).ok).toBe(true)
+  })
+})
+
+// 🔴 device_id / account_uuid 是 rec 识别设备的依据，缺任一个账号必然跑不通
+// （2026-09-24 定位：缺它们就是 bad_envelope / reclaude state mismatch，
+// 而那句错误完全看不出是身份字段缺失）。所以设为必填，建号时就拦住。
+describe('parseReclaudeBundle — 设备身份字段', () => {
+  const full = {
+    reclaude_sk: 'sk-rec-abcdef123456',
+    reclaude_ed25519_seed: 'a'.repeat(64),
+    reclaude_device_id: 44186,
+    reclaude_fingerprint: '161b2c4f8d006878',
+    reclaude_gateway_url: 'https://www.reclaude.ai',
+    reclaude_client_version: 'v1.4.0',
+    reclaude_client_platform: 'linux/amd64',
+    reclaude_claude_user_id: 'c'.repeat(64),
+    reclaude_account_uuid: '9c67eb02-4001-4cde-a6e2-e40f1a71649e',
+    reclaude_device_hostname: 'ip-172-31-65-127',
+    reclaude_claude_user_id: 'c'.repeat(64),
+    reclaude_account_uuid: '9c67eb02-4001-4cde-a6e2-e40f1a71649e'
+  }
+
+  it('解析出这两个字段', () => {
+    const result = parseReclaudeBundle(JSON.stringify(full))
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.values.claudeUserId).toBe('c'.repeat(64))
+    expect(result.values.accountUuid).toBe('9c67eb02-4001-4cde-a6e2-e40f1a71649e')
+  })
+
+  it('缺 claude_user_id 时拒绝', () => {
+    const { reclaude_claude_user_id: _omit, ...rest } = full
+    const result = parseReclaudeBundle(JSON.stringify(rest))
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error).toBe('missingFields')
+    expect(result.missing).toContain('reclaude_claude_user_id')
+  })
+
+  it('缺 account_uuid 时拒绝', () => {
+    const { reclaude_account_uuid: _omit, ...rest } = full
+    const result = parseReclaudeBundle(JSON.stringify(rest))
+
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.missing).toContain('reclaude_account_uuid')
   })
 })

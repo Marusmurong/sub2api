@@ -82,8 +82,16 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 			// 当 metadata 透传开启时跳过重写
 			if !enableMPT {
 				accountUUID := account.GetAccountUUID()
-				if accountUUID != "" && fp.ClientID != "" {
-					if newBody, err := s.identityService.RewriteUserIDWithMasking(ctx, body, account, accountUUID, fp.ClientID, fp.UserAgent); err == nil && len(newBody) > 0 {
+				// 🔴 reclaude 必须用真实客户端的 Claude Code userID 作 device_id：
+				// rec 服务端按它识别设备，报自己生成的 ClientID 会被判
+				// `state mismatch`（2026-09-24 定位 bad_envelope 的真因）。
+				// 未配置时返回空串，继续走既有 ClientID 逻辑。
+				clientID := fp.ClientID
+				if real := ReclaudeMetadataDeviceID(account); real != "" {
+					clientID = real
+				}
+				if accountUUID != "" && clientID != "" {
+					if newBody, err := s.identityService.RewriteUserIDWithMasking(ctx, body, account, accountUUID, clientID, fp.UserAgent); err == nil && len(newBody) > 0 {
 						body = newBody
 					}
 				}

@@ -28,6 +28,8 @@ func validReclaudeInput() ReclaudeAccountInput {
 		ClientVersion:  "v1.4.0",
 		ClientPlatform: "linux/amd64",
 		PlanTier:       "20x",
+		ClaudeUserID:   "c8f2a1b09d3e4f5a6b7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f809a1b2c3",
+		AccountUUID:    "9c67eb02-4001-4cde-a6e2-e40f1a71649e",
 		DeviceHostname: "mbp-dev",
 	}
 }
@@ -239,5 +241,61 @@ func TestReclaudeGroupIsolation(t *testing.T) {
 	// 账号自己已经在组里时不应把自己算成冲突（编辑既有账号的场景）。
 	t.Run("忽略自身", func(t *testing.T) {
 		require.NoError(t, CheckReclaudeGroupIsolation(reclaude, []*Account{reclaude}))
+	})
+}
+
+// 🔴 2026-09-24 真机 login 实测：客户端拿到的 gateway_url 是**主域**
+// `https://www.reclaude.ai`，不是任何一个 route 子域。
+//
+// 此前白名单只收了四个 `*.route.reclaude.ai` 节点（来自逆向推断），
+// 按那个清单建的号全部打在 asia.route 上，请求被拒为
+// device_signature_required —— 一个看起来像签名问题、实则可能是端点问题的故障。
+//
+// 保留 route 节点：它们在真实响应里出现过，且不排除按区域下发。
+func TestReclaudeGatewayAllowlistIncludesPrimaryDomain(t *testing.T) {
+	t.Run("主域必须被接受", func(t *testing.T) {
+		input := validReclaudeInput()
+		input.GatewayURL = "https://www.reclaude.ai"
+
+		result, err := ValidateReclaudeAccountInput(input)
+
+		require.NoError(t, err, "真实客户端 login 拿到的就是这个地址")
+		require.Equal(t, "https://www.reclaude.ai", result.NormalizedGateway)
+	})
+
+	t.Run("route 节点继续被接受", func(t *testing.T) {
+		for _, host := range []string{"asia.route.reclaude.ai", "la.route.reclaude.ai"} {
+			input := validReclaudeInput()
+			input.GatewayURL = "https://" + host
+
+			_, err := ValidateReclaudeAccountInput(input)
+
+			require.NoErrorf(t, err, "host %s", host)
+		}
+	})
+
+	t.Run("白名单之外仍然拒绝", func(t *testing.T) {
+		// 这条是防线本身：gateway_url 决定我们把全量明文 prompt 发到哪台机器。
+		input := validReclaudeInput()
+		input.GatewayURL = "https://evil.example.com"
+
+		_, err := ValidateReclaudeAccountInput(input)
+
+		require.ErrorIs(t, err, ErrReclaudeGatewayNotAllowed)
+	})
+
+	t.Run("相似域名不被误放行", func(t *testing.T) {
+		for _, bad := range []string{
+			"https://www.reclaude.ai.evil.com",
+			"https://notwww.reclaude.ai",
+			"https://reclaude.ai.attacker.net",
+		} {
+			input := validReclaudeInput()
+			input.GatewayURL = bad
+
+			_, err := ValidateReclaudeAccountInput(input)
+
+			require.Errorf(t, err, "不该放行 %s", bad)
+		}
 	})
 }

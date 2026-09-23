@@ -16,15 +16,18 @@ import (
 // 建号硬校验的错误。全部是**拒绝创建**，不是警告 —— 这类账号有一堆建号后
 // 不可逆的约束（人设只有一次机会、禁止二次 login），录错了只能重新买。
 var (
-	ErrReclaudeProxyRequired     = errors.New("reclaude account requires a bound proxy")
-	ErrReclaudeSeedInvalid       = errors.New("reclaude ed25519 seed is invalid")
-	ErrReclaudeSKInvalid         = errors.New("reclaude sk is invalid")
-	ErrReclaudeDeviceIDInvalid   = errors.New("reclaude device id is invalid")
-	ErrReclaudePlanTierRequired  = errors.New("reclaude plan tier must be selected")
-	ErrReclaudeGatewayNotAllowed = errors.New("reclaude gateway url is not an allowed route node")
-	ErrReclaudeClientIdentity    = errors.New("reclaude client version and platform are required")
-	ErrReclaudeGroupMixed        = errors.New("reclaude accounts must not share a group with self-hosted accounts")
-	ErrReclaudeGroupNotExclusive = errors.New("each reclaude device must have its own group")
+	ErrReclaudeProxyRequired    = errors.New("reclaude account requires a bound proxy")
+	ErrReclaudeSeedInvalid      = errors.New("reclaude ed25519 seed is invalid")
+	ErrReclaudeSKInvalid        = errors.New("reclaude sk is invalid")
+	ErrReclaudeDeviceIDInvalid  = errors.New("reclaude device id is invalid")
+	ErrReclaudePlanTierRequired = errors.New("reclaude plan tier must be selected")
+	// ErrReclaudeDeviceIdentityMissing：metadata.user_id 的两个身份字段缺失或形态不对。
+	// rec 服务端按它们识别设备，错了会被拒为 bad_envelope / state mismatch。
+	ErrReclaudeDeviceIdentityMissing = errors.New("reclaude device identity (claude user id / account uuid) is required")
+	ErrReclaudeGatewayNotAllowed     = errors.New("reclaude gateway url is not an allowed route node")
+	ErrReclaudeClientIdentity        = errors.New("reclaude client version and platform are required")
+	ErrReclaudeGroupMixed            = errors.New("reclaude accounts must not share a group with self-hosted accounts")
+	ErrReclaudeGroupNotExclusive     = errors.New("each reclaude device must have its own group")
 )
 
 // ReclaudeSKPrefix 是 SK 的固定前缀（设备页面上可见）。
@@ -35,10 +38,21 @@ const ReclaudeSKPrefix = "sk-rec-"
 // 默认配置下 SSRF 校验不生效，这是唯一的防线：gateway_url 决定我们把**全量
 // 明文 prompt** 发到哪台机器上。不做 auto-pick，固定一个节点。
 var ReclaudeAllowedGatewayHosts = []string{
+	// 🔴 主域 —— 2026-09-24 真机 login 实测，客户端 device.json 里的
+	// gateway_url 就是这个值，不是任何 route 子域。
+	//
+	// 此前清单只有下面四个 route 节点（逆向推断），按那个清单建的号全部打在
+	// asia.route 上被拒为 device_signature_required —— 一个看起来像签名问题、
+	// 实则可能是端点问题的故障。
+	"www.reclaude.ai",
+	// route 节点保留：它们在真实响应里出现过，不排除按区域下发。
 	"asia.route.reclaude.ai",
 	"la.route.reclaude.ai",
 	"misaka.route.reclaude.ai",
-	"cloudfront.route.reclaude.ai",
+	// 🔴 真实节点名是 cloudfront.reclaude.ai（无 .route）——
+	// 2026-09-24 `reclaude config gateway` 输出实测。原先写的
+	// cloudfront.route.reclaude.ai 是推断，不存在。
+	"cloudfront.reclaude.ai",
 }
 
 var reclaudeFingerprintPattern = regexp.MustCompile(`^[0-9a-f]{16}$`)
@@ -55,6 +69,8 @@ type ReclaudeAccountInput struct {
 	ClientPlatform string
 	UserEmail      string
 	PlanTier       string
+	ClaudeUserID   string
+	AccountUUID    string
 	DeviceHostname string
 }
 
@@ -106,6 +122,17 @@ func ValidateReclaudeAccountInput(input ReclaudeAccountInput) (ReclaudeValidatio
 		return result, fmt.Errorf("%w: got %q", ErrReclaudePlanTierRequired, input.PlanTier)
 	}
 	result.DailyLimitUSD = tier.DailyLimitUSD
+
+	// 🔴 设备身份：rec 按 metadata.user_id 里的 device_id / account_uuid 识别设备。
+	// 缺失或形态不对时账号建得出来但一定跑不通，而失败信息是对方那句
+	// 「请重启 reclaude」，完全看不出是建号时填漏了（2026-09-24 定位）。
+	if !claudeUserIDPattern.MatchString(strings.TrimSpace(input.ClaudeUserID)) {
+		return result, fmt.Errorf("%w: claude user id must be 64 hex chars (from ~/.claude.json userID), got %q",
+			ErrReclaudeDeviceIdentityMissing, input.ClaudeUserID)
+	}
+	if strings.TrimSpace(input.AccountUUID) == "" {
+		return result, fmt.Errorf("%w: account uuid is empty", ErrReclaudeDeviceIdentityMissing)
+	}
 
 	if strings.TrimSpace(input.ClientVersion) == "" || strings.TrimSpace(input.ClientPlatform) == "" {
 		return result, ErrReclaudeClientIdentity

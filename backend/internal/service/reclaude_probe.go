@@ -77,7 +77,17 @@ func (p *ReclaudeGatewayProbe) ProbeReclaudeEndpoint(
 		return nil, err
 	}
 
-	// 这些端点不带信封，因此**不签名** —— 签名覆盖的是信封字节，这里没有信封。
+	// 🔴 控制面端点也要签名。
+	//
+	// 这里原本的假设是「不带信封就不用签名」，2026-09-23 被实测证伪：
+	// `GET /client/account` 无签名头会被网关拒为 400 device_signature_required，
+	// 而 /health/ready 不需要 —— 于是建号自检表现为「第一步网关可达 ✓、
+	// 第二步凭据无效 ✗」，把一个缺签名的问题伪装成凭据问题。
+	// GET 没有 body，签的是 sha256("")，canonical 串格式与信封路径完全一致。
+	if err := p.signControlPlaneRequest(req, account); err != nil {
+		return nil, err
+	}
+
 	return p.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, nil)
 }
 
@@ -100,4 +110,23 @@ func accountIDOf(account *Account) int64 {
 		return 0
 	}
 	return account.ID
+}
+
+// signControlPlaneRequest 给控制面请求补签名头（X-Reclaude-Ts / Nonce /
+// Body-Sha256 / Signature，以及由签名器统一写入的 Device-Id）。
+func (p *ReclaudeGatewayProbe) signControlPlaneRequest(req *http.Request, account *Account) error {
+	seedEncoded, err := p.cipher.DecryptSecret(account, CredKeyReclaudeSeed)
+	if err != nil {
+		return err
+	}
+	seed, err := decodeDeviceSeed(seedEncoded)
+	if err != nil {
+		return fmt.Errorf("%w: %s", ErrReclaudeSeedInvalid, err.Error())
+	}
+	signer, err := reclaude.NewDeviceSigner(seed, account.GetCredentialAsInt64(CredKeyReclaudeDeviceID))
+	if err != nil {
+		return fmt.Errorf("reclaude probe: %w", err)
+	}
+	// GET 控制面请求没有 body。
+	return signer.AddControlPlaneSignatureHeaders(req.Header, nil)
 }

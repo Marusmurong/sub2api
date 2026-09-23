@@ -126,7 +126,8 @@ func TestReclaudeUpstream_Do_Request(t *testing.T) {
 		require.Equal(t, "v1.4.0", upstream.gotRequest.Header.Get(reclaude.HeaderClientVersion))
 		require.Equal(t, "linux/amd64", upstream.gotRequest.Header.Get(reclaude.HeaderClientPlatform))
 		require.Equal(t, "43448", upstream.gotRequest.Header.Get(reclaude.HeaderDeviceID))
-		require.Len(t, upstream.gotRequest.Header.Get(reclaude.HeaderSignature), 88)
+		require.Len(t, upstream.gotRequest.Header.Get(reclaude.HeaderSignature), 86,
+			"base64url 无填充的 64 字节签名是 86 字符（真实客户端抓包为准）")
 	})
 
 	t.Run("信封里的 headers 全小写且带上原始 URL 与方法", func(t *testing.T) {

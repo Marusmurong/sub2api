@@ -34,8 +34,33 @@ func TestReclaudeGatewayProbe(t *testing.T) {
 		require.Equal(t, "Bearer sk-rec-abcdef", upstream.gotRequest.Header.Get("Authorization"))
 	})
 
-	// 签名覆盖的是信封字节，而这些端点没有信封。
-	t.Run("不带签名头", func(t *testing.T) {
+	// 🔴 语义更正（2026-09-23 实测）：控制面端点**同样需要签名**。
+	//
+	// 原断言是「签名覆盖信封字节，而这些端点没有信封，所以不签」。实测证伪：
+	// GET /client/account 不带签名头会被网关拒为
+	//   {"code":"device_signature_required","status":400}
+	// 而 /health/ready 不需要 —— 于是自检表现为「第一步网关可达 ✓、第二步
+	// 凭据无效 ✗」，把一个缺签名的问题伪装成凭据问题，极具误导性。
+	//
+	// GET 没有 body，签的是 sha256("")，canonical 串格式与信封路径完全一致。
+	t.Run("控制面请求必须带签名头", func(t *testing.T) {
+		account, cipher := probeAccount(t)
+		upstream := &capturingUpstream{response: &http.Response{StatusCode: 200, Header: http.Header{}}}
+
+		_, err := NewReclaudeGatewayProbe(upstream, cipher).
+			ProbeReclaudeEndpoint(ctx, account, ReclaudeClientAccountPath)
+
+		require.NoError(t, err)
+		require.NotEmpty(t, upstream.gotRequest.Header.Get("X-Reclaude-Signature"),
+			"缺签名会被网关拒为 device_signature_required")
+		require.NotEmpty(t, upstream.gotRequest.Header.Get("X-Reclaude-Body-Sha256"))
+		require.NotEmpty(t, upstream.gotRequest.Header.Get("X-Reclaude-Ts"))
+		require.NotEmpty(t, upstream.gotRequest.Header.Get("X-Reclaude-Nonce"))
+		require.Equal(t, "43448", upstream.gotRequest.Header.Get("X-Reclaude-Device-Id"))
+	})
+
+	// 探活端点不需要签名，但带上也无害 —— 统一签名路径比按端点分叉更不容易漏。
+	t.Run("探活端点也走同一条签名路径", func(t *testing.T) {
 		account, cipher := probeAccount(t)
 		upstream := &capturingUpstream{response: &http.Response{StatusCode: 200, Header: http.Header{}}}
 
@@ -43,8 +68,7 @@ func TestReclaudeGatewayProbe(t *testing.T) {
 			ProbeReclaudeEndpoint(ctx, account, ReclaudeHealthReadyPath)
 
 		require.NoError(t, err)
-		require.Empty(t, upstream.gotRequest.Header.Get("X-Reclaude-Signature"))
-		require.Empty(t, upstream.gotRequest.Header.Get("X-Reclaude-Body-Sha256"))
+		require.NotEmpty(t, upstream.gotRequest.Header.Get("X-Reclaude-Signature"))
 	})
 
 	// 心跳从另一个出口发出去 = 这台设备同时出现在两个地方。

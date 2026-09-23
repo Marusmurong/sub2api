@@ -12,10 +12,14 @@
 
 /** 网关节点硬白名单。与后端 ReclaudeAllowedGatewayHosts 一一对应。 */
 export const RECLAUDE_GATEWAY_HOSTS = [
+  // 🔴 主域 —— 2026-09-24 真机 login 实测，客户端 device.json 里就是这个值。
+  // 必须与后端 ReclaudeAllowedGatewayHosts 保持一致。
+  'www.reclaude.ai',
   'asia.route.reclaude.ai',
   'la.route.reclaude.ai',
   'misaka.route.reclaude.ai',
-  'cloudfront.route.reclaude.ai'
+  // 真实节点名无 .route（2026-09-24 实测）
+  'cloudfront.reclaude.ai'
 ] as const
 
 /** SK 的固定前缀（设备页面上可见）。 */
@@ -33,6 +37,8 @@ export interface ReclaudeFormValues {
   clientVersion: string
   clientPlatform: string
   deviceHostname: string
+  claudeUserId: string
+  accountUuid: string
   timezone: string
   userEmail: string
   planTier: string
@@ -147,7 +153,9 @@ export function buildReclaudeCredentials(values: ReclaudeFormValues): Record<str
     reclaude_gateway_url: values.gatewayUrl.trim(),
     reclaude_client_version: values.clientVersion.trim(),
     reclaude_client_platform: values.clientPlatform.trim(),
-    reclaude_device_hostname: values.deviceHostname.trim()
+    reclaude_device_hostname: values.deviceHostname.trim(),
+    reclaude_claude_user_id: values.claudeUserId.trim(),
+    reclaude_account_uuid: values.accountUuid.trim()
   }
 
   // 时区决定「模拟关机」作息的生成，留空则后端按默认时区生成。
@@ -211,6 +219,16 @@ export interface ReclaudeBundle {
   reclaude_client_version: string
   reclaude_client_platform: string
   reclaude_device_hostname: string
+  // 🔴 rec 服务端按这两个值识别设备（进信封内层 body 的 metadata.user_id）。
+  // 来源都是 login 那台机器的 ~/.claude.json：userID 与 account uuid。
+  // 缺任一个 → bad_envelope / reclaude state mismatch，而那句错误完全看不出
+  // 是身份字段缺失（2026-09-24 花了一整天才定位到）。
+  //
+  // ⚠️ reclaude_claude_user_id 与 reclaude_device_id 同名不同物：
+  // 后者是设备号（44186，发在 X-Reclaude-Device-Id 头），前者是 Claude Code
+  // 的 userID（64 位 hex，发在 body 里）。
+  reclaude_claude_user_id: string
+  reclaude_account_uuid: string
   reclaude_timezone?: string
   reclaude_user_email?: string
 }
@@ -227,7 +245,10 @@ const REQUIRED_BUNDLE_KEYS: (keyof ReclaudeBundle)[] = [
   'reclaude_fingerprint',
   'reclaude_gateway_url',
   'reclaude_client_version',
-  'reclaude_client_platform'
+  'reclaude_client_platform',
+  // 设备身份：缺了账号建得出来但一定跑不通，必须在建号时就拦住。
+  'reclaude_claude_user_id',
+  'reclaude_account_uuid'
 ]
 
 /**
@@ -272,6 +293,8 @@ export function parseReclaudeBundle(raw: string): ReclaudeParseResult {
       clientVersion: text('reclaude_client_version'),
       clientPlatform: text('reclaude_client_platform'),
       deviceHostname: text('reclaude_device_hostname'),
+      claudeUserId: text('reclaude_claude_user_id'),
+      accountUuid: text('reclaude_account_uuid'),
       timezone: text('reclaude_timezone'),
       userEmail: text('reclaude_user_email')
     }

@@ -1970,6 +1970,19 @@
           </div>
         </div>
 
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>
+            <label class="input-label">{{ t('admin.accounts.reclaudeClaudeUserId') }}</label>
+            <input v-model="reclaudeForm.claudeUserId" type="text" class="input" placeholder="64 位 hex" />
+            <p class="input-hint">{{ t('admin.accounts.reclaudeClaudeUserIdHint') }}</p>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.reclaudeAccountUuid') }}</label>
+            <input v-model="reclaudeForm.accountUuid" type="text" class="input" />
+            <p class="input-hint">{{ t('admin.accounts.reclaudeAccountUuidHint') }}</p>
+          </div>
+        </div>
+
         <div>
           <label class="input-label">{{ t('admin.accounts.reclaudePlanTier') }}</label>
           <select v-model="reclaudeForm.planTier" class="input">
@@ -4382,6 +4395,8 @@ const reclaudeForm = reactive<ReclaudeFormValues>({
   clientVersion: '',
   clientPlatform: '',
   deviceHostname: '',
+  claudeUserId: '',
+  accountUuid: '',
   timezone: '',
   userEmail: '',
   planTier: '',

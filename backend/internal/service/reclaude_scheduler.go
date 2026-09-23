@@ -122,6 +122,10 @@ func (s *ReclaudeScheduler) RunOnceAt(ctx context.Context, at time.Time) {
 		logger.LegacyPrintf("service.reclaude", "failed to list reclaude accounts: %v", err)
 		return
 	}
+	// 🔴 成功路径也要留痕：此前这个循环完全静默 —— 生产上查「心跳有没有在跑」
+	// 只能看到 0 条日志，而 0 条既可能是「没账号」，也可能是「leader lock 没拿到」
+	// 或「注入缺件」。三种原因的处置完全不同。
+	logger.LegacyPrintf("service.reclaude", "heartbeat tick: %d account(s)", len(accounts))
 
 	for _, account := range accounts {
 		s.tickAccount(ctx, account, at)

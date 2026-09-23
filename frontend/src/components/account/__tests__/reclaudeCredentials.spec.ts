@@ -20,6 +20,8 @@ function form(overrides: Partial<ReclaudeFormValues> = {}): ReclaudeFormValues {
     clientVersion: 'v1.4.0',
     clientPlatform: 'linux/amd64',
     deviceHostname: 'MBP-Dev',
+    claudeUserId: 'c'.repeat(64),
+    accountUuid: '9c67eb02-4001-4cde-a6e2-e40f1a71649e',
     timezone: 'America/Los_Angeles',
     userEmail: 'owner@example.com',
     planTier: '20x',

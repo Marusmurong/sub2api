@@ -30,6 +30,8 @@ func reclaudeCreateInput() *CreateAccountInput {
 			CredKeyReclaudeClientVersion:  "v1.4.0",
 			CredKeyReclaudeClientPlatform: "linux/amd64",
 			CredKeyReclaudeDeviceHostname: "mbp-dev",
+			CredKeyReclaudeClaudeUserID:   "c8f2a1b09d3e4f5a6b7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f809a1b2c3",
+			CredKeyReclaudeAccountUUID:    "9c67eb02-4001-4cde-a6e2-e40f1a71649e",
 		},
 		Extra: map[string]any{
 			ExtraKeyReclaudePlanTier: "20x",

@@ -1130,15 +1130,18 @@ func (a *Account) GetAccountUUID() string {
 		return v
 	}
 
-	// reclaude 回落到**我们自己生成的**稳定 UUID。
-	//
-	// account_uuid 本来来自 Anthropic OAuth 流程，而 reclaude 不给我们这个值，
-	// 且底层账号会被静默换掉 ⇒ 根本不存在一个稳定的真实值。取不到时
-	// RewriteUserIDWithMasking 整段会被跳过，身份统一直接落空 —— 而那是
-	// 「一台设备底下挂 50 个不同 user_id」这条最直接的定性证据。
-	//
-	// 代价是上游看到的 user_id 哈希与自建号池不同源。**这是刻意的。**
 	if a.IsReclaude() {
+		// 🔴 优先用 login 时 /api/cli/auth/poll 返回的**真实** AccountUUID。
+		//
+		// 早期注释写「reclaude 不给我们这个值」——那是错的（逆向报告 §9 的
+		// pollResponse 里就有，真实信封里也是真值）。报错值会让 rec 判
+		// `state mismatch`，2026-09-24 定位 bad_envelope 时确认。
+		if v := strings.TrimSpace(a.GetCredential(CredKeyReclaudeAccountUUID)); v != "" {
+			return v
+		}
+		// 回落到自己生成的稳定 UUID：取不到时 RewriteUserIDWithMasking 整段会被
+		// 跳过，身份统一直接落空 —— 而那是「一台设备底下挂 50 个不同 user_id」
+		// 这条最直接的定性证据。存量账号没有真值时靠这条兜底。
 		return strings.TrimSpace(a.GetCredential(CredKeyReclaudeSyntheticAccountUUID))
 	}
 	return ""

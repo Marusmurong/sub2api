@@ -85,19 +85,19 @@ func (g *fakeGateway) verifySignature(header http.Header, envelope []byte) {
 	require.InDelta(g.t, time.Now().UnixMilli(), ts, float64(time.Minute.Milliseconds()),
 		"时间戳偏离太远会撞上重放窗口")
 
-	nonce, err := base64.StdEncoding.DecodeString(header.Get(reclaude.HeaderNonce))
+	nonce, err := base64.RawURLEncoding.DecodeString(header.Get(reclaude.HeaderNonce))
 	require.NoError(g.t, err)
 	require.Len(g.t, nonce, reclaude.SignatureNonceBytes)
 
 	sum := sha256.Sum256(envelope)
-	require.Equal(g.t, base64.StdEncoding.EncodeToString(sum[:]), header.Get(reclaude.HeaderBodySHA256),
+	require.Equal(g.t, base64.RawURLEncoding.EncodeToString(sum[:]), header.Get(reclaude.HeaderBodySHA256),
 		"哈希的必须是整个信封，不是原始请求体")
 
 	canonical := reclaude.SignatureVersion + "\n" +
 		strconv.FormatInt(ts, 10) + "\n" +
 		header.Get(reclaude.HeaderNonce) + "\n" +
 		header.Get(reclaude.HeaderBodySHA256)
-	signature, err := base64.StdEncoding.DecodeString(header.Get(reclaude.HeaderSignature))
+	signature, err := base64.RawURLEncoding.DecodeString(header.Get(reclaude.HeaderSignature))
 	require.NoError(g.t, err)
 	require.True(g.t, ed25519.Verify(g.publicKey, []byte(canonical), signature), "验签不过")
 }
