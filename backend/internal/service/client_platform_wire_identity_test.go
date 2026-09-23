@@ -85,11 +85,11 @@ func TestClientPlatformReachesWire(t *testing.T) {
 			require.Equal(t, tc.wantArch, getHeaderRaw(req.Header, "x-stainless-arch"))
 
 			// 平台之间没有差异的身份项仍然全池统一
-			require.Equal(t, claude.DefaultHeaders["User-Agent"], getHeaderRaw(req.Header, "user-agent"))
-			require.Equal(t, claude.DefaultHeaders["X-Stainless-Runtime"], getHeaderRaw(req.Header, "x-stainless-runtime"))
-			require.Equal(t, claude.DefaultHeaders["X-Stainless-Runtime-Version"], getHeaderRaw(req.Header, "x-stainless-runtime-version"))
-			require.Equal(t, claude.DefaultHeaders["X-Stainless-Package-Version"], getHeaderRaw(req.Header, "x-stainless-package-version"))
-			require.Equal(t, claude.DefaultHeaders["X-App"], getHeaderRaw(req.Header, "x-app"))
+			require.Equal(t, claude.DefaultHeaders()["User-Agent"], getHeaderRaw(req.Header, "user-agent"))
+			require.Equal(t, claude.DefaultHeaders()["X-Stainless-Runtime"], getHeaderRaw(req.Header, "x-stainless-runtime"))
+			require.Equal(t, claude.DefaultHeaders()["X-Stainless-Runtime-Version"], getHeaderRaw(req.Header, "x-stainless-runtime-version"))
+			require.Equal(t, claude.DefaultHeaders()["X-Stainless-Package-Version"], getHeaderRaw(req.Header, "x-stainless-package-version"))
+			require.Equal(t, claude.DefaultHeaders()["X-App"], getHeaderRaw(req.Header, "x-app"))
 		})
 	}
 }
@@ -113,8 +113,8 @@ func TestUntypedAccountKeepsPoolWideIdentity(t *testing.T) {
 	req, _, err := svc.buildUpstreamRequest(context.Background(), newWireIdentityContext(t),
 		acct, body, "tok", "oauth", "claude-opus-5", true, true)
 	require.NoError(t, err)
-	require.Equal(t, claude.DefaultHeaders["X-Stainless-OS"], getHeaderRaw(req.Header, "x-stainless-os"))
-	require.Equal(t, claude.DefaultHeaders["X-Stainless-Arch"], getHeaderRaw(req.Header, "x-stainless-arch"))
+	require.Equal(t, claude.DefaultHeaders()["X-Stainless-OS"], getHeaderRaw(req.Header, "x-stainless-os"))
+	require.Equal(t, claude.DefaultHeaders()["X-Stainless-Arch"], getHeaderRaw(req.Header, "x-stainless-arch"))
 }
 
 // 出站 UA 与 body 里的 cc_version 必须同源：显式改了 cli_version 的账号两处都要跟着变。
@@ -164,7 +164,7 @@ func TestClientEntrypointReachesWire(t *testing.T) {
 		entry ClientEntrypoint
 		want  string
 	}{
-		{"回落 cli(与改动前逐字相同)", defaultClientEntrypoint(), claude.DefaultHeaders["User-Agent"]},
+		{"回落 cli(与改动前逐字相同)", defaultClientEntrypoint(), claude.DefaultHeaders()["User-Agent"]},
 		{"VS Code 扩展", ClientEntrypoint{Product: "claude-vscode", UASuffix: "(external, claude-vscode, agent-sdk/0.3.263)"},
 			"claude-cli/" + claude.CLIVersion() + " (external, claude-vscode, agent-sdk/0.3.263)"},
 		{"sdk-cli", ClientEntrypoint{Product: "sdk-cli", UASuffix: "(external, sdk-cli)"},
@@ -185,8 +185,8 @@ func TestClientEntrypointReachesWire(t *testing.T) {
 			// 机器身份不受入口影响
 			require.Contains(t, wire, "X-Stainless-OS: Windows\r\n")
 			require.Contains(t, wire, "X-Stainless-Arch: x64\r\n")
-			require.Contains(t, wire, "X-Stainless-Runtime-Version: "+claude.DefaultHeaders["X-Stainless-Runtime-Version"]+"\r\n")
-			require.Contains(t, wire, "X-Stainless-Package-Version: "+claude.DefaultHeaders["X-Stainless-Package-Version"]+"\r\n")
+			require.Contains(t, wire, "X-Stainless-Runtime-Version: "+claude.DefaultHeaders()["X-Stainless-Runtime-Version"]+"\r\n")
+			require.Contains(t, wire, "X-Stainless-Package-Version: "+claude.DefaultHeaders()["X-Stainless-Package-Version"]+"\r\n")
 			// x-app 恒为 cli:真实抓包里 `(external, sdk-cli)` 的请求 x-app 也是 cli
 			require.Contains(t, wire, "x-app: cli\r\n")
 		})

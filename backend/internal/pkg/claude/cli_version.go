@@ -33,15 +33,55 @@ func CLIVersion() string {
 	return resolvedCLIVersion
 }
 
+// CalibratedCLIVersions 是我们**实际抓包标定过**的 CLI 版本集合。
+//
+// 🔴 只有列在这里的版本才允许生效。原因是版本号不是一个孤立的数字，
+// 而是一组同时变化的出站字段中的一个：
+//
+//	claude-cli/<version>                    ← 版本号
+//	X-Stainless-Package-Version: 0.112.1    ← SDK 版本
+//	X-Stainless-Runtime-Version: v26.3.0    ← Node 版本
+//	anthropic-beta: <三族模板>               ← beta 集合
+//	TLS ClientHello profile                 ← 指纹
+//
+// 上游 v0.2.8 起有「每小时从 GitHub Releases 拉最新稳定版」的同步服务
+// （ClaudeCodeVersionSyncService）。若放任它推进，同步到一个我们没抓过包的
+// 版本时，发出的是「新版本号 + 旧 SDK + 旧 beta」——**真实世界不存在的组合**。
+// 版本号落后只是「旧客户端」，字段组合错位是「伪造客户端」，后者严重得多；
+// 且失败完全静默：同步成功、日志正常、无报错，直到账号开始被封才知道。
+//
+// **加新版本的前提是重新抓包**，并同步核对 constants.go 的 DefaultHeaders
+// 各字段与 beta 模板。见 docs/UPSTREAM_EXPOSURE_AUDIT_2026-09-07.html 附录。
+// ⚠️ 只列 >= CLICurrentVersion 的版本：低于基线的版本本来就被判据 2 拒掉，
+// 列在这里只会造成「标定了却用不了」的矛盾（曾被测试抓到）。
+// 抬基线时把更早的条目一并删掉。
+var CalibratedCLIVersions = []string{
+	// 2026-09-20 抓包核对（Bun 原生 arm64，OAuth/API-key 两种模式头集合一致）；
+	// Opus 5.5 要求 >= 2.1.280，当前基线即此值。
+	"2.1.280",
+}
+
+// isCalibratedCLIVersion 报告该版本是否已抓包标定。
+func isCalibratedCLIVersion(version string) bool {
+	for _, calibrated := range CalibratedCLIVersions {
+		if version == calibrated {
+			return true
+		}
+	}
+	return false
+}
+
 // IsSupportedCLIVersion 判断运维给的覆盖值是否可用。
 //
-// 判据有两条，缺一不可：
+// 判据有三条，缺一不可：
 //  1. 严格三段纯数字（"2.1.251"）。带 -local / -dev / +build 等后缀的版本号会被
 //     identity_service 的 fingerprintUserAgentPattern 拒绝，一旦漏进去，该账号的
 //     持久指纹会被写成一个不存在的客户端版本，此后所有上游请求都声称这个版本，
 //     被判非正版并持续 429——而系统内没有指纹重置入口。
 //  2. 不低于内置基线 CLICurrentVersion。向下覆盖没有任何使用场景，
 //     却会让 identity_service 的主版本超前检查基准跟着一起降。
+//  3. 已在 CalibratedCLIVersions 中抓包标定。这一条挡住上游的版本自动同步
+//     拉来的未验证版本 —— 它只推进版本号，不动 SDK/beta/TLS 那几项。
 func IsSupportedCLIVersion(version string) bool {
 	version = strings.TrimSpace(version)
 	if version == "" {
@@ -56,7 +96,11 @@ func IsSupportedCLIVersion(version string) bool {
 	if semver.Prerelease(canonical) != "" || semver.Build(canonical) != "" {
 		return false
 	}
-	return semver.Compare(canonical, "v"+CLICurrentVersion) >= 0
+	if semver.Compare(canonical, "v"+CLICurrentVersion) < 0 {
+		return false
+	}
+	// 🔴 最后一道：必须是抓过包的版本。见 CalibratedCLIVersions 的说明。
+	return isCalibratedCLIVersion(version)
 }
 
 // resolveCLIVersion 把环境变量的原始值解析成可用的版本号。

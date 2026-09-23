@@ -33,9 +33,12 @@ func TestIsSupportedCLIVersion(t *testing.T) {
 		want    bool
 	}{
 		{"内置基线本身", CLICurrentVersion, true},
-		{"高于基线的补丁位", above, true},
-		{"高于基线的次版本", "2.2.0", true},
-		{"高于基线的主版本", "3.0.0", true},
+		// 🔴 语义变更（2026-09-23）：高于基线**不再**自动通过 —— 还必须已抓包标定。
+		// 见 CalibratedCLIVersions：版本号与 SDK/beta/TLS 是一组耦合取值，
+		// 只推进版本号会发出真实世界不存在的组合。
+		{"高于基线但未标定的补丁位", above, false},
+		{"高于基线但未标定的次版本", "2.2.0", false},
+		{"高于基线但未标定的主版本", "3.0.0", false},
 		{"低于基线", "2.1.219", false},
 		{"仅低于基线一个补丁位", "2.1.256", false},
 		{"远低于基线", "1.0.0", false},
@@ -45,7 +48,7 @@ func TestIsSupportedCLIVersion(t *testing.T) {
 		{"预发布后缀", "2.2.0-local", false},
 		{"构建元数据", "2.2.0+build1", false},
 		{"哨兵版本带后缀", "999.0.0-local", false},
-		{"纯数字哨兵仍然合法（形态没问题，运维自负）", "999.0.0", true},
+		{"纯数字哨兵未标定，被拒", "999.0.0", false},
 		{"非数字", "abc", false},
 		{"多余的段", "2.2.0.1", false},
 	}
@@ -67,8 +70,9 @@ func TestResolveCLIVersion(t *testing.T) {
 	}{
 		{"未配置时用内置基线", "", CLICurrentVersion},
 		{"只有空白等同未配置", "   ", CLICurrentVersion},
-		{"合法覆盖生效", above, above},
-		{"两侧空白被裁掉", "  " + above + "  ", above},
+		// 环境变量覆盖同样要过标定闸：未标定的值回落基线（见 CalibratedCLIVersions）。
+		{"未标定的高版本覆盖被拒", above, CLICurrentVersion},
+		{"两侧空白被裁掉后仍走同一判据", "  " + above + "  ", CLICurrentVersion},
 		{"非法值回落基线", "not-a-version", CLICurrentVersion},
 		{"向下覆盖被拒", "2.0.0", CLICurrentVersion},
 		{"预发布后缀被拒（会毒化账号指纹）", "2.2.0-local", CLICurrentVersion},
@@ -86,7 +90,7 @@ func TestResolveCLIVersion(t *testing.T) {
 // 两者由不同代码路径写入同一个请求，不一致会被上游判为非正版客户端。
 func TestDefaultHeadersUserAgentMatchesCLIVersion(t *testing.T) {
 	want := "claude-cli/" + CLIVersion() + " (external, cli)"
-	if got := DefaultHeaders["User-Agent"]; got != want {
+	if got := DefaultHeaders()["User-Agent"]; got != want {
 		t.Fatalf("DefaultHeaders[User-Agent] = %q, want %q", got, want)
 	}
 }

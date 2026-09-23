@@ -75,10 +75,10 @@ func TestUnifiedIdentity_MimicDropsClientIdentityHeaders(t *testing.T) {
 		"x-client-request-id 不能沿用客户端的，也不能自造：真实 2.1.257 根本不发这个头（2026-09-07 本机抓包）")
 
 	// 平台头必须是我们的固定值，而不是客户端的 Windows/x64/v20.1.0
-	require.Equal(t, claude.DefaultHeaders["X-Stainless-OS"], getHeaderRaw(req.Header, "x-stainless-os"))
-	require.Equal(t, claude.DefaultHeaders["X-Stainless-Arch"], getHeaderRaw(req.Header, "x-stainless-arch"))
-	require.Equal(t, claude.DefaultHeaders["X-App"], getHeaderRaw(req.Header, "x-app"))
-	require.Equal(t, claude.DefaultHeaders["User-Agent"], getHeaderRaw(req.Header, "user-agent"),
+	require.Equal(t, claude.DefaultHeaders()["X-Stainless-OS"], getHeaderRaw(req.Header, "x-stainless-os"))
+	require.Equal(t, claude.DefaultHeaders()["X-Stainless-Arch"], getHeaderRaw(req.Header, "x-stainless-arch"))
+	require.Equal(t, claude.DefaultHeaders()["X-App"], getHeaderRaw(req.Header, "x-app"))
+	require.Equal(t, claude.DefaultHeaders()["User-Agent"], getHeaderRaw(req.Header, "user-agent"),
 		"UA 必须是账号统一身份，不能是客户端自报的版本")
 }
 

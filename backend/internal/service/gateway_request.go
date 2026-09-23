@@ -234,7 +234,7 @@ func parseGatewayRequestCurrentBody(parsed *ParsedRequest, protocol string) erro
 	parsed.MetadataUserID = gjson.Get(jsonStr, "metadata.user_id").String()
 
 	thinkingType := gjson.Get(jsonStr, "thinking.type").String()
-	parsed.ThinkingEnabled = thinkingType == "enabled" || thinkingType == "adaptive"
+	parsed.ThinkingEnabled = thinkingType == "enabled" || thinkingType == "adaptive" || (protocol == domain.PlatformAnthropic && claude.IsOpus55(parsed.Model))
 
 	parsed.OutputEffort = strings.TrimSpace(gjson.Get(jsonStr, "output_config.effort").String())
 	if protocol == domain.PlatformAnthropic {
@@ -679,6 +679,26 @@ func stripEmptyTextBlocksAtPath(body []byte, contentOwnerPath string, owner gjso
 	return body
 }
 
+// validateClaudeOpus55Request rejects settings that the upstream cannot honor.
+// Call before OAuth mimicry can remove tool_choice or alter thinking defaults.
+func validateClaudeOpus55Request(body []byte, model string) error {
+	if !claude.IsOpus55(model) {
+		return nil
+	}
+	switch gjson.GetBytes(body, "thinking.type").String() {
+	case "disabled", "enabled":
+		return fmt.Errorf("claude-opus-5-5 requires adaptive thinking; omit thinking or use thinking.type=adaptive and output_config.effort")
+	}
+	if gjson.GetBytes(body, "tool_choice").String() == "required" {
+		return fmt.Errorf("claude-opus-5-5 does not support forced tool_choice; use auto or none")
+	}
+	switch gjson.GetBytes(body, "tool_choice.type").String() {
+	case "any", "tool", "function", "custom", "namespace":
+		return fmt.Errorf("claude-opus-5-5 does not support forced tool_choice; use auto or none")
+	}
+	return nil
+}
+
 // FilterThinkingBlocks removes thinking blocks from request body
 // Returns filtered body or original body if filtering fails (fail-safe)
 // This prevents 400 errors from invalid thinking block signatures.
@@ -697,7 +717,7 @@ func FilterThinkingBlocks(body []byte, mappedModel string) []byte {
 	if !ShouldPreFilterThinkingBlocks(mappedModel) {
 		return body
 	}
-	return filterThinkingBlocksInternal(body, false)
+	return filterThinkingBlocksInternal(body, claude.IsOpus55(mappedModel))
 }
 
 // FilterThinkingBlocksForRetry strips thinking-related constructs for retry scenarios.
@@ -1380,7 +1400,7 @@ func FilterSignatureSensitiveBlocksForRetry(body []byte, mappedModel string) []b
 // 策略：
 //   - 当 thinking.type 不是 "enabled"/"adaptive"：移除所有 thinking 相关块
 //   - 当 thinking.type 是 "enabled"/"adaptive"：仅移除缺失/无效 signature 的 thinking 块
-func filterThinkingBlocksInternal(body []byte, _ bool) []byte {
+func filterThinkingBlocksInternal(body []byte, alwaysThinking bool) []byte {
 	// Fast path: if body doesn't contain "thinking", skip parsing
 	if !bytes.Contains(body, patternTypeThinking) &&
 		!bytes.Contains(body, patternTypeThinkingSpaced) &&
@@ -1393,7 +1413,10 @@ func filterThinkingBlocksInternal(body []byte, _ bool) []byte {
 
 	root := gjson.ParseBytes(body)
 	thinkingType := root.Get("thinking.type").String()
-	thinkingEnabled := thinkingType == "enabled" || thinkingType == "adaptive"
+	// alwaysThinking：Opus 5.5 的 thinking 默认即 adaptive，请求**省略** thinking
+	// 字段时同样算启用。漏掉它会把「省略 thinking 的 Opus 5.5 请求」判成未启用，
+	// 把带签名的历史块整批删掉 —— 破坏 signature 校验所依赖的「原样回传」前提。
+	thinkingEnabled := alwaysThinking || thinkingType == "enabled" || thinkingType == "adaptive"
 
 	msgs := root.Get("messages")
 	if !msgs.Exists() || !msgs.IsArray() {
@@ -1447,7 +1470,19 @@ func shouldDropThinkingBlock(block gjson.Result, role string, thinkingEnabled bo
 		return false
 	}
 	switch block.Get("type").String() {
-	case "thinking", "redacted_thinking":
+	case "redacted_thinking":
+		// 🔴 redacted_thinking 带的是 data 而不是 signature —— 按签名判据会被
+		// 当成「无有效签名」一律删掉，而删掉它本身就破坏了 Anthropic signature
+		// 校验所依赖的「历史原样回传」前提，换来
+		//   400 messages.N.content.M: Invalid `signature` in `thinking` block
+		//
+		// 采纳上游 v0.2.8 的语义（其 Opus 5.5 adaptive 用例发现了这条）。
+		// data 为空的块没有回传价值（且可能是我们自己改写链的产物），照删。
+		if thinkingEnabled && role == "assistant" && block.Get("data").String() != "" {
+			return false
+		}
+		return true
+	case "thinking":
 		if thinkingEnabled && role == "assistant" {
 			sig := block.Get("signature").String()
 			if sig != "" && sig != antigravity.DummyThoughtSignature {
@@ -1651,12 +1686,16 @@ const (
 
 // isThinkingBudgetConstraintError detects whether an upstream error message indicates
 // a budget_tokens constraint violation (e.g. "budget_tokens >= 1024").
-// Matches three conditions (all must be true):
+// Also recognizes Baseten's final-answer reserve constraint.
+// For the original budget constraint, all three conditions must be true:
 //  1. Contains "budget_tokens" or "budget tokens"
 //  2. Contains "thinking"
 //  3. Contains ">= 1024" or "greater than or equal to 1024" or ("1024" + "input should be")
 func isThinkingBudgetConstraintError(errMsg string) bool {
 	m := strings.ToLower(errMsg)
+	if isFinalAnswerReserveError(m) {
+		return true
+	}
 
 	// Condition 1: budget_tokens or budget tokens
 	hasBudget := strings.Contains(m, "budget_tokens") || strings.Contains(m, "budget tokens")
@@ -1678,6 +1717,14 @@ func isThinkingBudgetConstraintError(errMsg string) bool {
 	}
 
 	return false
+}
+
+// isFinalAnswerReserveError matches the specific reserve constraint, rather than
+// treating arbitrary reasoning quota or context-length errors as repairable.
+func isFinalAnswerReserveError(errMsg string) bool {
+	m := strings.ToLower(errMsg)
+	return strings.Contains(m, "must be greater than 1024 to reserve tokens for a final answer") &&
+		strings.Contains(m, "baseten reasoning is enabled")
 }
 
 // RectifyThinkingBudget modifies the request body to fix budget_tokens constraint errors.

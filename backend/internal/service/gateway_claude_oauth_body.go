@@ -383,7 +383,7 @@ func normalizeClaudeOAuthRequestBody(body []byte, modelID string, opts claudeOAu
 	// - 其他形态（auto/any/none）原样透传
 	// 如果 body 里完全没有 tools（空数组），tool_choice 没意义时才删除
 	if !gjson.GetBytes(out, "tools").IsArray() || len(gjson.GetBytes(out, "tools").Array()) == 0 {
-		if gjson.GetBytes(out, "tool_choice").Exists() {
+		if !claude.IsOpus55(modelID) && gjson.GetBytes(out, "tool_choice").Exists() {
 			if next, ok := deleteJSONPathBytes(out, "tool_choice"); ok {
 				out = next
 				modified = true
@@ -916,14 +916,21 @@ func expandClaudeOAuthSystemPromptTextTemplate(body []byte, text string, expansi
 		return "", nil
 	}
 	expansionPrompt = defaultClaudeOAuthExpansionPrompt(expansionPrompt)
-	billingText, err := buildBillingAttributionText(body, claude.CLIVersion(), entrypoint)
+	// 同一次展开内只取一次版本号（采纳上游）：billing attribution / 指纹 / 占位符
+	// 三处共用，避免运行期版本翻转瞬间取到不同值。
+	// EffectiveCLIVersion 而非 CLIVersion：前者含面板/同步的运行期值，
+	// 且经 CalibratedCLIVersions 闸校验（见 pkg/claude/cli_version.go）。
+	cliVersion := claude.EffectiveCLIVersion()
+	// entrypoint 参数是我们的补丁面：cc_entrypoint 区分 cli / sdk-cli，
+	// 上游版本没有这个维度。
+	billingText, err := buildBillingAttributionText(body, cliVersion, entrypoint)
 	if err != nil {
 		return "", err
 	}
-	fp := computeClaudeCodeFingerprint(body, claude.CLIVersion())
+	fp := computeClaudeCodeFingerprint(body, cliVersion)
 	replacer := strings.NewReplacer(
 		"{billing_header}", billingText,
-		"{cc_version}", claude.CLIVersion(),
+		"{cc_version}", cliVersion,
 		"{fp}", fp,
 		"{claude_code_system_prompt}", claudeCodeSystemPrompt,
 		"{claude_code_expansion_prompt}", expansionPrompt,

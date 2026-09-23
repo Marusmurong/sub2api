@@ -168,14 +168,14 @@ func defaultsForTLSAlignedIdentity() forcedFingerprintSpec {
 
 func defaultsFromClaudeDefaultHeaders() forcedFingerprintSpec {
 	return forcedFingerprintSpec{
-		OS:             normalizeStainlessOS(claude.DefaultHeaders["X-Stainless-OS"]),
-		Arch:           claude.DefaultHeaders["X-Stainless-Arch"],
-		Runtime:        claude.DefaultHeaders["X-Stainless-Runtime"],
-		RuntimeVersion: normalizeNodeVersion(claude.DefaultHeaders["X-Stainless-Runtime-Version"]),
-		PackageVersion: claude.DefaultHeaders["X-Stainless-Package-Version"],
+		OS:             normalizeStainlessOS(claude.DefaultHeaders()["X-Stainless-OS"]),
+		Arch:           claude.DefaultHeaders()["X-Stainless-Arch"],
+		Runtime:        claude.DefaultHeaders()["X-Stainless-Runtime"],
+		RuntimeVersion: normalizeNodeVersion(claude.DefaultHeaders()["X-Stainless-Runtime-Version"]),
+		PackageVersion: claude.DefaultHeaders()["X-Stainless-Package-Version"],
 		CLIVersion:     claude.CLICurrentVersion,
 		UASuffix:       "(external, cli)",
-		Lang:           firstNonEmptyFingerprint(claude.DefaultHeaders["X-Stainless-Lang"], "js"),
+		Lang:           firstNonEmptyFingerprint(claude.DefaultHeaders()["X-Stainless-Lang"], "js"),
 	}
 }
 
@@ -185,7 +185,7 @@ func (s *forcedFingerprintSpec) toFingerprint() *Fingerprint {
 	}
 	ua := fmt.Sprintf("claude-cli/%s %s", s.CLIVersion, s.UASuffix)
 	if s.CLIVersion == "" {
-		ua = defaultFingerprint.UserAgent
+		ua = defaultFingerprint().UserAgent
 	}
 	return &Fingerprint{
 		ClientID:                s.ClientID,

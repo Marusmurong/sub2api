@@ -2,10 +2,10 @@ package service
 
 import (
 	"fmt"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"regexp"
 	"strings"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
@@ -35,7 +35,7 @@ func effectiveBillingUserAgent(tokenType string, mimicClaudeCode bool, fingerpri
 		if forced != nil && forced.UserAgent != "" {
 			return forced.UserAgent
 		}
-		return claude.DefaultHeaders["User-Agent"]
+		return claude.DefaultHeaders()["User-Agent"]
 	}
 	if fingerprint == nil {
 		return ""

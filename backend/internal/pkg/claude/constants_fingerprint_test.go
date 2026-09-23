@@ -26,8 +26,8 @@ func TestDefaultHeadersMimicAPlausibleEnvironment(t *testing.T) {
 		"Connection":                  "keep-alive",
 	}
 	for k, v := range want {
-		if got := DefaultHeaders[k]; got != v {
-			t.Errorf("DefaultHeaders[%q] = %q, want %q", k, got, v)
+		if got := DefaultHeaders()[k]; got != v {
+			t.Errorf("DefaultHeaders()[%q] = %q, want %q", k, got, v)
 		}
 	}
 }
@@ -38,7 +38,7 @@ func TestDefaultHeadersMimicAPlausibleEnvironment(t *testing.T) {
 // in step by hand.
 func TestUserAgentMatchesCLIVersionConstant(t *testing.T) {
 	want := "claude-cli/" + CLICurrentVersion + " (external, cli)"
-	if got := DefaultHeaders["User-Agent"]; got != want {
+	if got := DefaultHeaders()["User-Agent"]; got != want {
 		t.Fatalf("User-Agent = %q, want %q", got, want)
 	}
 }
