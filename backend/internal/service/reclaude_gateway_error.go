@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"net/http"
 	"time"
 )
@@ -31,6 +32,29 @@ const (
 // 外层非 200 有两类完全不同的含义，绝不能混：这里处理的是「reclaude 网关自己
 // 拒绝了请求」，而不是「隧道通了、Anthropic 报错」—— 后者外层恒为 200，
 // 错误码在信封里，走既有的 Anthropic 错误处理。
+// ReclaudeDeviceRevokedCode 是设备被解绑时对端返回的错误码。
+//
+// 🔴 它走的是 **400**，不是 401/403。✅ 2026-09-25 生产实测：
+//
+//	HTTP 400 {"type":"error","error":{"type":"authentication_error",
+//	          "code":"device_revoked","message":"此设备已被解绑…"}}
+//
+// 只按状态码分类会把它落进 default（只告警不停号），于是账号带着一副已经
+// 作废的凭据继续被调度 —— 那天它打了 30 多分钟必然失败的请求，
+// 每一条都在对端那里留下一次「已撤销设备仍在尝试」的记录。
+const ReclaudeDeviceRevokedCode = "device_revoked"
+
+// ClassifyReclaudeGatewayBody 在状态码之外再看错误码。
+//
+// 优先于 ClassifyReclaudeGatewayStatus 使用：状态码是粗粒度的，
+// 而对端把「凭据彻底失效」和「这次请求不合法」都塞在 400 里。
+func ClassifyReclaudeGatewayBody(statusCode int, body []byte) ReclaudeAccountActionKind {
+	if len(body) > 0 && bytes.Contains(body, []byte(ReclaudeDeviceRevokedCode)) {
+		return ReclaudeActionCredentialRevoked
+	}
+	return ClassifyReclaudeGatewayStatus(statusCode)
+}
+
 func ClassifyReclaudeGatewayStatus(statusCode int) ReclaudeAccountActionKind {
 	switch {
 	case statusCode == http.StatusUnauthorized, statusCode == http.StatusForbidden:

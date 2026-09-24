@@ -26,6 +26,10 @@ type ReclaudeLifecycleDriver struct {
 	// sessions 记每个账号当前会话的 id 与起点，供遥测事件填
 	// session_id / process.uptime —— 真值里同一会话的事件共享同一个 id。
 	sessions map[int64]reclaudeSessionState
+	// pendingEvents 是尚未上报的遥测事件名，按账号累计（见 maybeFlushEvents）。
+	pendingEvents map[int64][]string
+	// lastEventFlush 记每个账号上次上报的时刻。
+	lastEventFlush map[int64]time.Time
 }
 
 type reclaudeSessionState struct {
@@ -36,11 +40,13 @@ type reclaudeSessionState struct {
 // NewReclaudeLifecycleDriver 构造驱动器。
 func NewReclaudeLifecycleDriver(sender *ReclaudeLifecycleSender) *ReclaudeLifecycleDriver {
 	return &ReclaudeLifecycleDriver{
-		tracker:  NewReclaudeSessionTracker(),
-		sender:   sender,
-		now:      time.Now,
-		turns:    map[int64]int{},
-		sessions: map[int64]reclaudeSessionState{},
+		tracker:        NewReclaudeSessionTracker(),
+		sender:         sender,
+		now:            time.Now,
+		turns:          map[int64]int{},
+		sessions:       map[int64]reclaudeSessionState{},
+		pendingEvents:  map[int64][]string{},
+		lastEventFlush: map[int64]time.Time{},
 	}
 }
 
@@ -79,9 +85,13 @@ func (d *ReclaudeLifecycleDriver) OnInference(
 		requests = BuildReclaudeInferenceFollowups(d.nextTurn(account.ID))
 	}
 
-	// 🔴 遥测事件跟随**真实发生的**这次推理。
-	// 缺真值身份字段时 BuildReclaudeEventBatch 返回 nil —— 不发，不编造。
-	if event := d.buildEventRequest(account, clientVersion, model, now); event != nil {
+	// 🔴 遥测**攒批**，不是每条推理发一次。
+	//
+	// 2026-09-25 复盘：此前每条推理立刻发一批（只含 2 个事件），
+	// 于是 3 分钟内发了 11 次。真值是攒批语义 ——
+	// ✅ 抓包实测每批 **103~107 个事件**，一次会话共 7 批。
+	// 批大小差 50 倍、频次差一个量级，这是我自己引入的可判别特征。
+	if event := d.maybeFlushEvents(account, clientVersion, model, now); event != nil {
 		requests = append(requests, *event)
 	}
 
@@ -90,16 +100,34 @@ func (d *ReclaudeLifecycleDriver) OnInference(
 	d.sender.SendAsync(account, proxyURL, requests)
 }
 
-// buildEventRequest 为这次推理产出一条 event_logging 请求。
+// ReclaudeEventFlushInterval 是遥测攒批的最小间隔。
+//
+// ⚠️ 真值样本的批间隔是 0.5~14 秒，但那是**一次交互式会话内**的分布 ——
+// 每批都在重发整个会话的累计事件（103→103→103→107），说明它是
+// 「有新事件就把当前全量再发一次」而非「攒够再发」。
+// 我们的事件量远小于真客户端（只有三种 api_* 事件），照搬秒级间隔会变成
+// 高频发送微批。取 60 秒：既不高频，也不会攒到一个不合理的大批。
+const ReclaudeEventFlushInterval = time.Minute
+
+// maybeFlushEvents 在距上次上报足够久时产出一条 event_logging 请求。
+//
+// 攒批期间的事件累计在 pendingEvents 里，一次性发出 —— 与真值的
+// 「一批含整段会话的事件」语义一致。
 //
 // 只发三种事件：它们都对应一次**真实的上游调用**（见 reclaude_event_logging.go
 // 顶部的选择标准）。真客户端一批里有 42 种事件，其余都是 CLI 自身子系统的状态，
 // 我们没有那些子系统，填了就是与实际行为矛盾的证词。
-func (d *ReclaudeLifecycleDriver) buildEventRequest(
+func (d *ReclaudeLifecycleDriver) maybeFlushEvents(
 	account *Account, clientVersion, model string, now time.Time,
 ) *ReclaudeLifecycleRequest {
 	session, ok := d.sessionState(account.ID)
 	if !ok {
+		return nil
+	}
+
+	// 本次推理产生的事件先入账，再决定这一刻发不发。
+	names := d.accumulateEvents(account.ID, now)
+	if len(names) == 0 {
 		return nil
 	}
 
@@ -109,7 +137,7 @@ func (d *ReclaudeLifecycleDriver) buildEventRequest(
 		Model:     model,
 		Uptime:    now.Sub(session.startAt),
 		Now:       now,
-	}, []string{ReclaudeEventAPIQuery, ReclaudeEventAPICacheBreakpoints})
+	}, names)
 	if batch == nil {
 		return nil
 	}
@@ -123,6 +151,28 @@ func (d *ReclaudeLifecycleDriver) buildEventRequest(
 	return &request
 }
 
+// accumulateEvents 记下本次推理产生的事件，到点时取走全部待发事件。
+//
+// 未到间隔返回 nil（继续攒）；到点返回累计的全部事件名并清空。
+func (d *ReclaudeLifecycleDriver) accumulateEvents(accountID int64, now time.Time) []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// 每条真实推理产生这两个事件 —— 它们都对应一次真实的上游调用。
+	d.pendingEvents[accountID] = append(d.pendingEvents[accountID],
+		ReclaudeEventAPIQuery, ReclaudeEventAPICacheBreakpoints)
+
+	last, seen := d.lastEventFlush[accountID]
+	if seen && now.Sub(last) < ReclaudeEventFlushInterval {
+		return nil
+	}
+	d.lastEventFlush[accountID] = now
+
+	pending := d.pendingEvents[accountID]
+	delete(d.pendingEvents, accountID)
+	return pending
+}
+
 // startSession 开一个新会话：重置轮次并生成新的 session_id。
 //
 // 🔴 session_id 必须逐会话变化。固定值 = 一台「永远在同一个会话里」的机器，
@@ -132,6 +182,11 @@ func (d *ReclaudeLifecycleDriver) startSession(accountID int64, now time.Time) {
 	defer d.mu.Unlock()
 	d.turns[accountID] = 1
 	d.sessions[accountID] = reclaudeSessionState{id: uuid.NewString(), startAt: now}
+	// 新会话重置攒批状态：不清的话，上一个会话的事件会带着旧 session_id
+	// 被算进新会话的第一批里。同时删掉 lastEventFlush，让新会话立刻上报一次
+	// —— 真值是「启动即 flush」。
+	delete(d.pendingEvents, accountID)
+	delete(d.lastEventFlush, accountID)
 }
 
 func (d *ReclaudeLifecycleDriver) sessionState(accountID int64) (reclaudeSessionState, bool) {

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -506,7 +507,67 @@ func (u *ReclaudeUpstream) synthesizeResponse(outer *http.Response, account *Acc
 		u.events.HandleReclaudeEvents(account, meta.Events)
 	}
 
+	// 12.5：**内层**凭据失效检测。
+	//
+	// 🔴 2026-09-25 生产事故：设备被解绑时，外层是 **200**（信封本身正常），
+	// 400 在**内层**：
+	//
+	//	{"type":"error","error":{"type":"authentication_error",
+	//	 "code":"device_revoked","message":"此设备已被解绑…"}}
+	//
+	// 于是它既不走 HandleReclaudeGatewayError（那条路只看外层状态码），
+	// 也不被 ClassifyReclaudeGatewayStatus 分类 —— 账号照常 active+schedulable，
+	// 带着一副已经作废的凭据被持续调度了 30 多分钟，每一条都在对端那里
+	// 留下一次「已撤销设备仍在尝试」的记录。
+	u.detectInnerCredentialRevoked(synthesized, account)
+
 	return synthesized, nil
+}
+
+// reclaudeInnerErrorPeekBytes 是为识别内层错误码而预读的字节数。
+//
+// 错误体只有几百字节；正常响应**一个字节都不预读**（先看状态码）。
+const reclaudeInnerErrorPeekBytes = 2 << 10
+
+// detectInnerCredentialRevoked 检查内层响应是不是「设备已被解绑」，是则停号。
+//
+// 🔴 只在内层状态码 >= 400 时才碰 body：正常响应（含 SSE 流）绝不能预读 ——
+// 预读会打乱流式边界，让下游收到残缺的第一个事件。
+func (u *ReclaudeUpstream) detectInnerCredentialRevoked(resp *http.Response, account *Account) {
+	if u == nil || u.events == nil || resp == nil || resp.Body == nil {
+		return
+	}
+	if resp.StatusCode < http.StatusBadRequest {
+		return
+	}
+
+	peeked, err := io.ReadAll(io.LimitReader(resp.Body, reclaudeInnerErrorPeekBytes))
+	// 无论成功与否都要把读到的字节还回去，否则下游拿到的是残缺错误体。
+	resp.Body = &reclaudeRestoredBody{
+		Reader: io.MultiReader(bytes.NewReader(peeked), resp.Body),
+		closer: resp.Body,
+	}
+	if err != nil {
+		return
+	}
+	if !bytes.Contains(peeked, []byte(ReclaudeDeviceRevokedCode)) {
+		return
+	}
+
+	logger.LegacyPrintf("service.reclaude",
+		"inner credential revoked for account %d (status %d): stopping scheduling",
+		account.ID, resp.StatusCode)
+	u.events.HandleReclaudeGatewayError(account, http.StatusUnauthorized)
+}
+
+// reclaudeRestoredBody 把预读的前缀与剩余流拼回，并保留原始 Close。
+type reclaudeRestoredBody struct {
+	io.Reader
+	closer io.Closer
+}
+
+func (b *reclaudeRestoredBody) Close() error {
+	return b.closer.Close()
 }
 
 // reclaudeEnvelopeBody 把信封剩余流包成 ReadCloser，Close 时关闭原始 body。

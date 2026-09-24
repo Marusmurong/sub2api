@@ -244,3 +244,101 @@ func uniqueStrings(values []string) []string {
 	}
 	return out
 }
+
+// 🔴 2026-09-25 复盘：遥测是**攒批**语义，不是每条推理发一次。
+// 此前 3 分钟内发了 11 次、每批只含 2 个事件，而真值每批 103~107 个。
+func TestReclaudeEventBatching(t *testing.T) {
+	ctx := context.Background()
+	base := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+
+	fixture := func(t *testing.T) (*ReclaudeLifecycleDriver, *recordingLifecycleForwarder, *Account) {
+		t.Helper()
+		account := eventAccount(t)
+		_, cipher := probeAccount(t)
+		forwarder := &recordingLifecycleForwarder{}
+		sender := NewReclaudeLifecycleSender(forwarder, cipher)
+		sender.sleep = func(time.Duration) {}
+		return NewReclaudeLifecycleDriver(sender), forwarder, account
+	}
+
+	countEventPosts := func(calls []recordedLifecycleCall) int {
+		n := 0
+		for _, c := range calls {
+			if strings.Contains(c.url, "/api/event_logging/") {
+				n++
+			}
+		}
+		return n
+	}
+
+	t.Run("间隔内的多次推理只上报一次", func(t *testing.T) {
+		driver, forwarder, account := fixture(t)
+		driver.now = func() time.Time { return base }
+		driver.OnInference(ctx, account, "http://p", "m") // 新会话：立刻发
+		waitForCalls(t, forwarder, 9)
+
+		for i := 1; i <= 10; i++ {
+			driver.now = func() time.Time { return base.Add(time.Duration(i) * time.Second) }
+			driver.OnInference(ctx, account, "http://p", "m")
+		}
+		time.Sleep(200 * time.Millisecond)
+
+		require.Equal(t, 1, countEventPosts(forwarder.snapshot()),
+			"10 秒内 11 条推理只该上报一次，而不是 11 次")
+	})
+
+	t.Run("攒批后一次发出全部累计事件", func(t *testing.T) {
+		driver, forwarder, account := fixture(t)
+		driver.now = func() time.Time { return base }
+		driver.OnInference(ctx, account, "http://p", "m")
+		waitForCalls(t, forwarder, 9)
+
+		for i := 1; i <= 3; i++ {
+			driver.now = func() time.Time { return base.Add(time.Duration(i) * time.Second) }
+			driver.OnInference(ctx, account, "http://p", "m")
+		}
+		driver.now = func() time.Time { return base.Add(2 * ReclaudeEventFlushInterval) }
+		driver.OnInference(ctx, account, "http://p", "m")
+
+		deadline := time.Now().Add(2 * time.Second)
+		var last []byte
+		for time.Now().Before(deadline) {
+			calls := forwarder.snapshot()
+			if countEventPosts(calls) >= 2 {
+				for _, c := range calls {
+					if strings.Contains(c.url, "/api/event_logging/") {
+						last = c.body
+					}
+				}
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		require.NotNil(t, last, "第二批应当发出")
+
+		var batch ReclaudeEventBatch
+		require.NoError(t, json.Unmarshal(last, &batch))
+		require.Greater(t, len(batch.Events), 2,
+			"攒批后的批次应含多条推理累计的事件，而不是固定 2 个")
+	})
+
+	t.Run("新会话立刻上报一次 —— 真值是启动即 flush", func(t *testing.T) {
+		driver, forwarder, account := fixture(t)
+		driver.now = func() time.Time { return base }
+		driver.OnInference(ctx, account, "http://p", "m")
+		waitForCalls(t, forwarder, 9)
+		require.Equal(t, 1, countEventPosts(forwarder.snapshot()))
+
+		driver.now = func() time.Time { return base.Add(ReclaudeSessionIdleGap) }
+		driver.OnInference(ctx, account, "http://p", "m")
+
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if countEventPosts(forwarder.snapshot()) >= 2 {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		require.Equal(t, 2, countEventPosts(forwarder.snapshot()))
+	})
+}
