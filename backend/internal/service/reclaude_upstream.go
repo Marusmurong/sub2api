@@ -70,6 +70,7 @@ type ReclaudeUpstream struct {
 	events       ReclaudeEventHandler
 	quota        ReclaudeUpstreamCallRecorder
 	telemetry    *ReclaudeTelemetryCollector
+	lifecycle    *ReclaudeLifecycleDriver
 }
 
 // ReclaudeUpstreamCallRecorder 记录一次上游调用的水位。
@@ -106,6 +107,14 @@ func (u *ReclaudeUpstream) SetTelemetryCollector(collector *ReclaudeTelemetryCol
 		return
 	}
 	u.telemetry = collector
+}
+
+// SetLifecycleDriver 注入生命周期流量驱动器（D3）。
+func (u *ReclaudeUpstream) SetLifecycleDriver(driver *ReclaudeLifecycleDriver) {
+	if u == nil {
+		return
+	}
+	u.lifecycle = driver
 }
 
 // recordTelemetry 记一次**已经出网**的调用。
@@ -187,6 +196,15 @@ func (u *ReclaudeUpstream) Do(inner *http.Request, account *Account, proxyURL st
 	// 统一转小写互相覆盖，谁赢取决于 map 遍历顺序，于是一半的请求带着空凭据出门，
 	// 网关回 400 bad_envelope。setHeaderRaw 会把两种大小写都删掉再写小写键。
 	setHeaderRaw(inner.Header, "authorization", "Bearer "+sk)
+
+	// D3：补上真客户端的生命周期流量（启动引导 / MCP 复查）。
+	//
+	// 🔴 放在这里而不是函数末尾：它只看请求本身，不依赖响应，
+	// 而且必须在 daemon 分支**之前** —— daemon 模式下本机真客户端
+	// 自己就会发这些，我们再补一份就成了双份。
+	//
+	// 🔴 合成请求自己不能再触发合成（IsReclaudeSynthetic），否则指数爆炸。
+	u.lifecycle.OnInference(inner.Context(), account, proxyURL)
 
 	// daemon 模式：本机真客户端负责封信封与签名，我们只做 CC 伪装。
 	//

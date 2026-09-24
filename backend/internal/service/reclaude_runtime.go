@@ -61,6 +61,12 @@ func ProvideReclaudeRuntime(
 	quota := NewReclaudeQuotaGate(usageStore)
 	upstream := NewReclaudeUpstream(httpUpstream, cipher, events)
 	upstream.SetTelemetryCollector(telemetryCollector)
+
+	// D3：生命周期流量。驱动器把合成请求回送给**同一个** upstream，
+	// 因此它们与推理流量共用代理、签名、TLS profile 与配额记账。
+	// 递归由 WithReclaudeSynthetic 标记挡住（见 ReclaudeLifecycleDriver.OnInference）。
+	upstream.SetLifecycleDriver(
+		NewReclaudeLifecycleDriver(NewReclaudeLifecycleSender(upstream, cipher)))
 	// 失败调用的按次记账在转发器里发生（那里才知道请求有没有真的出网）。
 	upstream.SetQuotaRecorder(quota)
 
