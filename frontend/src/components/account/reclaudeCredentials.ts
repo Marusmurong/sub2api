@@ -324,7 +324,8 @@ function machineEnvJson(parsed: Record<string, unknown>): string {
     ['reclaude_linux_distro_id', 'linux_distro_id'],
     ['reclaude_linux_distro_version', 'linux_distro_version'],
     ['reclaude_linux_kernel', 'linux_kernel'],
-    ['reclaude_shell', 'shell']
+    ['reclaude_shell', 'shell'],
+    ['reclaude_cli_version', 'cli_version']
   ] as const) {
     const val = pick(src)
     if (val !== '') env[dst] = val

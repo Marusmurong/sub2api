@@ -257,6 +257,14 @@ type ReclaudeMachineEnv struct {
 	LinuxDistroVersion string `json:"linux_distro_version"`
 	LinuxKernel        string `json:"linux_kernel"`
 	Shell              string `json:"shell"`
+	// CliVersion 是 **claude-cli** 版本（如 2.1.280），进 env.version / version_base。
+	//
+	// 🔴 2026-09-25 抓包实证它与外层信封头 X-Reclaude-Client-Version 是**两个值**：
+	//   - 外层头 = reclaude 客户端自身版本（v1.4.0，走 reclaude_client_version）
+	//   - env.version = 它包装的 claude-cli 版本（2.1.280）
+	// 用错会让 device 的遥测版本与真客户端族群不一致 —— 又一处对账不上。
+	// 与 node_version 同源：都取自 claude-cli 二进制（metadata.json version）。
+	CliVersion string `json:"cli_version"`
 }
 
 // buildReclaudeEventEnv 从账号采集的**真机快照**拼 env 块。
@@ -266,6 +274,8 @@ type ReclaudeMachineEnv struct {
 // 正是撤销的根因，所以建号流程必须采集真机 env（见 CredKeyReclaudeMachineEnv）。
 func buildReclaudeEventEnv(account *Account) ReclaudeEventEnv {
 	platform := strings.TrimSpace(account.GetCredential(CredKeyReclaudeClientPlatform))
+	// ⚠️ 回落值用 reclaude_client_version 只是兜底；env.version 的正解是
+	// claude-cli 版本（下方从快照的 cli_version 覆盖）。两者是不同的值。
 	version := reclaudeClientVersionOr(account.GetCredential(CredKeyReclaudeClientVersion))
 
 	// client_platform 形如 "darwin/arm64" / "linux/amd64"。
@@ -292,6 +302,11 @@ func buildReclaudeEventEnv(account *Account) ReclaudeEventEnv {
 	shell := reclaudeDefaultShellFor(osName)
 	if snapshot.Shell != "" {
 		shell = snapshot.Shell
+	}
+	// 🔴 env.version 用 claude-cli 版本（2.1.280），不是 reclaude 客户端版本
+	// （v1.4.0）—— 见 ReclaudeMachineEnv.CliVersion 注释。
+	if snapshot.CliVersion != "" {
+		version = snapshot.CliVersion
 	}
 
 	return ReclaudeEventEnv{

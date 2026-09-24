@@ -22,9 +22,9 @@ func eventAccount(t *testing.T) *Account {
 	account.Credentials[CredKeyReclaudeClientVersion] = "2.1.280"
 	// 真机快照：与登录 /auth/start 上报的同源。缺它会回落到 platform 推断，
 	// 而推断值与真机对不上正是撤销的根因。
-	account.Credentials[CredKeyReclaudeMachineEnv] = `{"node_version":"v18.19.1",` +
+	account.Credentials[CredKeyReclaudeMachineEnv] = `{"node_version":"v26.3.0",` +
 		`"arch":"x64","linux_distro_id":"ubuntu","linux_distro_version":"24.04",` +
-		`"linux_kernel":"6.17.0-1017-aws","shell":"bash"}`
+		`"linux_kernel":"6.17.0-1017-aws","shell":"bash","cli_version":"2.1.280"}`
 	return account
 }
 
@@ -136,12 +136,14 @@ func TestBuildReclaudeEventBatch(t *testing.T) {
 		env := BuildReclaudeEventBatch(eventContext(t), []string{ReclaudeEventAPIQuery}).
 			Events[0].EventData.Env
 
-		require.Equal(t, "v18.19.1", env.NodeVersion, "不能再是硬编码的 v26.3.0")
+		require.Equal(t, "v26.3.0", env.NodeVersion, "node_version 跟 claude-cli 二进制内嵌运行时走,不跟机器")
 		require.Equal(t, "x64", env.Arch)
 		require.Equal(t, "ubuntu", env.LinuxDistroID)
 		require.Equal(t, "24.04", env.LinuxDistroVersion)
 		require.Equal(t, "6.17.0-1017-aws", env.LinuxKernel)
 		require.Equal(t, "bash", env.Shell)
+		require.Equal(t, "2.1.280", env.Version, "env.version 用 claude-cli 版本,不是 reclaude 客户端版本")
+		require.Equal(t, "2.1.280", env.VersionBase)
 	})
 
 	t.Run("坏的快照 JSON 不 panic，回落到推断", func(t *testing.T) {
