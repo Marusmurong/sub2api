@@ -217,6 +217,10 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 		_ = resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
+		if isAnthropicRequestScoped429(account, resp.StatusCode, resp.Header, respBody) {
+			return nil, s.writeAnthropicRequestScoped429(c, account, resp, respBody)
+		}
+
 		logger.LegacyPrintf("service.gateway", "[Anthropic Passthrough] Upstream error (failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
 			account.ID, account.Name, resp.StatusCode, upstreamRequestID(resp.Header), truncateString(string(respBody), 1000))
 

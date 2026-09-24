@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -316,7 +315,9 @@ func buildReclaudeEnvelope(inner *http.Request, gatewayURL string) ([]byte, stri
 		headers["x-client-request-id"] = uuid.NewString()
 	}
 
-	traceID := uuid.NewString()
+	// 🔴 必须用 reclaude.NewTraceID()，不能用 uuid.NewString()：
+	// 真客户端的 traceId 是纯随机 hex，不设 version/variant 位（见该函数注释）。
+	traceID := reclaude.NewTraceID()
 	envelope, err := reclaude.EncodeEnvelope(reclaude.ClientRequestMetadata{
 		URL:     inner.URL.String(),
 		Method:  inner.Method,
@@ -324,7 +325,7 @@ func buildReclaudeEnvelope(inner *http.Request, gatewayURL string) ([]byte, stri
 		TraceID: traceID,
 		// 真实客户端恒发这两项（edge="unknown"、keepalive=true）。结构体上它们是
 		// omitempty，不显式赋值整个字段就从 JSON 里消失，信封形状与真值对不上。
-		Edge:      reclaudeEnvelopeEdgeFor(gatewayURL),
+		Edge:      reclaudeEnvelopeEdge,
 		Keepalive: true,
 	}, body)
 	if err != nil {
@@ -333,28 +334,23 @@ func buildReclaudeEnvelope(inner *http.Request, gatewayURL string) ([]byte, stri
 	return envelope, traceID, nil
 }
 
-// reclaudeEnvelopeEdgeFallback 是取不到网关主机名时的回落值。
+// reclaudeEnvelopeEdge 是信封 meta 的 edge 字段取值。
 //
-// 客户端**尚未选定节点**时确实发 "unknown"（2026-09-23 抓到的早期样本就是），
-// 所以这是个合法取值，只是不能当常量用。
-const reclaudeEnvelopeEdgeFallback = "unknown"
-
-// reclaudeEnvelopeEdgeFor 从网关 URL 取出信封 edge 字段该用的标签。
+// 🔴 恒为 "unknown" —— 这是**撤回 2026-09-24 一次错误改动**后的结论。
 //
-// 🔴 edge = **实际发往的网关主机名**（逆向报告 §7.2：「网关节点标签」）。
-// 2026-09-24 用 RECLAUDE_GATEWAY_DIAL_ADDR 把 daemon 指向本地 sink 抓到真实
-// 报文，确认 `"edge":"www.reclaude.ai"` 与它连接的网关一致。
+// 真客户端的 computeEdgeLabel（📄 反编译）是一次 **map 查表**：
 //
-// 早先这里硬编码 "unknown" —— 那来自一份客户端刚启动、还没选定节点时的样本，
-// 被误当成常量。edge 与实际网关不符正是
-// `bad_envelope / reclaude state mismatch` 的字面含义。
-func reclaudeEnvelopeEdgeFor(gatewayURL string) string {
-	parsed, err := url.Parse(strings.TrimSpace(gatewayURL))
-	if err != nil || parsed.Hostname() == "" {
-		return reclaudeEnvelopeEdgeFallback
-	}
-	return parsed.Hostname()
-}
+//	u := url.Parse(gatewayURL)
+//	if _, ok := knownEdges[u.Host]; ok { return u.Host }
+//	return "unknown"
+//
+// 那张表里装的是 route 节点，而 login 拿到的默认 gateway（www.reclaude.ai）
+// 不在其中。✅ 实测佐证：reclaude-lab/sink/dump 的 **26/26 条真实信封
+// edge 全是 "unknown"**。
+//
+// 当天我据一条 daemon 指向本地 sink 时的样本，把它改成了动态取主机名 ——
+// 那个样本不是常态，改动方向是错的，现已撤回。
+const reclaudeEnvelopeEdge = "unknown"
 
 // buildProxyRequest 组装打给 /proxy 的外层请求。
 func (u *ReclaudeUpstream) buildProxyRequest(
@@ -362,7 +358,11 @@ func (u *ReclaudeUpstream) buildProxyRequest(
 	envelope []byte, signer *reclaude.DeviceSigner,
 ) (*http.Request, error) {
 	// ctx 取自 inner —— 见 Do 的签名注释。
-	ctx := WithHTTPUpstreamProfile(inner.Context(), HTTPUpstreamProfileLongStream)
+	//
+	// 🔴 必须是 Reclaude profile（强制 HTTP/1.1 + ALPN 只报 http/1.1）。
+	// 此前用 LongStream 是错的：那个 profile 强制 H2 并周期性发 h2 PING，
+	// 而真客户端（📄 newDirectTransport + ✅ 抓包）只走 HTTP/1.1。
+	ctx := WithHTTPUpstreamProfile(inner.Context(), HTTPUpstreamProfileReclaude)
 	// 默认配置下 SSRF 校验不生效（allowlist 关、allow_private_hosts 开），
 	// 这个标记强制开启校验，不依赖全局配置。
 	ctx = WithHTTPUpstreamPublicHostsOnly(ctx)

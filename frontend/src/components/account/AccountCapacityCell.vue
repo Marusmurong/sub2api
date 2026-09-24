@@ -72,6 +72,17 @@ const isAnthropicOAuthOrSetupToken = computed(() =>
   (props.account.type === 'oauth' || props.account.type === 'setup-token')
 )
 
+/**
+ * 🔴 会话数 / 设备数 / RPM 对 reclaude 同样适用 —— 它们都是 **sub 端准入控制**
+ * （Redis 里的计数），在请求发往上游之前就判完了，与账号类型无关。
+ * 必须与后端的 SupportsSessionLimit / SupportsDeviceLimit / SupportsRPMLimit 一致：
+ * 后端在限流、前端不显示，运营就无从判断这个号还能不能接量。
+ */
+const supportsSubSideLimits = computed(() =>
+  isAnthropicOAuthOrSetupToken.value ||
+  (props.account.platform === 'anthropic' && props.account.type === 'reclaude')
+)
+
 const showWindowCost = computed(() =>
   isAnthropicOAuthOrSetupToken.value &&
   props.account.window_cost_limit != null &&
@@ -103,7 +114,7 @@ const windowCostTooltip = computed(() => {
 
 // ====== 会话限制 ======
 const showSessionLimit = computed(() =>
-  isAnthropicOAuthOrSetupToken.value &&
+  supportsSubSideLimits.value &&
   props.account.max_sessions != null &&
   props.account.max_sessions > 0
 )
@@ -138,7 +149,7 @@ const hasConcurrentLimit = computed(() => maxDevices.value > 0)
 const hasDailyLimit = computed(() => maxDevicesDaily.value > 0)
 
 const showDeviceLimit = computed(() =>
-  isAnthropicOAuthOrSetupToken.value && (hasConcurrentLimit.value || hasDailyLimit.value)
+  supportsSubSideLimits.value && (hasConcurrentLimit.value || hasDailyLimit.value)
 )
 
 const activeDevices = computed(() => props.account.active_devices ?? 0)
@@ -180,7 +191,7 @@ const deviceLimitTooltip = computed(() => {
 
 // ====== RPM ======
 const showRpmLimit = computed(() =>
-  isAnthropicOAuthOrSetupToken.value &&
+  supportsSubSideLimits.value &&
   props.account.base_rpm != null &&
   props.account.base_rpm > 0
 )
@@ -233,7 +244,13 @@ const formatCost = (value: number | null | undefined) => {
 }
 
 // ====== 配额 ======
-const isQuotaEligible = computed(() => props.account.type === 'apikey' || props.account.type === 'bedrock')
+// reclaude 的日限额按套餐档位换算成**美元**，走的就是 quota_daily_limit
+// （与 apikey/bedrock 同一套配额子系统，见后端 shouldUpdateAccountQuota）。
+const isQuotaEligible = computed(() =>
+  props.account.type === 'apikey' ||
+  props.account.type === 'bedrock' ||
+  props.account.type === 'reclaude'
+)
 
 const showDailyQuota = computed(() =>
   isQuotaEligible.value && props.account.quota_daily_limit != null && props.account.quota_daily_limit > 0

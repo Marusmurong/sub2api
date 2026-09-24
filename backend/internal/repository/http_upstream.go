@@ -104,6 +104,7 @@ const (
 	upstreamProtocolModeOpenAIH2         = "openai_h2"
 	upstreamProtocolModeOpenAIH1Fallback = "openai_h1_fallback"
 	upstreamProtocolModeGrok             = "grok"
+	upstreamProtocolModeReclaudeH1       = "reclaude_h1"
 )
 
 var errUpstreamClientLimitReached = errors.New("upstream client cache limit reached")
@@ -1056,6 +1057,9 @@ func (s *httpUpstreamService) resolveOpenAIHTTP2Settings() openAIHTTP2Settings {
 }
 
 func (s *httpUpstreamService) resolveProtocolMode(profile service.HTTPUpstreamProfile, proxyKey string, parsedProxy *url.URL) string {
+	if profile == service.HTTPUpstreamProfileReclaude {
+		return upstreamProtocolModeReclaudeH1
+	}
 	if profile == service.HTTPUpstreamProfileLongStream {
 		return upstreamProtocolModeLongStreamH2
 	}
@@ -1391,6 +1395,20 @@ func buildUpstreamTransport(settings poolSettings, proxyURL *url.URL, protocolMo
 		if _, err := enableHTTP2KeepAlive(transport, protocolMode); err != nil {
 			return nil, err
 		}
+	case upstreamProtocolModeReclaudeH1:
+		// 🔴 三件事齐做，缺一不可（📄 真客户端 newDirectTransport 反编译）：
+		//   NextProtos=["http/1.1"] —— ALPN 层只报 http/1.1
+		//   TLSNextProto 非 nil 空 map —— Go 里禁用 h2 的标准写法
+		//   ForceAttemptHTTP2=false
+		//
+		// 只设后两项不设 NextProtos，ClientHello 里仍会提供 h2 —— 而 ALPN
+		// 在 **TLS 握手阶段**就暴露，比任何请求级特征更早被看到。
+		transport.ForceAttemptHTTP2 = false
+		transport.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)
+		if transport.TLSClientConfig == nil {
+			transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+		}
+		transport.TLSClientConfig.NextProtos = []string{"http/1.1"}
 	case upstreamProtocolModeOpenAIH1:
 		transport.ForceAttemptHTTP2 = false
 		transport.TLSNextProto = make(map[string]func(string, *tls.Conn) http.RoundTripper)

@@ -4185,6 +4185,7 @@ import {
   type OpenCodeAccountMode,
   type OpenCodeGoProtocolRule
 } from '@/components/account/credentialsBuilder'
+import { applySubSideLimits } from '@/components/account/subSideLimits'
 import {
   buildReclaudeAccountName,
   parseReclaudeBundle,
@@ -5969,11 +5970,27 @@ const handleSubmit = async () => {
 
     form.name = reclaudeGeneratedName.value
 
+    // 🔴 会话数 / 设备数 / RPM 一并写入：只传 buildReclaudeExtra 的话，
+    // 表单上设的那三项会被整段丢弃，且创建不报错（编辑弹窗有过同样的缺口）。
+    const reclaudeExtra = applySubSideLimits(buildReclaudeExtra(reclaudeForm), {
+      sessionLimitEnabled: sessionLimitEnabled.value,
+      maxSessions: maxSessions.value,
+      sessionIdleTimeout: sessionIdleTimeout.value,
+      deviceLimitEnabled: deviceLimitEnabled.value,
+      maxDevices: maxDevices.value,
+      maxDevicesDaily: maxDevicesDaily.value,
+      deviceWindowMinutes: deviceWindowMinutes.value,
+      rpmLimitEnabled: rpmLimitEnabled.value,
+      baseRpm: baseRpm.value,
+      rpmStrategy: rpmStrategy.value,
+      rpmStickyBuffer: rpmStickyBuffer.value
+    })
+
     await createAccountAndFinish(
       'anthropic',
       'reclaude' as AccountType,
       buildReclaudeCredentials(reclaudeForm),
-      buildReclaudeExtra(reclaudeForm)
+      reclaudeExtra
     )
     return
   }

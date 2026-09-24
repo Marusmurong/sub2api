@@ -3243,6 +3243,7 @@
 </template>
 
 <script setup lang="ts">
+import { applySubSideLimits } from './subSideLimits'
 import { ref, reactive, computed, watch, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -5084,13 +5085,20 @@ function loadQuotaControlSettings(account: Account) {
     return
   }
 
-  // Window cost / session limit only apply to Anthropic OAuth/SetupToken accounts
-  if (account.type !== 'oauth' && account.type !== 'setup-token') {
+  // 🔴 会话数 / 设备数 / RPM 对 reclaude 同样适用（sub 端准入控制，见后端
+  // SupportsSessionLimit / SupportsDeviceLimit / SupportsRPMLimit）。
+  // 此前这里把 reclaude 一并挡掉 —— 表现是打开编辑页时三个开关永远是关的、
+  // 已保存的值也读不回来，看起来就像「设置无法保存」（2026-09-24 实测发现）。
+  //
+  // 窗口费用仍只对 oauth 生效：它锚在 session_window_start/end 上，
+  // 而 reclaude 从不写那两个字段（见 SupportsWindowCostLimit）。
+  const isOAuthLike = account.type === 'oauth' || account.type === 'setup-token'
+  if (!isOAuthLike && account.type !== 'reclaude') {
     return
   }
 
   // Load from extra field (via backend DTO fields)
-  if (account.window_cost_limit != null && account.window_cost_limit > 0) {
+  if (isOAuthLike && account.window_cost_limit != null && account.window_cost_limit > 0) {
     windowCostEnabled.value = true
     windowCostLimit.value = account.window_cost_limit
     windowCostStickyReserve.value = account.window_cost_sticky_reserve ?? 10
@@ -5588,10 +5596,26 @@ const handleSubmit = async () => {
       updatePayload.credentials = newCredentials
       // 只提交档位 id：日限额由后端按档位换算写进 quota_daily_limit。
       // 前端也算一遍的话，两处换算表迟早漂移，而漂移的方向是超卖。
-      updatePayload.extra = {
+      // 🔴 会话数 / 设备数 / RPM 必须一起写：此前这个分支只写档位，
+      // 表单上设的那三项被整段丢弃，且保存不报错（2026-09-24 实测发现）。
+      const reclaudeExtra: Record<string, unknown> = {
         ...((props.account.extra as Record<string, unknown>) || {}),
         [RECLAUDE_PLAN_TIER_EXTRA_KEY]: tier.id
       }
+      applySubSideLimits(reclaudeExtra, {
+        sessionLimitEnabled: sessionLimitEnabled.value,
+        maxSessions: maxSessions.value,
+        sessionIdleTimeout: sessionIdleTimeout.value,
+        deviceLimitEnabled: deviceLimitEnabled.value,
+        maxDevices: maxDevices.value,
+        maxDevicesDaily: maxDevicesDaily.value,
+        deviceWindowMinutes: deviceWindowMinutes.value,
+        rpmLimitEnabled: rpmLimitEnabled.value,
+        baseRpm: baseRpm.value,
+        rpmStrategy: rpmStrategy.value,
+        rpmStickyBuffer: rpmStickyBuffer.value
+      })
+      updatePayload.extra = reclaudeExtra
     } else if (props.account.type === 'bedrock') {
       const currentCredentials = (props.account.credentials as Record<string, unknown>) || {}
       const newCredentials: Record<string, unknown> = { ...currentCredentials }

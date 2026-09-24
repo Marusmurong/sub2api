@@ -11,6 +11,16 @@ const (
 	HTTPUpstreamProfileOpenAI     HTTPUpstreamProfile = "openai"
 	HTTPUpstreamProfileGrok       HTTPUpstreamProfile = "grok"
 	HTTPUpstreamProfileLongStream HTTPUpstreamProfile = "long_stream"
+	// HTTPUpstreamProfileReclaude 强制 HTTP/1.1，且钉到 ALPN 层。
+	//
+	// 🔴 reclaude 网关的真客户端（📄 反编译 newDirectTransport）只提供
+	// http/1.1：NextProtos=["http/1.1"] + 非 nil 空 TLSNextProto +
+	// ForceAttemptHTTP2=false。✅ 抓包里所有请求首行都是 HTTP/1.1、
+	// UA 为 Go-http-client/1.1。
+	//
+	// 不复用 long_stream：那个 profile 强制 H2 且会周期性发 h2 PING 帧 ——
+	// 真客户端永远不发，而 ALPN 差异在 TLS 握手阶段就暴露。
+	HTTPUpstreamProfileReclaude HTTPUpstreamProfile = "reclaude"
 )
 
 type httpUpstreamProfileContextKey struct{}
@@ -38,7 +48,8 @@ func HTTPUpstreamProfileFromContext(ctx context.Context) HTTPUpstreamProfile {
 		return HTTPUpstreamProfileDefault
 	}
 	switch profile {
-	case HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileGrok, HTTPUpstreamProfileLongStream:
+	case HTTPUpstreamProfileOpenAI, HTTPUpstreamProfileGrok, HTTPUpstreamProfileLongStream,
+		HTTPUpstreamProfileReclaude:
 		return profile
 	default:
 		return HTTPUpstreamProfileDefault

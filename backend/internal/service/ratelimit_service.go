@@ -398,6 +398,14 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		if fableCreditsRequired || fableLimited {
 			return false
 		}
+		// 长上下文需额度：只拒这一个请求，账号额度无关。必须排在临时不可调度规则之前——
+		// 宽泛的 "rate limit" 关键词规则同样会误伤。详见 anthropic_request_scoped_429.go。
+		if isAnthropicRequestScoped429(account, statusCode, headers, responseBody) {
+			slog.Info("anthropic_request_scoped_429_not_cooling",
+				"account_id", account.ID,
+				"reason", "long context requires usage credits")
+			return false
+		}
 	}
 
 	// 先尝试临时不可调度规则（401除外）

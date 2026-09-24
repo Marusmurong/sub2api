@@ -166,7 +166,8 @@ func (s *GatewayService) ForwardAsResponses(
 		upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(respBody))
 		upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
 
-		if s.shouldFailoverUpstreamError(resp.StatusCode) {
+		// 请求级 429（长上下文需额度）换号也一样被拒，落到下面直接回给客户端。
+		if s.shouldFailoverUpstreamError(resp.StatusCode) && !isAnthropicRequestScoped429(account, resp.StatusCode, resp.Header, respBody) {
 			appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
 				ProxyID:            opsUpstreamProxyID(account),
 				ProxyName:          opsUpstreamProxyName(account),

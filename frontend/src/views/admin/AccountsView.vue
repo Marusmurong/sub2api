@@ -503,6 +503,7 @@
 </template>
 
 <script setup lang="ts">
+import { accountDisplayEmail } from './accountDisplayEmail'
 import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
@@ -1732,9 +1733,7 @@ function getAntigravityTierLabel(row: any): string | null {
 
 // 账号显示邮箱:优先账号自身(extra/credentials),影子账号回退母账号 parent_email。
 // 供名称单元格 v-if/标题/文本三处共用,避免同一回退链在模板里重复三次。
-function accountDisplayEmail(row: any): string {
-  return row.extra?.email_address || row.extra?.email || row.credentials?.email || row.parent_email || ''
-}
+
 
 function accountHomepageUrl(row: Account): string {
   if (row.type !== 'apikey' || typeof row.credentials?.base_url !== 'string') return ''

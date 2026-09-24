@@ -107,6 +107,18 @@ func (r *ReclaudeHeartbeatRunner) BeatAt(ctx context.Context, account *Account, 
 		if endpoint == ReclaudeClientAccountPath {
 			r.observeAccountState(account, resp.Body)
 		}
+		// 🔴 记下清单版本，下一轮才能发条件请求。只记不发等于没做 ——
+		// 第一次 200 拿到 ETag 后，此后应当一直是 304（✅ 真客户端如此）。
+		// 304 通常不重复带 ETag，Remember 对空值是 no-op，不会把已知版本清掉。
+		if endpoint == ReclaudeInterceptDomainsPath {
+			// 类型断言而不是加进 ReclaudeEndpointProbe 接口：ETag 记忆是探测器的
+			// 可选能力，塞进接口会逼着所有实现（含测试桩）都实现一个用不到的方法。
+			if remember, ok := r.probe.(interface {
+				RememberInterceptETag(int64, string)
+			}); ok {
+				remember.RememberInterceptETag(account.ID, resp.Header.Get("ETag"))
+			}
+		}
 		_, _ = io.Copy(io.Discard, resp.Body)
 		_ = resp.Body.Close()
 	}

@@ -941,6 +941,10 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		_ = resp.Body.Close()
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
+		if isAnthropicRequestScoped429(account, resp.StatusCode, resp.Header, respBody) {
+			return nil, s.writeAnthropicRequestScoped429(c, account, resp, respBody)
+		}
+
 		// 调试日志：打印上游错误响应
 		logger.LegacyPrintf("service.gateway", "[Forward] Upstream error (failover): Account=%d(%s) Status=%d RequestID=%s Body=%s",
 			account.ID, account.Name, resp.StatusCode, upstreamRequestID(resp.Header), truncateString(string(respBody), 1000))

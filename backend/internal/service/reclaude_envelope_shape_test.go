@@ -51,14 +51,18 @@ func TestBuildReclaudeEnvelope_MatchesRealClientShape(t *testing.T) {
 			t.Fatalf("元数据缺字段 %q（真实客户端六项齐全）: %v", key, meta)
 		}
 	}
-	// 🔴 更正（2026-09-24）：edge 是**实际网关主机名**，不是常量 "unknown"。
+	// 🔴 edge 恒为 "unknown"。
 	//
-	// 早先这条断言写死 unknown —— 那来自一份客户端刚启动、尚未选定节点时的抓包。
-	// 用 RECLAUDE_GATEWAY_DIAL_ADDR 把 daemon 指向本地 sink 后抓到的真实报文是
-	// `"edge":"www.reclaude.ai"`，与它连接的网关一致（逆向报告 §7.2 也写明
-	// 「网关节点标签」）。edge 与实际网关不符正是 bad_envelope 的字面含义。
-	if meta["edge"] != "www.reclaude.ai" {
-		t.Fatalf("edge 应为网关主机名 www.reclaude.ai，得到 %v", meta["edge"])
+	// 真客户端的 computeEdgeLabel（📄 反编译）是一次 map 查表：命中返回 u.Host，
+	// 未命中返回 "unknown"。表里装的是 route 节点，login 拿到的默认 gateway
+	// （www.reclaude.ai）不在其中。
+	//
+	// ✅ 实测：reclaude-lab/sink/dump 的 26/26 条真实信封 edge 全是 "unknown"。
+	//
+	// 当天曾据一条 daemon 指向本地 sink 时的样本把断言改成主机名 —— 那不是常态，
+	// 方向是错的，已撤回。
+	if meta["edge"] != "unknown" {
+		t.Fatalf("edge 应恒为 unknown，得到 %v", meta["edge"])
 	}
 	if meta["keepalive"] != true {
 		t.Fatalf("keepalive 应为 true，得到 %v", meta["keepalive"])

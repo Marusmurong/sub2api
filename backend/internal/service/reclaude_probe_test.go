@@ -105,7 +105,9 @@ func TestReclaudeGatewayProbe(t *testing.T) {
 
 		require.NoError(t, err)
 		reqCtx := upstream.gotRequest.Context()
-		require.Equal(t, HTTPUpstreamProfileLongStream, HTTPUpstreamProfileFromContext(reqCtx))
+		// 🔴 必须是 Reclaude profile（强制 HTTP/1.1）。真客户端走 H1，
+		// 用 LongStream 会走 H2 并周期性发 h2 PING —— ALPN 在握手阶段就暴露。
+		require.Equal(t, HTTPUpstreamProfileReclaude, HTTPUpstreamProfileFromContext(reqCtx))
 		require.True(t, HTTPUpstreamPublicHostsOnly(reqCtx))
 	})
 

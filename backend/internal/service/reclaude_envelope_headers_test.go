@@ -83,28 +83,34 @@ func extractReclaudeEnvelopeMetaForTest(t *testing.T, envelope []byte) map[strin
 	return meta
 }
 
-// 🔴 edge 必须是**实际发往的网关主机名**，不是常量。
+// 🔴 edge 恒为 "unknown"（撤回 2026-09-24 一次错误改动后的结论）。
 //
-// 逆向报告 §7.2 写明 `Edge = 网关节点标签（la.route.reclaude.ai）`，
-// 而我们早先抓到的样本恰好是客户端刚启动、尚未选定节点时的 "unknown"，
-// 被误当成常量写死。2026-09-24 用 RECLAUDE_GATEWAY_DIAL_ADDR 把 daemon 指向
-// 本地 sink 后抓到真实报文：`"edge":"www.reclaude.ai"` —— 与它实际连接的
-// 网关一致。
+// 真客户端的 computeEdgeLabel（📄 反编译）是一次 map 查表：命中返回 u.Host，
+// 未命中返回 "unknown"。那张表装的是 route 节点，而 login 拿到的默认 gateway
+// （www.reclaude.ai）不在其中。
 //
-// edge 与实际网关不符，正是 `bad_envelope / reclaude state mismatch` 的字面含义。
-func TestReclaudeEnvelopeEdgeMatchesGateway(t *testing.T) {
-	t.Run("取网关主机名", func(t *testing.T) {
-		require.Equal(t, "www.reclaude.ai", reclaudeEnvelopeEdgeFor("https://www.reclaude.ai"))
-		require.Equal(t, "la.route.reclaude.ai", reclaudeEnvelopeEdgeFor("https://la.route.reclaude.ai"))
-	})
+// ✅ 实测：reclaude-lab/sink/dump 的 26/26 条真实信封 edge 全是 "unknown"。
+//
+// 当天我据一条 daemon 指向本地 sink 时的样本把它改成了动态主机名 ——
+// 那不是常态，方向是错的。这条测试钉住撤回后的行为。
+func TestReclaudeEnvelopeEdgeIsAlwaysUnknown(t *testing.T) {
+	for _, gateway := range []string{
+		"https://www.reclaude.ai",
+		"https://la.route.reclaude.ai",
+		"",
+	} {
+		envelope, _, err := buildReclaudeEnvelope(newInnerForEdgeTest(t), gateway)
+		require.NoError(t, err)
+		require.Contains(t, string(envelope), `"edge":"unknown"`,
+			"gateway %q 下 edge 应恒为 unknown", gateway)
+	}
+}
 
-	t.Run("带端口时只取主机名", func(t *testing.T) {
-		require.Equal(t, "www.reclaude.ai", reclaudeEnvelopeEdgeFor("https://www.reclaude.ai:443"))
-	})
-
-	t.Run("解析失败时回落 unknown", func(t *testing.T) {
-		// 客户端未选定节点时确实发 unknown（早期抓包样本），这是合法回落值。
-		require.Equal(t, "unknown", reclaudeEnvelopeEdgeFor(""))
-		require.Equal(t, "unknown", reclaudeEnvelopeEdgeFor("::not a url::"))
-	})
+func newInnerForEdgeTest(t *testing.T) *http.Request {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost,
+		"https://api.anthropic.com/v1/messages?beta=true", nil)
+	require.NoError(t, err)
+	req.Header.Set("content-type", "application/json")
+	return req
 }

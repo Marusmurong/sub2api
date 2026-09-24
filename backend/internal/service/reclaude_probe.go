@@ -18,11 +18,22 @@ import (
 type ReclaudeGatewayProbe struct {
 	httpUpstream HTTPUpstream
 	cipher       *ReclaudeCredentialCipher
+	// interceptETags 记住每台设备的拦截清单版本，用于条件请求（见 ProbeReclaudeEndpoint）。
+	interceptETags *ReclaudeInterceptETagStore
 }
 
 // NewReclaudeGatewayProbe 构造探测器。
+// RememberInterceptETag 记下拦截清单的版本，供下次条件请求使用。
+func (p *ReclaudeGatewayProbe) RememberInterceptETag(accountID int64, etag string) {
+	if p == nil || p.interceptETags == nil {
+		return
+	}
+	p.interceptETags.Remember(accountID, etag)
+}
+
 func NewReclaudeGatewayProbe(httpUpstream HTTPUpstream, cipher *ReclaudeCredentialCipher) *ReclaudeGatewayProbe {
-	return &ReclaudeGatewayProbe{httpUpstream: httpUpstream, cipher: cipher}
+	return &ReclaudeGatewayProbe{
+		interceptETags: NewReclaudeInterceptETagStore(), httpUpstream: httpUpstream, cipher: cipher}
 }
 
 // ProbeReclaudeEndpoint 实现 ReclaudeEndpointProbe。
@@ -52,9 +63,13 @@ func (p *ReclaudeGatewayProbe) ProbeReclaudeEndpoint(
 		return nil, fmt.Errorf("%w: %s", ErrReclaudeGatewayNotAllowed, err.Error())
 	}
 
-	// 与推理流量一致：long_stream profile（否则外层退成 HTTP/1.1，而真客户端走 H2）
+	// 与推理流量一致：Reclaude profile（强制 HTTP/1.1）
 	// + public-hosts-only（默认配置下 SSRF 校验不生效，这个标记强制开启）。
-	reqCtx := WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileLongStream)
+	//
+	// 🔴 此处原注释写「否则外层退成 HTTP/1.1，而真客户端走 H2」—— **方向反了**。
+	// 反编译（newDirectTransport 设 NextProtos=["http/1.1"]）与抓包（所有请求
+	// 首行 HTTP/1.1、UA Go-http-client/1.1）双向证伪：真客户端强制 H1。
+	reqCtx := WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileReclaude)
 	reqCtx = WithHTTPUpstreamPublicHostsOnly(reqCtx)
 
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, gatewayURL+endpoint, nil)
@@ -62,10 +77,27 @@ func (p *ReclaudeGatewayProbe) ProbeReclaudeEndpoint(
 		return nil, fmt.Errorf("reclaude probe: build request: %w", err)
 	}
 
+	// 🔴 控制面**只带 Authorization + 五个签名头**。
+	//
+	// ✅ 真值抓包（reclaude-lab/sink/dump/*client_*.txt）：控制面请求里没有
+	// X-Reclaude-Client-Version / -Client-Platform —— 那两个头**只出现在 /proxy**。
+	// 在这里带上它们是一个「照着 /proxy 抄的」直接特征，真客户端的两条代码
+	// 路径本来就不同（tunnel.Forward vs intercept.fetch）。
+	//
+	// Device-Id 不在这里写：signControlPlaneRequest 里的签名器会统一写入，
+	// 两处都写会出现大小写重复键。
 	req.Header.Set("Authorization", "Bearer "+sk)
-	req.Header.Set(reclaude.HeaderClientVersion, account.GetCredential(CredKeyReclaudeClientVersion))
-	req.Header.Set(reclaude.HeaderClientPlatform, account.GetCredential(CredKeyReclaudeClientPlatform))
-	req.Header.Set(reclaude.HeaderDeviceID, account.GetCredential(CredKeyReclaudeDeviceID))
+
+	// 🔴 拦截清单走条件请求：真客户端持久化版本号（形如 "0:0"）并每次带
+	// If-None-Match，第一次 200、此后一整天都是 304（✅ 真值抓包）。
+	// 不带的话每 60 秒强制一次全量 200 —— 一条每分钟重复、跨设备一致的信号。
+	//
+	// 只给这个端点带：ETag 是清单端点专有的，给 /client/account 带上是另一种抄错。
+	if endpoint == ReclaudeInterceptDomainsPath {
+		if etag, ok := p.interceptETags.Get(account.ID); ok {
+			req.Header.Set("If-None-Match", etag)
+		}
+	}
 
 	// 🔴 代理取不到就**拒绝发送**，不能退回直连。
 	//
