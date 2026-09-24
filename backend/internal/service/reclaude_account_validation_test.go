@@ -244,36 +244,13 @@ func TestReclaudeGroupIsolation(t *testing.T) {
 	})
 }
 
-// 🔴 2026-09-24 真机 login 实测：客户端拿到的 gateway_url 是**主域**
-// `https://www.reclaude.ai`，不是任何一个 route 子域。
+// gateway_url 白名单是把全量明文 prompt 发往何处的唯一防线。
 //
-// 此前白名单只收了四个 `*.route.reclaude.ai` 节点（来自逆向推断），
-// 按那个清单建的号全部打在 asia.route 上，请求被拒为
-// device_signature_required —— 一个看起来像签名问题、实则可能是端点问题的故障。
-//
-// 保留 route 节点：它们在真实响应里出现过，且不排除按区域下发。
-func TestReclaudeGatewayAllowlistIncludesPrimaryDomain(t *testing.T) {
-	t.Run("主域必须被接受", func(t *testing.T) {
-		input := validReclaudeInput()
-		input.GatewayURL = "https://www.reclaude.ai"
-
-		result, err := ValidateReclaudeAccountInput(input)
-
-		require.NoError(t, err, "真实客户端 login 拿到的就是这个地址")
-		require.Equal(t, "https://www.reclaude.ai", result.NormalizedGateway)
-	})
-
-	t.Run("route 节点继续被接受", func(t *testing.T) {
-		for _, host := range []string{"asia.route.reclaude.ai", "la.route.reclaude.ai"} {
-			input := validReclaudeInput()
-			input.GatewayURL = "https://" + host
-
-			_, err := ValidateReclaudeAccountInput(input)
-
-			require.NoErrorf(t, err, "host %s", host)
-		}
-	})
-
+// ⚠️ 这个测试此前叫 ...IncludesPrimaryDomain 并断言「主域必须被接受」。
+// 那个结论已于 2026-09-24 被推翻：www.reclaude.ai 是真客户端 auto-pick
+// 全部失败时的兜底值，不是候选节点。候选表本身由
+// TestReclaudeGatewayCandidates 锁定，这里只保留 SSRF 防线一条。
+func TestReclaudeGatewayAllowlistRejectsUnknownHosts(t *testing.T) {
 	t.Run("白名单之外仍然拒绝", func(t *testing.T) {
 		// 这条是防线本身：gateway_url 决定我们把全量明文 prompt 发到哪台机器。
 		input := validReclaudeInput()

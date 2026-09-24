@@ -12,14 +12,18 @@
 
 /** 网关节点硬白名单。与后端 ReclaudeAllowedGatewayHosts 一一对应。 */
 export const RECLAUDE_GATEWAY_HOSTS = [
-  // 🔴 主域 —— 2026-09-24 真机 login 实测，客户端 device.json 里就是这个值。
-  // 必须与后端 ReclaudeAllowedGatewayHosts 保持一致。
-  'www.reclaude.ai',
+  // 🔴 这四个是真客户端的**候选表全集**（daemon 启动时对它们做 RTT 探测，
+  // 取最快的一个）。必须与后端 ReclaudeAllowedGatewayHosts 逐字一致。
   'asia.route.reclaude.ai',
   'la.route.reclaude.ai',
   'misaka.route.reclaude.ai',
   // 真实节点名无 .route（2026-09-24 实测）
   'cloudfront.reclaude.ai'
+
+  // 🔴 **www.reclaude.ai 已于 2026-09-24 移出白名单，不要加回来。**
+  // 它不是候选节点，是「所有候选都探测失败」时的兜底值 —— 客户端自己的
+  // i18n 写着 "auto-pick failed (no reachable candidates), falling back to %s"。
+  // 正常工作的真客户端永远不会停在它上面。详见后端同名常量处的长注释。
 ] as const
 
 /** SK 的固定前缀（设备页面上可见）。 */

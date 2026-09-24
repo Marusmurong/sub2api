@@ -38,21 +38,45 @@ const ReclaudeSKPrefix = "sk-rec-"
 // 默认配置下 SSRF 校验不生效，这是唯一的防线：gateway_url 决定我们把**全量
 // 明文 prompt** 发到哪台机器上。不做 auto-pick，固定一个节点。
 var ReclaudeAllowedGatewayHosts = []string{
-	// 🔴 主域 —— 2026-09-24 真机 login 实测，客户端 device.json 里的
-	// gateway_url 就是这个值，不是任何 route 子域。
+	// 🔴 这四个就是真客户端的**候选表全集**，缺一不可、多一个都不行。
 	//
-	// 此前清单只有下面四个 route 节点（逆向推断），按那个清单建的号全部打在
-	// asia.route 上被拒为 device_signature_required —— 一个看起来像签名问题、
-	// 实则可能是端点问题的故障。
-	"www.reclaude.ai",
-	// route 节点保留：它们在真实响应里出现过，不排除按区域下发。
+	// ✅ 真值（2026-09-24 对客户端二进制做 strings 只读分析）：
+	//   - 源文件名 `client/internal/config/gateway_candidates.go`
+	//   - 符号 `config.PickFastestGateway` / `config.ProbeGateway`
+	//   - 四个候选常量均以 `https://` 前缀连续存放
+	//
+	// daemon 启动时对它们并发做 RTT 探测（`gatewayProbeURL` = base + "/proxy"，
+	// 无凭据空 POST），取最快的一个写进 state.json。
 	"asia.route.reclaude.ai",
 	"la.route.reclaude.ai",
 	"misaka.route.reclaude.ai",
-	// 🔴 真实节点名是 cloudfront.reclaude.ai（无 .route）——
-	// 2026-09-24 `reclaude config gateway` 输出实测。原先写的
-	// cloudfront.route.reclaude.ai 是推断，不存在。
+	// 真实节点名无 .route 段 —— `reclaude config gateway` 输出实测。
 	"cloudfront.reclaude.ai",
+
+	// 🔴 **www.reclaude.ai 已于 2026-09-24 移出白名单，不要加回来。**
+	//
+	// 它不是候选节点，是**「所有候选都探测失败」时的兜底值**。决定性证据是
+	// 客户端自己的 i18n 字符串：
+	//
+	//	"gateway: auto-picked %s (RTT %s, %d candidates probed)"
+	//	"gateway: auto-pick failed (no reachable candidates), falling back to %s"
+	//	"(daemon will auto-pick; url is fallback)"
+	//
+	// 正常工作的真客户端**永远不会**停在 www 上；停在上面意味着它那一刻
+	// 一个节点都连不通。而我们此前把全部账号固定在这里 —— 等于整个设备群
+	// 长期呈现一种真实世界里不该批量出现的形态。
+	// 对端判别它零成本：看哪些设备的 /proxy 落在 apex 而不是 route 节点即可。
+	//
+	// ⚠️ 此处原注释称「按 route 节点建的号被拒为 device_signature_required，
+	// 所以只能用主域」——**那个归因是错的**。那次失败发生在 K-4 签名 bug
+	// （base64 变体用了 Std(padded)、控制面 GET 未签名）修复**之前**；
+	// 真客户端每天都在打 route 节点且签名正常，而 device_signature_required
+	// 是签名错误码，与端点无关。一条错记的注释把我们锁在兜底域上近一周。
+	//
+	// 佐证（D8）：信封 edge 是对候选表的一次查表，命中回 host、未命中回
+	// "unknown"。26/26 条真实信封 edge = "unknown"（那批 daemon 指向 www/sink），
+	// 而真客户端遥测 rollup 的 edge = "asia.route.reclaude.ai"。
+	// 两处设计自洽地指向同一件事：真客户端不该打 apex。
 }
 
 var reclaudeFingerprintPattern = regexp.MustCompile(`^[0-9a-f]{16}$`)
