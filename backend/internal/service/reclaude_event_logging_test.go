@@ -20,6 +20,11 @@ func eventAccount(t *testing.T) *Account {
 		"3c5a8384b29498aeb24ac2717c50dbccbffe818352a8eac8c1a6f29d690b2e31"
 	account.Credentials[CredKeyReclaudeClientPlatform] = "linux/amd64"
 	account.Credentials[CredKeyReclaudeClientVersion] = "2.1.280"
+	// 真机快照：与登录 /auth/start 上报的同源。缺它会回落到 platform 推断，
+	// 而推断值与真机对不上正是撤销的根因。
+	account.Credentials[CredKeyReclaudeMachineEnv] = `{"node_version":"v18.19.1",` +
+		`"arch":"x64","linux_distro_id":"ubuntu","linux_distro_version":"24.04",` +
+		`"linux_kernel":"6.17.0-1017-aws","shell":"bash"}`
 	return account
 }
 
@@ -73,6 +78,8 @@ func TestBuildReclaudeEventBatch(t *testing.T) {
 			"is_claude_code_action", "is_claude_ai_auth", "version", "arch",
 			"is_claude_code_remote", "deployment_environment", "is_conductor",
 			"version_base", "is_local_agent_mode", "platform_raw", "shell",
+			// linux_* 带 omitempty：eventAccount 注入了 Linux 真机快照，故应出现。
+			"linux_distro_id", "linux_distro_version", "linux_kernel",
 		}, keysOf(decoded))
 	})
 
@@ -110,9 +117,10 @@ func TestBuildReclaudeEventBatch(t *testing.T) {
 		require.Equal(t, "linux", batch.Events[0].EventData.Env.Platform)
 	})
 
-	t.Run("env 跟随账号平台，不是硬编码", func(t *testing.T) {
-		// 一批设备共用同一套 env 是比沉默更强的批量特征。
+	t.Run("无真机快照时回落到 platform 推断", func(t *testing.T) {
+		// 一批设备共用同一套推断 env 是批量特征 —— 这是降级路径，不是正解。
 		ctx := eventContext(t)
+		delete(ctx.Account.Credentials, CredKeyReclaudeMachineEnv)
 		ctx.Account.Credentials[CredKeyReclaudeClientPlatform] = "darwin/arm64"
 
 		env := BuildReclaudeEventBatch(ctx, []string{ReclaudeEventAPIQuery}).Events[0].EventData.Env
@@ -121,6 +129,30 @@ func TestBuildReclaudeEventBatch(t *testing.T) {
 		require.Equal(t, "arm64", env.Arch)
 		require.Equal(t, "zsh", env.Shell, "macOS 默认 shell 应与平台自洽")
 		require.Equal(t, "unknown-darwin", env.DeploymentEnvironment)
+	})
+
+	// 🔴 撤销复盘的核心断言：env 必须用**真机快照**，不是硬编码/推断。
+	t.Run("真机快照优先于 platform 推断", func(t *testing.T) {
+		env := BuildReclaudeEventBatch(eventContext(t), []string{ReclaudeEventAPIQuery}).
+			Events[0].EventData.Env
+
+		require.Equal(t, "v18.19.1", env.NodeVersion, "不能再是硬编码的 v26.3.0")
+		require.Equal(t, "x64", env.Arch)
+		require.Equal(t, "ubuntu", env.LinuxDistroID)
+		require.Equal(t, "24.04", env.LinuxDistroVersion)
+		require.Equal(t, "6.17.0-1017-aws", env.LinuxKernel)
+		require.Equal(t, "bash", env.Shell)
+	})
+
+	t.Run("坏的快照 JSON 不 panic，回落到推断", func(t *testing.T) {
+		ctx := eventContext(t)
+		ctx.Account.Credentials[CredKeyReclaudeMachineEnv] = "{not json"
+
+		require.NotPanics(t, func() {
+			env := BuildReclaudeEventBatch(ctx, []string{ReclaudeEventAPIQuery}).
+				Events[0].EventData.Env
+			require.Equal(t, reclaudeDefaultNodeVersion, env.NodeVersion)
+		})
 	})
 }
 

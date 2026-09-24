@@ -24,6 +24,7 @@ function form(overrides: Partial<ReclaudeFormValues> = {}): ReclaudeFormValues {
     accountUuid: '9c67eb02-4001-4cde-a6e2-e40f1a71649e',
     organizationUuid: '47be3ed1-4b36-4bae-837d-40b5106369ec',
     claudeEmail: 'claude-account@example.com',
+    machineEnv: '{"node_version":"v18.19.1","arch":"x64"}',
     timezone: 'America/Los_Angeles',
     userEmail: 'owner@example.com',
     planTier: '20x',

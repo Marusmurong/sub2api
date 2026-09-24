@@ -44,6 +44,19 @@ const (
 	//   - bound  —— 心跳从 /client/account 读到的值。✅ 2026-09-25 实测它是
 	//               **订阅账户邮箱**，一个订阅下所有设备相同，零区分度。
 	CredKeyReclaudeClaudeEmail = "reclaude_claude_email"
+
+	// CredKeyReclaudeMachineEnv 是**登录机器的真机指纹快照**（JSON）。
+	//
+	// 🔴 2026-09-25 撤销复盘定位的根因：event_logging 每个事件的 env 块带
+	// kernel / arch / node_version / distro，而登录时 /api/cli/auth/start
+	// 已把这台机器的真机指纹上报给服务端并落库。两者必须**同源一致** ——
+	// 我们此前硬编码抄样本值（arm64 / v26.3.0），与服务器真机（x86_64 /
+	// v18.19.1 / kernel 6.17-aws）对不上：同一 device_id 自报了两副矛盾硬件，
+	// 服务端一致性校验一对账就撤销。
+	//
+	// 建号时从登录机器采集（uname -m / uname -r / os-release / node -v），
+	// 存这里；event_logging 按账号读，绝不再硬编码。
+	CredKeyReclaudeMachineEnv = "reclaude_machine_env"
 )
 
 // claudeUserIDPattern 是 Claude Code userID 的形态：sha256 的 64 位小写 hex。

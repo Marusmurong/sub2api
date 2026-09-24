@@ -4410,6 +4410,7 @@ const reclaudeForm = reactive<ReclaudeFormValues>({
   accountUuid: '',
   organizationUuid: '',
   claudeEmail: '',
+  machineEnv: '',
   timezone: '',
   userEmail: '',
   planTier: '',

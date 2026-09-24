@@ -47,6 +47,8 @@ export interface ReclaudeFormValues {
   organizationUuid: string
   /** 底层 Claude 账号邮箱（~/.claude.json 的 oauthAccount.emailAddress）。 */
   claudeEmail: string
+  /** 真机指纹快照 JSON（node_version/arch/linux_distro_id/linux_distro_version/linux_kernel/shell）。 */
+  machineEnv: string
   timezone: string
   userEmail: string
   planTier: string
@@ -180,6 +182,14 @@ export function buildReclaudeCredentials(values: ReclaudeFormValues): Record<str
     credentials.reclaude_claude_email = values.claudeEmail.trim()
   }
 
+  // 真机指纹快照（node 版本 / arch / distro / kernel / shell）。
+  // 🔴 遥测 event_logging 的 env 块按它填，必须与登录 /auth/start 上报的同源，
+  // 否则服务端对账不上会撤销设备（2026-09-25 撤销复盘的根因）。
+  // 留空则后端回落到 platform 推断（降级，不推荐）。
+  if (values.machineEnv.trim() !== '') {
+    credentials.reclaude_machine_env = values.machineEnv.trim()
+  }
+
   // 时区决定「模拟关机」作息的生成，留空则后端按默认时区生成。
   if (values.timezone.trim() !== '') {
     credentials.reclaude_timezone = values.timezone.trim()
@@ -255,6 +265,8 @@ export interface ReclaudeBundle {
   reclaude_organization_uuid?: string
   /** 底层 Claude 账号邮箱。缺失时列表回落到订阅邮箱显示。 */
   reclaude_claude_email?: string
+  /** 真机指纹快照 JSON 字符串。缺失时后端回落到 platform 推断（降级）。 */
+  reclaude_machine_env?: string
   reclaude_timezone?: string
   reclaude_user_email?: string
 }
@@ -285,6 +297,41 @@ const REQUIRED_BUNDLE_KEYS: (keyof ReclaudeBundle)[] = [
  * 必须固定一个 route 节点。直接拿原始文件建号，账号会指向一个我们没选定的节点。
  * 正确做法是用本地控制台的「生成建号 JSON」，那里会带上选定的节点。
  */
+
+/**
+ * machineEnvJson 从粘贴的 bundle 里取真机指纹快照。
+ *
+ * 🔴 两种来源，优先级从高到低：
+ *   1. reclaude_machine_env —— 已是完整 JSON 字符串（建号 JSON 直接给的）
+ *   2. 顶层散字段 —— node_version / arch / linux_distro_id / ... 拼成 JSON
+ * 都没有则返回空串，后端回落到 platform 推断（降级）。
+ *
+ * 与登录 /auth/start 上报的必须同源，否则服务端对账不上会撤销设备。
+ */
+function machineEnvJson(parsed: Record<string, unknown>): string {
+  const direct = parsed.reclaude_machine_env
+  if (typeof direct === 'string' && direct.trim() !== '') return direct.trim()
+  if (direct && typeof direct === 'object') return JSON.stringify(direct)
+
+  const pick = (k: string): string => {
+    const v = parsed[k]
+    return typeof v === 'string' ? v.trim() : ''
+  }
+  const env: Record<string, string> = {}
+  for (const [src, dst] of [
+    ['reclaude_node_version', 'node_version'],
+    ['reclaude_arch', 'arch'],
+    ['reclaude_linux_distro_id', 'linux_distro_id'],
+    ['reclaude_linux_distro_version', 'linux_distro_version'],
+    ['reclaude_linux_kernel', 'linux_kernel'],
+    ['reclaude_shell', 'shell']
+  ] as const) {
+    const val = pick(src)
+    if (val !== '') env[dst] = val
+  }
+  return Object.keys(env).length > 0 ? JSON.stringify(env) : ''
+}
+
 export function parseReclaudeBundle(raw: string): ReclaudeParseResult {
   let parsed: Record<string, unknown>
   try {
@@ -323,6 +370,7 @@ export function parseReclaudeBundle(raw: string): ReclaudeParseResult {
       accountUuid: text('reclaude_account_uuid'),
       organizationUuid: text('reclaude_organization_uuid'),
       claudeEmail: text('reclaude_claude_email'),
+      machineEnv: machineEnvJson(parsed),
       timezone: text('reclaude_timezone'),
       userEmail: text('reclaude_user_email')
     }

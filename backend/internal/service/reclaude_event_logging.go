@@ -58,8 +58,15 @@ type ReclaudeEventEnv struct {
 	IsConductor           bool   `json:"is_conductor"`
 	VersionBase           string `json:"version_base"`
 	IsLocalAgentMode      bool   `json:"is_local_agent_mode"`
-	PlatformRaw           string `json:"platform_raw"`
-	Shell                 string `json:"shell"`
+	// linux_* 三项是真机指纹。✅ 真值样本：linux_distro_id=ubuntu /
+	// linux_distro_version=24.04 / linux_kernel=6.8.0-139-generic。
+	// 🔴 必须与登录 /auth/start 上报的同源，否则服务端对账不上 → 撤销。
+	// omitempty：非 Linux 平台真值里没有这三项。
+	LinuxDistroID      string `json:"linux_distro_id,omitempty"`
+	LinuxDistroVersion string `json:"linux_distro_version,omitempty"`
+	LinuxKernel        string `json:"linux_kernel,omitempty"`
+	PlatformRaw        string `json:"platform_raw"`
+	Shell              string `json:"shell"`
 }
 
 // ReclaudeEventAuth 是事件的身份块。
@@ -237,13 +244,26 @@ func BuildReclaudeEventBatch(ctx ReclaudeEventContext, names []string) *Reclaude
 	return &ReclaudeEventBatch{Events: events}
 }
 
-// buildReclaudeEventEnv 从账号的真实快照拼 env 块。
+// ReclaudeMachineEnv 是建号时从**登录机器**采集的真机指纹快照。
 //
-// 🔴 取值来自账号自己的 client_platform / client_version，不是硬编码。
-// ⚠️ 已知缺口：node_version / linux_distro / kernel / shell 这些**真机指纹**
-// 我们建号时没有采集，所以只能给出与 platform 自洽的保守值。
-// 它们是「一批设备共享同一套值」的风险点 —— 若日后建号流程采集了真机快照，
-// 应改为按账号读取。当前取舍：字段在、形态对、与 platform 不矛盾。
+// 🔴 字段必须与登录时 /api/cli/auth/start 上报给服务端的同源。event_logging
+// 的 env 块每 60 秒复述一次这些值，服务端拿它和登录档案对账 —— 对不上就撤销
+// （2026-09-25 撤销复盘定位的根因）。字段留空即回落到 platform 推断，
+// 但那是**降级**不是正解：一批设备共享同一套推断值本身就是批量特征。
+type ReclaudeMachineEnv struct {
+	NodeVersion        string `json:"node_version"`
+	Arch               string `json:"arch"`
+	LinuxDistroID      string `json:"linux_distro_id"`
+	LinuxDistroVersion string `json:"linux_distro_version"`
+	LinuxKernel        string `json:"linux_kernel"`
+	Shell              string `json:"shell"`
+}
+
+// buildReclaudeEventEnv 从账号采集的**真机快照**拼 env 块。
+//
+// 🔴 优先读 reclaude_machine_env（建号时从登录机器采集，与 /auth/start 同源）。
+// 逐字段回落到 platform 推断只是不让请求发不出去的兜底 —— 它与真机对不上，
+// 正是撤销的根因，所以建号流程必须采集真机 env（见 CredKeyReclaudeMachineEnv）。
 func buildReclaudeEventEnv(account *Account) ReclaudeEventEnv {
 	platform := strings.TrimSpace(account.GetCredential(CredKeyReclaudeClientPlatform))
 	version := reclaudeClientVersionOr(account.GetCredential(CredKeyReclaudeClientVersion))
@@ -259,16 +279,28 @@ func buildReclaudeEventEnv(account *Account) ReclaudeEventEnv {
 		}
 	}
 
+	snapshot := parseReclaudeMachineEnv(account.GetCredential(CredKeyReclaudeMachineEnv))
+
+	// 🔴 每个真机字段：有快照就用快照，否则回落到推断（降级）。
+	if snapshot.Arch != "" {
+		arch = snapshot.Arch
+	}
+	nodeVersion := reclaudeDefaultNodeVersion
+	if snapshot.NodeVersion != "" {
+		nodeVersion = snapshot.NodeVersion
+	}
+	shell := reclaudeDefaultShellFor(osName)
+	if snapshot.Shell != "" {
+		shell = snapshot.Shell
+	}
+
 	return ReclaudeEventEnv{
 		Platform:    osName,
 		PlatformRaw: osName,
 		Arch:        arch,
 		Version:     version,
 		VersionBase: version,
-		// ⚠️ node_version 是**真机指纹**，我们没采集。给一个与 CLI 构建时期
-		// 自洽的值，形态对但不是真采样 —— 与 linux_distro/kernel 同属
-		// buildReclaudeEventEnv 顶部标注的已知缺口。
-		NodeVersion: reclaudeDefaultNodeVersion,
+		NodeVersion: nodeVersion,
 		// ✅ 真值：非交互 SDK 场景下 terminal 恒为 unknown，两个列表恒为空串。
 		Terminal:        "unknown",
 		PackageManagers: "",
@@ -284,9 +316,32 @@ func buildReclaudeEventEnv(account *Account) ReclaudeEventEnv {
 		IsClaudeCodeRemote:    false,
 		IsConductor:           false,
 		IsLocalAgentMode:      false,
-		DeploymentEnvironment: "unknown-" + osName,
-		Shell:                 reclaudeDefaultShellFor(osName),
+		DeploymentEnvironment: reclaudeDeploymentEnv(osName, snapshot),
+		Shell:                 shell,
+		LinuxDistroID:         snapshot.LinuxDistroID,
+		LinuxDistroVersion:    snapshot.LinuxDistroVersion,
+		LinuxKernel:           snapshot.LinuxKernel,
 	}
+}
+
+// parseReclaudeMachineEnv 解析真机快照 JSON；空/坏值返回零值（触发逐字段回落）。
+func parseReclaudeMachineEnv(raw string) ReclaudeMachineEnv {
+	var env ReclaudeMachineEnv
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return env
+	}
+	// 解析失败静默返回零值：坏数据回落到推断，不该让遥测整个发不出去。
+	_ = json.Unmarshal([]byte(raw), &env)
+	return env
+}
+
+// reclaudeDeploymentEnv 复刻真值的 deployment_environment 取值。
+//
+// ✅ 真值样本：Linux 上是 "unknown-linux"。有 distro 时仍按 os 拼，
+// 与样本一致（样本的 deployment_environment 是 "unknown-linux" 而非带 distro）。
+func reclaudeDeploymentEnv(osName string, _ ReclaudeMachineEnv) string {
+	return "unknown-" + osName
 }
 
 // reclaudeDefaultNodeVersion 是 env.node_version 的取值。
