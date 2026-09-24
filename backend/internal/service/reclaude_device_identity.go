@@ -34,6 +34,16 @@ const (
 	// 缺失时**不发遥测事件**，绝不编造：org UUID 与账号的归属关系
 	// 对端一查就知道，编一个等于主动提供一条矛盾证据。
 	CredKeyReclaudeOrganizationUUID = "reclaude_organization_uuid"
+
+	// CredKeyReclaudeClaudeEmail 是**底层 Claude 账号**的邮箱
+	// （真机 ~/.claude.json 的 oauthAccount.emailAddress）。
+	//
+	// 🔴 与 CredKeyReclaudeUserEmail / ExtraKeyReclaudeBoundEmail 都不同：
+	//   - 这个   —— 这台设备当前挂在哪个 Claude 账号上（运营要看的）
+	//   - user   —— 建号时填的 reclaude 订阅账号
+	//   - bound  —— 心跳从 /client/account 读到的值。✅ 2026-09-25 实测它是
+	//               **订阅账户邮箱**，一个订阅下所有设备相同，零区分度。
+	CredKeyReclaudeClaudeEmail = "reclaude_claude_email"
 )
 
 // claudeUserIDPattern 是 Claude Code userID 的形态：sha256 的 64 位小写 hex。

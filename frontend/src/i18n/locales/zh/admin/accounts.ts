@@ -766,6 +766,8 @@ export default {
       reclaudeAccountUuidHint: '同一份 ~/.claude.json 里的账号 UUID。与上一项一起决定 metadata.user_id。',
       reclaudeOrganizationUuid: '组织 UUID（可选）',
       reclaudeOrganizationUuidHint: '~/.claude.json 里 oauthAccount.organizationUuid。遥测事件的 auth 块需要它；留空则不发遥测事件（不会编造假值）。',
+      reclaudeClaudeEmail: '底层 Claude 账号邮箱（可选）',
+      reclaudeClaudeEmailHint: '~/.claude.json 里 oauthAccount.emailAddress。列表名称下方显示的就是它 —— 标识这台设备挂在哪个 Claude 账号上，与 reclaude 订阅邮箱不是一回事。',
       reclaudePlanTier: '套餐档位',
       reclaudePlanTierHint: '档位决定日消费上限（美元），由号池里官方订阅号的实测用量反推。未选档位的账号不会被调度——未标定就售卖等于超卖。',
       reclaudePlanTierPlaceholder: '请选择档位',

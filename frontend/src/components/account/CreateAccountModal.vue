@@ -1986,6 +1986,11 @@
             <input v-model="reclaudeForm.organizationUuid" type="text" class="input" />
             <p class="input-hint">{{ t('admin.accounts.reclaudeOrganizationUuidHint') }}</p>
           </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.reclaudeClaudeEmail') }}</label>
+            <input v-model="reclaudeForm.claudeEmail" type="text" class="input" />
+            <p class="input-hint">{{ t('admin.accounts.reclaudeClaudeEmailHint') }}</p>
+          </div>
         </div>
 
         <div>
@@ -4404,6 +4409,7 @@ const reclaudeForm = reactive<ReclaudeFormValues>({
   claudeUserId: '',
   accountUuid: '',
   organizationUuid: '',
+  claudeEmail: '',
   timezone: '',
   userEmail: '',
   planTier: '',

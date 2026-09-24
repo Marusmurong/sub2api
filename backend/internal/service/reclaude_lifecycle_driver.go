@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/google/uuid"
 )
 
@@ -84,6 +85,8 @@ func (d *ReclaudeLifecycleDriver) OnInference(
 		requests = append(requests, *event)
 	}
 
+	logger.LegacyPrintf("service.reclaude",
+		"lifecycle dispatch: account=%d requests=%d", account.ID, len(requests))
 	d.sender.SendAsync(account, proxyURL, requests)
 }
 

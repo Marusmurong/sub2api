@@ -23,6 +23,7 @@ function form(overrides: Partial<ReclaudeFormValues> = {}): ReclaudeFormValues {
     claudeUserId: 'c'.repeat(64),
     accountUuid: '9c67eb02-4001-4cde-a6e2-e40f1a71649e',
     organizationUuid: '47be3ed1-4b36-4bae-837d-40b5106369ec',
+    claudeEmail: 'claude-account@example.com',
     timezone: 'America/Los_Angeles',
     userEmail: 'owner@example.com',
     planTier: '20x',
@@ -165,5 +166,17 @@ describe('组织 UUID', () => {
     const credentials = buildReclaudeCredentials(form({ organizationUuid: '  ' }))
 
     expect('reclaude_organization_uuid' in credentials).toBe(false)
+  })
+})
+
+describe('底层 Claude 账号邮箱', () => {
+  it('填了就带上 —— 列表名称下方显示的是它', () => {
+    expect(buildReclaudeCredentials(form()).reclaude_claude_email)
+      .toBe('claude-account@example.com')
+  })
+
+  it('留空时不写入该键', () => {
+    expect('reclaude_claude_email' in buildReclaudeCredentials(form({ claudeEmail: '' })))
+      .toBe(false)
   })
 })

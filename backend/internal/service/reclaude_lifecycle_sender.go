@@ -134,6 +134,17 @@ func (s *ReclaudeLifecycleSender) sendOne(
 			spec.Method, spec.URL, account.ID, err)
 		return
 	}
+	// 🔴 成功路径也要留痕。此前这条链路**完全静默** —— 线上查「生命周期流量
+	// 有没有在发」只能看到 0 条日志，而 0 条既可能是「全部成功」，也可能是
+	// 「压根没触发」。两者的处置完全不同（2026-09-25 为此排查了一轮）。
+	// 配额计数器不能用来判断：合成流量成功时不走计费路径，从不计数。
+	status := 0
+	if resp != nil {
+		status = resp.StatusCode
+	}
+	logger.LegacyPrintf("service.reclaude",
+		"lifecycle sent: account=%d %s %s -> %d", account.ID, spec.Method, spec.URL, status)
+
 	if resp != nil && resp.Body != nil {
 		// 必须读完并关闭，否则连接不复用，反而制造额外 TCP 会话。
 		_, _ = io.Copy(io.Discard, resp.Body)

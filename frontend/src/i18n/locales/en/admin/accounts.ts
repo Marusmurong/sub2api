@@ -649,6 +649,8 @@ export default {
       reclaudeAccountUuidHint: 'The account UUID from the same ~/.claude.json. Together with the field above it determines metadata.user_id.',
       reclaudeOrganizationUuid: 'Organization UUID (optional)',
       reclaudeOrganizationUuidHint: 'oauthAccount.organizationUuid from ~/.claude.json. Required by the auth block of telemetry events; leave empty to skip telemetry events rather than fabricate a value.',
+      reclaudeClaudeEmail: 'Claude account email (optional)',
+      reclaudeClaudeEmailHint: 'oauthAccount.emailAddress from ~/.claude.json. Shown under the account name: it identifies which Claude account this device is bound to, which differs from the reclaude subscription email.',
       reclaudePlanTier: 'Plan tier',
       reclaudePlanTierHint: 'The tier sets the daily spend cap (USD), derived from observed usage of official subscription accounts in the pool. Accounts without a tier are never scheduled.',
       reclaudePlanTierPlaceholder: 'Select a tier',
