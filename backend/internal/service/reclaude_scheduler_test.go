@@ -50,6 +50,7 @@ func schedulerFixture(t *testing.T, granted bool, accounts ...*Account) (
 		&fakeReclaudeAccountLister{accounts: accounts},
 		store,
 		NewReclaudeHeartbeatRunner(probe),
+		nil, // 遥测上报器：调度测试只关心心跳节拍，nil 时上报被跳过
 		lock,
 		"instance-under-test",
 	)
@@ -150,6 +151,7 @@ func TestReclaudeScheduler_Robustness(t *testing.T) {
 			&fakeReclaudeAccountLister{err: context.DeadlineExceeded},
 			newFakeReclaudeAccountStore(),
 			NewReclaudeHeartbeatRunner(&recordingHeartbeatProbe{}),
+			nil,
 			&fakeLeaderLock{granted: true},
 			"instance",
 		)
@@ -159,7 +161,7 @@ func TestReclaudeScheduler_Robustness(t *testing.T) {
 
 	t.Run("依赖缺席时不 panic", func(t *testing.T) {
 		require.NotPanics(t, func() {
-			NewReclaudeScheduler(nil, nil, nil, nil, "").RunOnce(context.Background())
+			NewReclaudeScheduler(nil, nil, nil, nil, nil, "").RunOnce(context.Background())
 		})
 	})
 }

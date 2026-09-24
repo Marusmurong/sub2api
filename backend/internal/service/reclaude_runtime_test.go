@@ -58,7 +58,7 @@ func TestProvideReclaudeRuntime(t *testing.T) {
 }
 
 func TestReclaudeScheduler_Stop(t *testing.T) {
-	scheduler := NewReclaudeScheduler(nil, nil, nil, nil, "inst")
+	scheduler := NewReclaudeScheduler(nil, nil, nil, nil, nil, "inst")
 
 	scheduler.Start(context.Background())
 	scheduler.Stop()

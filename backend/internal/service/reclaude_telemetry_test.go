@@ -1,3 +1,5 @@
+//go:build unit
+
 package service
 
 import (
@@ -8,158 +10,192 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// 🔴 为什么必须发遥测（推翻早先"不发"的决定）。
-//
-// 逆向报告 §12.3 的理由是「遥测 opt-out（RECLAUDE_TELEMETRY_DISABLE 可关），
-// 服务端不可能把它作为 /proxy 的必要条件」。这个推理对**真客户端**成立，
-// 对我们不成立 —— 真客户端关了遥测就同时不发推理；而我们的形态是
-// **发了大量推理、遥测恒为零**：
-//
-//	网关侧：设备今天有 N 次 /proxy 记录（模型、耗时、token、成本俱全）
-//	遥测侧：该设备报告自己发了 0 次
-//
-// 这个矛盾无法用「用户关了遥测」解释，它精确指向「凭据被第三方程序使用」。
-// 2026-09-24 连续四台设备在不同条件下（VM/Mac/服务器、daemon 开关、单/双来源）
-// 全部被解绑，而这是唯一贯穿所有场景的共同点。
-func TestBuildReclaudeTelemetryPayload(t *testing.T) {
-	stats := ReclaudeTelemetryStats{
-		SuccessCount: 7,
-		FailureCount: 1,
-		Latencies: []time.Duration{
-			800 * time.Millisecond, 1200 * time.Millisecond, 3500 * time.Millisecond,
-		},
-		BytesIn:  4096,
-		BytesOut: 12288,
-		Edge:     "www.reclaude.ai",
-	}
+func telemetryAt(t *testing.T, iso string) time.Time {
+	t.Helper()
+	at, err := time.Parse(time.RFC3339, iso)
+	require.NoError(t, err)
+	return at
+}
 
-	t.Run("产出真客户端的三字段结构", func(t *testing.T) {
-		payload, err := BuildReclaudeTelemetryPayload(stats)
+func TestReclaudeTelemetryPayloadShape(t *testing.T) {
+	t.Run("顶层键与真值样本一致", func(t *testing.T) {
+		// ✅ ~/.reclaude/telemetry-pending.json 顶层只有这两个键。
+		raw, err := BuildReclaudeTelemetryPayload(nil)
 		require.NoError(t, err)
 
-		var decoded map[string]any
-		require.NoError(t, json.Unmarshal(payload, &decoded))
-		// 与 cli.telemetryUploadRequestWithLeak 对齐（逆向报告 §12）
-		require.Contains(t, decoded, "rollups")
-		require.Contains(t, decoded, "passthrough_hosts")
-		require.Contains(t, decoded, "passthrough_overflow")
+		var decoded map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(raw, &decoded))
+		require.ElementsMatch(t, []string{"rollups", "passthrough_hosts"}, keysOf(decoded))
 	})
 
-	t.Run("rollup 带成功/失败计数与 edge", func(t *testing.T) {
-		payload, _ := BuildReclaudeTelemetryPayload(stats)
+	t.Run("空集合序列化成 [] 而不是 null", func(t *testing.T) {
+		// null 在对端看来是「字段缺失」，空数组才是「没有数据」。
+		raw, err := BuildReclaudeTelemetryPayload(nil)
+		require.NoError(t, err)
+		require.JSONEq(t, `{"rollups":[],"passthrough_hosts":[]}`, string(raw))
+	})
+
+	t.Run("rollup 字段名逐字对齐真值", func(t *testing.T) {
+		raw, err := BuildReclaudeTelemetryPayload([]ReclaudeTelemetryRollup{{
+			WindowSecs:  ReclaudeTelemetryWindowSecs,
+			TTFTBuckets: make([]int, reclaudeTelemetryBucketCount),
+			DurBuckets:  make([]int, reclaudeTelemetryBucketCount),
+		}})
+		require.NoError(t, err)
+
 		var decoded struct {
-			Rollups []struct {
-				Success int    `json:"success"`
-				Failure int    `json:"failure"`
-				Edge    string `json:"edge"`
-			} `json:"rollups"`
+			Rollups []map[string]json.RawMessage `json:"rollups"`
 		}
-		require.NoError(t, json.Unmarshal(payload, &decoded))
+		require.NoError(t, json.Unmarshal(raw, &decoded))
 		require.Len(t, decoded.Rollups, 1)
-		require.Equal(t, 7, decoded.Rollups[0].Success)
-		require.Equal(t, 1, decoded.Rollups[0].Failure)
-		require.Equal(t, "www.reclaude.ai", decoded.Rollups[0].Edge)
+		require.ElementsMatch(t, []string{
+			"edge", "window_start_ms", "window_secs", "ttft_buckets", "dur_buckets",
+			"bytes_sum", "dur_ms_sum", "n", "ttft_n", "ok_n",
+			"fail_forward_n", "fail_write_n", "http_error_n",
+		}, keysOf(decoded.Rollups[0]))
 	})
 
-	t.Run("passthrough_hosts 为空数组而不是 null", func(t *testing.T) {
-		// 🔴 我们不做 MITM，本来就没有 passthrough 主机。但必须是 []
-		// 而不是 null —— 后者在对端解析时是"字段缺失"，与"没有数据"不同。
-		payload, _ := BuildReclaudeTelemetryPayload(stats)
+	t.Run("两个直方图都是定长 18", func(t *testing.T) {
+		collector := NewReclaudeTelemetryCollector()
+		at := telemetryAt(t, "2026-09-24T10:00:00Z")
+		collector.RecordAt(1, ReclaudeTelemetrySample{Outcome: ReclaudeOutcomeOk}, at)
 
-		require.Contains(t, string(payload), `"passthrough_hosts":[]`)
-	})
-
-	t.Run("零用量时不产出 rollup", func(t *testing.T) {
-		// 一个周期内没有请求就不该编一条 rollup 出来 ——
-		// 真客户端空闲时同样不产生数据点。
-		payload, err := BuildReclaudeTelemetryPayload(ReclaudeTelemetryStats{Edge: "x"})
-		require.NoError(t, err)
-
-		var decoded struct {
-			Rollups []any `json:"rollups"`
-		}
-		require.NoError(t, json.Unmarshal(payload, &decoded))
-		require.Empty(t, decoded.Rollups)
-	})
-
-	t.Run("时延分桶按真客户端的 18 档", func(t *testing.T) {
-		// 逆向报告 §12：TTFT/时延分桶各 18 档。档数不对是结构性差异。
-		payload, _ := BuildReclaudeTelemetryPayload(stats)
-		var decoded struct {
-			Rollups []struct {
-				LatencyBuckets []int `json:"latency_buckets"`
-			} `json:"rollups"`
-		}
-		require.NoError(t, json.Unmarshal(payload, &decoded))
-		require.Len(t, decoded.Rollups[0].LatencyBuckets, 18)
-
-		// 三个样本必须都落进桶里，一个不丢。
-		total := 0
-		for _, n := range decoded.Rollups[0].LatencyBuckets {
-			total += n
-		}
-		require.Equal(t, 3, total)
+		rollups := collector.DrainClosedWindows(1, at.Add(ReclaudeTelemetryInterval))
+		require.Len(t, rollups, 1)
+		require.Len(t, rollups[0].TTFTBuckets, 18)
+		require.Len(t, rollups[0].DurBuckets, 18)
 	})
 }
 
-// 用量采集器：按账号累计一个周期内的请求，上报后清零。
-func TestReclaudeTelemetryCollector(t *testing.T) {
-	t.Run("累计成功与失败", func(t *testing.T) {
-		c := NewReclaudeTelemetryCollector()
-		c.Record(7, true, 900*time.Millisecond, "www.reclaude.ai")
-		c.Record(7, true, 1200*time.Millisecond, "www.reclaude.ai")
-		c.Record(7, false, 300*time.Millisecond, "www.reclaude.ai")
+func keysOf[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
 
-		stats := c.Snapshot(7)
+// 真值样本里交叉验证过的三条不变式。
+func TestReclaudeTelemetryRollupInvariants(t *testing.T) {
+	at := telemetryAt(t, "2026-09-24T10:00:00Z")
+	collector := NewReclaudeTelemetryCollector()
 
-		require.Equal(t, 2, stats.SuccessCount)
-		require.Equal(t, 1, stats.FailureCount)
-		require.Len(t, stats.Latencies, 3)
-		require.Equal(t, "www.reclaude.ai", stats.Edge)
+	for _, sample := range []ReclaudeTelemetrySample{
+		{Outcome: ReclaudeOutcomeOk, TTFT: 600 * time.Millisecond, Duration: 2500 * time.Millisecond, Bytes: 100},
+		{Outcome: ReclaudeOutcomeOk, TTFT: 700 * time.Millisecond, Duration: 3000 * time.Millisecond, Bytes: 200},
+		{Outcome: ReclaudeOutcomeHTTPError, TTFT: 620 * time.Millisecond, Duration: 9 * time.Second, Bytes: 50},
+		{Outcome: ReclaudeOutcomeFailWrite, TTFT: 640 * time.Millisecond},
+		{Outcome: ReclaudeOutcomeFailForward},
+	} {
+		collector.RecordAt(7, sample, at)
+	}
+
+	rollups := collector.DrainClosedWindows(7, at.Add(ReclaudeTelemetryInterval))
+	require.Len(t, rollups, 1)
+	r := rollups[0]
+
+	t.Run("n 等于四个归类之和", func(t *testing.T) {
+		require.Equal(t, r.N, r.OkN+r.FailForwardN+r.FailWriteN+r.HTTPErrorN)
+		require.Equal(t, 5, r.N)
 	})
 
-	t.Run("账号之间互不串数", func(t *testing.T) {
-		// 串了会让 A 设备上报 B 设备的用量 —— 比不上报更糟。
-		c := NewReclaudeTelemetryCollector()
-		c.Record(1, true, time.Second, "a")
-		c.Record(2, true, time.Second, "b")
-
-		require.Equal(t, 1, c.Snapshot(1).SuccessCount)
-		require.Equal(t, 1, c.Snapshot(2).SuccessCount)
+	t.Run("sum(ttft_buckets) 等于 ttft_n", func(t *testing.T) {
+		require.Equal(t, r.TTFTN, sumInts(r.TTFTBuckets))
+		require.Equal(t, 4, r.TTFTN, "没测到 TTFT 的样本不计入")
 	})
 
-	t.Run("Snapshot 取走即清零", func(t *testing.T) {
-		// 不清零会让同一批请求被反复上报，累计数无限膨胀。
-		c := NewReclaudeTelemetryCollector()
-		c.Record(7, true, time.Second, "x")
-
-		require.Equal(t, 1, c.Snapshot(7).SuccessCount)
-		require.Equal(t, 0, c.Snapshot(7).SuccessCount)
+	t.Run("sum(dur_buckets) 等于 ok_n —— dur 只记成功请求", func(t *testing.T) {
+		require.Equal(t, r.OkN, sumInts(r.DurBuckets))
+		require.Equal(t, 2, r.OkN)
 	})
 
-	t.Run("没记录过的账号返回零值", func(t *testing.T) {
-		require.Equal(t, 0, NewReclaudeTelemetryCollector().Snapshot(99).SuccessCount)
+	t.Run("dur_ms_sum 不含失败请求的耗时", func(t *testing.T) {
+		// 那条 http_error 样本耗时 9s；算进去会变成 14500。
+		require.Equal(t, int64(5500), r.DurMsSum)
 	})
 
-	t.Run("并发写入不 panic", func(t *testing.T) {
-		// 转发路径是高并发的，采集器在热路径上。
-		c := NewReclaudeTelemetryCollector()
-		done := make(chan struct{})
-		for i := range 8 {
-			go func(n int) {
-				defer func() { done <- struct{}{} }()
-				for range 50 {
-					c.Record(int64(n%3), true, time.Millisecond, "x")
-				}
-			}(i)
+	t.Run("bytes_sum 含所有样本", func(t *testing.T) {
+		require.Equal(t, int64(350), r.BytesSum)
+	})
+}
+
+func sumInts(values []int) int {
+	total := 0
+	for _, v := range values {
+		total += v
+	}
+	return total
+}
+
+func TestReclaudeTelemetryWindowing(t *testing.T) {
+	t.Run("窗口起点对齐到 300 秒边界", func(t *testing.T) {
+		at := telemetryAt(t, "2026-09-24T10:07:13Z")
+		start := ReclaudeTelemetryWindowStartMs(at)
+		require.Equal(t, telemetryAt(t, "2026-09-24T10:05:00Z").UnixMilli(), start)
+		require.Zero(t, start%(ReclaudeTelemetryWindowSecs*1000))
+	})
+
+	t.Run("当前窗口不被取走", func(t *testing.T) {
+		// 🔴 提前上报会让同一个 window_start_ms 被报两次。
+		collector := NewReclaudeTelemetryCollector()
+		at := telemetryAt(t, "2026-09-24T10:07:13Z")
+		collector.RecordAt(1, ReclaudeTelemetrySample{Outcome: ReclaudeOutcomeOk}, at)
+
+		require.Empty(t, collector.DrainClosedWindows(1, at.Add(time.Minute)))
+		require.Len(t, collector.DrainClosedWindows(1, at.Add(ReclaudeTelemetryInterval)), 1)
+	})
+
+	t.Run("取走即清零，不会重复上报", func(t *testing.T) {
+		collector := NewReclaudeTelemetryCollector()
+		at := telemetryAt(t, "2026-09-24T10:00:00Z")
+		collector.RecordAt(1, ReclaudeTelemetrySample{Outcome: ReclaudeOutcomeOk}, at)
+		later := at.Add(ReclaudeTelemetryInterval)
+
+		require.Len(t, collector.DrainClosedWindows(1, later), 1)
+		require.Empty(t, collector.DrainClosedWindows(1, later))
+	})
+
+	t.Run("多个积压窗口按时间升序返回", func(t *testing.T) {
+		// 真客户端的积压文件里 rollup 严格按时间递增；map 迭代是乱序的。
+		collector := NewReclaudeTelemetryCollector()
+		base := telemetryAt(t, "2026-09-24T10:00:00Z")
+		for i := 0; i < 5; i++ {
+			collector.RecordAt(1, ReclaudeTelemetrySample{Outcome: ReclaudeOutcomeOk},
+				base.Add(time.Duration(i)*ReclaudeTelemetryInterval))
 		}
-		for range 8 {
-			<-done
+
+		rollups := collector.DrainClosedWindows(1, base.Add(5*ReclaudeTelemetryInterval))
+
+		require.Len(t, rollups, 5)
+		for i := 1; i < len(rollups); i++ {
+			require.Less(t, rollups[i-1].WindowStartMs, rollups[i].WindowStartMs)
 		}
-		total := 0
-		for id := range int64(3) {
-			total += c.Snapshot(id).SuccessCount
-		}
-		require.Equal(t, 400, total)
+	})
+
+	t.Run("账号之间互不串数据", func(t *testing.T) {
+		collector := NewReclaudeTelemetryCollector()
+		at := telemetryAt(t, "2026-09-24T10:00:00Z")
+		collector.RecordAt(1, ReclaudeTelemetrySample{Outcome: ReclaudeOutcomeOk}, at)
+		collector.RecordAt(2, ReclaudeTelemetrySample{Outcome: ReclaudeOutcomeHTTPError}, at)
+
+		later := at.Add(ReclaudeTelemetryInterval)
+		first := collector.DrainClosedWindows(1, later)
+		require.Len(t, first, 1)
+		require.Equal(t, 1, first[0].OkN)
+		require.Zero(t, first[0].HTTPErrorN)
+	})
+}
+
+func TestReclaudeTelemetryBucketing(t *testing.T) {
+	t.Run("超过最大上界落进溢出桶，不丢样本", func(t *testing.T) {
+		buckets := bucketizeReclaudeDurations([]time.Duration{10 * time.Minute})
+		require.Equal(t, 1, buckets[reclaudeTelemetryBucketCount-1])
+		require.Equal(t, 1, sumInts(buckets))
+	})
+
+	t.Run("零样本产出全零的定长数组而不是 nil", func(t *testing.T) {
+		buckets := bucketizeReclaudeDurations(nil)
+		require.Len(t, buckets, reclaudeTelemetryBucketCount)
+		require.Zero(t, sumInts(buckets))
 	})
 }

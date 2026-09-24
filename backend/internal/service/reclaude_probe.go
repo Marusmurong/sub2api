@@ -1,8 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/reclaude"
@@ -22,7 +24,6 @@ type ReclaudeGatewayProbe struct {
 	interceptETags *ReclaudeInterceptETagStore
 }
 
-// NewReclaudeGatewayProbe 构造探测器。
 // RememberInterceptETag 记下拦截清单的版本，供下次条件请求使用。
 func (p *ReclaudeGatewayProbe) RememberInterceptETag(accountID int64, etag string) {
 	if p == nil || p.interceptETags == nil {
@@ -31,9 +32,15 @@ func (p *ReclaudeGatewayProbe) RememberInterceptETag(accountID int64, etag strin
 	p.interceptETags.Remember(accountID, etag)
 }
 
-func NewReclaudeGatewayProbe(httpUpstream HTTPUpstream, cipher *ReclaudeCredentialCipher) *ReclaudeGatewayProbe {
+// NewReclaudeGatewayProbe 构造探测器。
+func NewReclaudeGatewayProbe(
+	httpUpstream HTTPUpstream, cipher *ReclaudeCredentialCipher,
+) *ReclaudeGatewayProbe {
 	return &ReclaudeGatewayProbe{
-		interceptETags: NewReclaudeInterceptETagStore(), httpUpstream: httpUpstream, cipher: cipher}
+		httpUpstream:   httpUpstream,
+		cipher:         cipher,
+		interceptETags: NewReclaudeInterceptETagStore(),
+	}
 }
 
 // ProbeReclaudeEndpoint 实现 ReclaudeEndpointProbe。
@@ -42,6 +49,26 @@ func NewReclaudeGatewayProbe(httpUpstream HTTPUpstream, cipher *ReclaudeCredenti
 // 在对端眼里就是「这台设备同时出现在两个地方」。
 func (p *ReclaudeGatewayProbe) ProbeReclaudeEndpoint(
 	ctx context.Context, account *Account, endpoint string,
+) (*http.Response, error) {
+	return p.doControlPlane(ctx, account, http.MethodGet, endpoint, nil)
+}
+
+// PostReclaudeTelemetry 上报一批 rollup。
+//
+// 与心跳共用 doControlPlane，因此**必然**走同一条住宅代理、同一套签名头、
+// 同一个强制 HTTP/1.1 的 transport。遥测从别的出口发出去，在对端眼里就是
+// 「这台设备同时出现在两个地方」—— 比不发遥测更糟。
+func (p *ReclaudeGatewayProbe) PostReclaudeTelemetry(
+	ctx context.Context, account *Account, payload []byte,
+) (*http.Response, error) {
+	return p.doControlPlane(ctx, account, http.MethodPost, ReclaudeTelemetryPath, payload)
+}
+
+// doControlPlane 组装并发出一次控制面请求。
+//
+// body 为 nil 即 GET 语义（签 sha256("")）。
+func (p *ReclaudeGatewayProbe) doControlPlane(
+	ctx context.Context, account *Account, method, endpoint string, body []byte,
 ) (*http.Response, error) {
 	if p == nil || p.httpUpstream == nil {
 		return nil, fmt.Errorf("reclaude probe: http upstream not configured")
@@ -72,9 +99,19 @@ func (p *ReclaudeGatewayProbe) ProbeReclaudeEndpoint(
 	reqCtx := WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileReclaude)
 	reqCtx = WithHTTPUpstreamPublicHostsOnly(reqCtx)
 
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, gatewayURL+endpoint, nil)
+	var payload io.Reader
+	if body != nil {
+		payload = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(reqCtx, method, gatewayURL+endpoint, payload)
 	if err != nil {
 		return nil, fmt.Errorf("reclaude probe: build request: %w", err)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+		// 显式设置：signControlPlaneRequest 签的是 body，而 content-length
+		// 与实际字节数对不上会让对端先于验签就拒掉。
+		req.ContentLength = int64(len(body))
 	}
 
 	// 🔴 控制面**只带 Authorization + 五个签名头**。
@@ -116,7 +153,7 @@ func (p *ReclaudeGatewayProbe) ProbeReclaudeEndpoint(
 	// 而 /health/ready 不需要 —— 于是建号自检表现为「第一步网关可达 ✓、
 	// 第二步凭据无效 ✗」，把一个缺签名的问题伪装成凭据问题。
 	// GET 没有 body，签的是 sha256("")，canonical 串格式与信封路径完全一致。
-	if err := p.signControlPlaneRequest(req, account); err != nil {
+	if err := p.signControlPlaneRequest(req, account, body); err != nil {
 		return nil, err
 	}
 
@@ -146,7 +183,12 @@ func accountIDOf(account *Account) int64 {
 
 // signControlPlaneRequest 给控制面请求补签名头（X-Reclaude-Ts / Nonce /
 // Body-Sha256 / Signature，以及由签名器统一写入的 Device-Id）。
-func (p *ReclaudeGatewayProbe) signControlPlaneRequest(req *http.Request, account *Account) error {
+//
+// body 为 nil 时签的是 sha256("")，与 GET 路径一致；POST 必须把**实际发出去
+// 的字节**传进来，签一份、发另一份等于自己给自己制造签名失败。
+func (p *ReclaudeGatewayProbe) signControlPlaneRequest(
+	req *http.Request, account *Account, body []byte,
+) error {
 	seedEncoded, err := p.cipher.DecryptSecret(account, CredKeyReclaudeSeed)
 	if err != nil {
 		return err
@@ -159,6 +201,5 @@ func (p *ReclaudeGatewayProbe) signControlPlaneRequest(req *http.Request, accoun
 	if err != nil {
 		return fmt.Errorf("reclaude probe: %w", err)
 	}
-	// GET 控制面请求没有 body。
-	return signer.AddControlPlaneSignatureHeaders(req.Header, nil)
+	return signer.AddControlPlaneSignatureHeaders(req.Header, body)
 }

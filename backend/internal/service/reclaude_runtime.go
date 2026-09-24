@@ -52,8 +52,15 @@ func ProvideReclaudeRuntime(
 	// 而「绑定邮箱变了」是一条独立的可见信号。
 	heartbeat.SetAccountObserver(actuator)
 
+	// 遥测：热路径采集 → 300 秒窗口 → 搭心跳的 tick 上报。
+	// 🔴 采集器必须与转发器**共用同一个实例**：各持一份的话，转发器记的样本
+	// 上报器永远取不到，遥测恒为空 —— 而「有推理、零遥测」正是要消除的矛盾。
+	telemetryCollector := NewReclaudeTelemetryCollector()
+	telemetry := NewReclaudeTelemetryReporter(probe, telemetryCollector)
+
 	quota := NewReclaudeQuotaGate(usageStore)
 	upstream := NewReclaudeUpstream(httpUpstream, cipher, events)
+	upstream.SetTelemetryCollector(telemetryCollector)
 	// 失败调用的按次记账在转发器里发生（那里才知道请求有没有真的出网）。
 	upstream.SetQuotaRecorder(quota)
 
@@ -62,7 +69,7 @@ func ProvideReclaudeRuntime(
 		QuotaGate:   quota,
 		SelfChecker: NewReclaudeSelfChecker(accounts, probe, upstream),
 		Scheduler: NewReclaudeScheduler(
-			accounts, accounts, heartbeat, lockCache, uuid.NewString()),
+			accounts, accounts, heartbeat, telemetry, lockCache, uuid.NewString()),
 	}
 }
 

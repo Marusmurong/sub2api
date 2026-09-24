@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -68,6 +69,7 @@ type ReclaudeUpstream struct {
 	cipher       *ReclaudeCredentialCipher
 	events       ReclaudeEventHandler
 	quota        ReclaudeUpstreamCallRecorder
+	telemetry    *ReclaudeTelemetryCollector
 }
 
 // ReclaudeUpstreamCallRecorder 记录一次上游调用的水位。
@@ -94,6 +96,29 @@ func (u *ReclaudeUpstream) SetQuotaRecorder(recorder ReclaudeUpstreamCallRecorde
 		return
 	}
 	u.quota = recorder
+}
+
+// SetTelemetryCollector 注入遥测采集器。
+//
+// 与 SetQuotaRecorder 同样用 setter：遥测是转发器的旁路，缺席时转发照常。
+func (u *ReclaudeUpstream) SetTelemetryCollector(collector *ReclaudeTelemetryCollector) {
+	if u == nil {
+		return
+	}
+	u.telemetry = collector
+}
+
+// recordTelemetry 记一次**已经出网**的调用。
+//
+// 与 recordFailedCall 的口径一致：建包阶段失败的请求没出网，不该出现在遥测里 ——
+// 遥测的用途恰恰是与对端的网关记录对账，多记等于自己制造对不上。
+func (u *ReclaudeUpstream) recordTelemetry(
+	account *Account, sample ReclaudeTelemetrySample, at time.Time,
+) {
+	if u == nil || u.telemetry == nil || account == nil {
+		return
+	}
+	u.telemetry.RecordAt(account.ID, sample, at)
 }
 
 // recordFailedCall 记一次**已经发出去**的失败调用。
@@ -200,12 +225,20 @@ func (u *ReclaudeUpstream) Do(inner *http.Request, account *Account, proxyURL st
 	// 它会被直接设成 MaxConnsPerHost，传 1 等于把推导出来的并发值一行作废。
 	// 排障用：落盘外层请求的完整头部取值（仅在调试环境变量配置时）。
 	dumpOutboundRequest(outer, traceID)
+	timer := newReclaudeCallTimer(time.Now())
 	resp, err := u.httpUpstream.DoWithTLS(outer, proxyURL, account.ID, account.Concurrency, nil)
 	if err != nil {
 		// 请求已经出网：对端可能已经扣了配额，必须记。
 		u.recordFailedCall(account)
+		// 没拿到响应头 ⇒ 没有 TTFT 可言，传 0 让它不计入 ttft_n
+		// （真值里 ttft_n 可以小于 n，编一个数会破坏这条关系）。
+		u.recordTelemetry(account, ReclaudeTelemetrySample{
+			Edge:    reclaudeEdgeLabel(gatewayURL),
+			Outcome: ReclaudeOutcomeFailForward,
+		}, time.Now())
 		return nil, fmt.Errorf("reclaude upstream transport: %w", err)
 	}
+	timer.markTTFT(time.Now())
 
 	synthesized, err := u.synthesizeResponse(resp, account)
 
@@ -241,7 +274,48 @@ func (u *ReclaudeUpstream) Do(inner *http.Request, account *Account, proxyURL st
 	if err != nil || synthesized == nil || synthesized.StatusCode >= http.StatusBadRequest {
 		u.recordFailedCall(account)
 	}
+
+	u.attachTelemetry(account, synthesized, timer, reclaudeEdgeLabel(gatewayURL), err != nil, status)
 	return synthesized, err
+}
+
+// attachTelemetry 给响应挂上计量，在流读完时结算这次调用。
+//
+// 🔴 失败路径**当场结算**，成功路径**等流结束**。真值里 dur 只统计成功请求
+// （sum(dur_buckets) == ok_n），而失败请求往往没有可读的流；
+// 两条路径用同一个时机结算，必然有一边的数字是编的。
+func (u *ReclaudeUpstream) attachTelemetry(
+	account *Account, synthesized *http.Response,
+	timer *reclaudeCallTimer, edge string, failed bool, status int,
+) {
+	if u == nil || u.telemetry == nil {
+		return
+	}
+
+	sample := ReclaudeTelemetrySample{Edge: edge, TTFT: timer.ttft}
+
+	if failed || synthesized == nil || status >= http.StatusBadRequest {
+		sample.Outcome = ReclaudeOutcomeHTTPError
+		if synthesized != nil && synthesized.ContentLength > 0 {
+			sample.Bytes = synthesized.ContentLength
+		}
+		u.recordTelemetry(account, sample, time.Now())
+		return
+	}
+	if synthesized.Body == nil {
+		sample.Outcome = ReclaudeOutcomeOk
+		sample.Duration = timer.elapsed(time.Now())
+		u.recordTelemetry(account, sample, time.Now())
+		return
+	}
+
+	synthesized.Body = newReclaudeMeasuredBody(synthesized.Body, func(bytes int64) {
+		now := time.Now()
+		sample.Outcome = ReclaudeOutcomeOk
+		sample.Duration = timer.elapsed(now)
+		sample.Bytes = bytes
+		u.recordTelemetry(account, sample, now)
+	})
 }
 
 // deviceSignerFor 解密凭据并构造签名器。
@@ -323,9 +397,12 @@ func buildReclaudeEnvelope(inner *http.Request, gatewayURL string) ([]byte, stri
 		Method:  inner.Method,
 		Headers: headers,
 		TraceID: traceID,
-		// 真实客户端恒发这两项（edge="unknown"、keepalive=true）。结构体上它们是
-		// omitempty，不显式赋值整个字段就从 JSON 里消失，信封形状与真值对不上。
-		Edge:      reclaudeEnvelopeEdge,
+		// 真实客户端恒发这两项。结构体上它们是 omitempty，不显式赋值整个字段
+		// 就从 JSON 里消失，信封形状与真值对不上。
+		//
+		// edge 按真实现查表（见 reclaudeEdgeLabel）：打主域时是 "unknown"，
+		// 打 route 节点时是 host 本身。**不要写死成任一个输出**。
+		Edge:      reclaudeEdgeLabel(gatewayURL),
 		Keepalive: true,
 	}, body)
 	if err != nil {
@@ -333,24 +410,6 @@ func buildReclaudeEnvelope(inner *http.Request, gatewayURL string) ([]byte, stri
 	}
 	return envelope, traceID, nil
 }
-
-// reclaudeEnvelopeEdge 是信封 meta 的 edge 字段取值。
-//
-// 🔴 恒为 "unknown" —— 这是**撤回 2026-09-24 一次错误改动**后的结论。
-//
-// 真客户端的 computeEdgeLabel（📄 反编译）是一次 **map 查表**：
-//
-//	u := url.Parse(gatewayURL)
-//	if _, ok := knownEdges[u.Host]; ok { return u.Host }
-//	return "unknown"
-//
-// 那张表里装的是 route 节点，而 login 拿到的默认 gateway（www.reclaude.ai）
-// 不在其中。✅ 实测佐证：reclaude-lab/sink/dump 的 **26/26 条真实信封
-// edge 全是 "unknown"**。
-//
-// 当天我据一条 daemon 指向本地 sink 时的样本，把它改成了动态取主机名 ——
-// 那个样本不是常态，改动方向是错的，现已撤回。
-const reclaudeEnvelopeEdge = "unknown"
 
 // buildProxyRequest 组装打给 /proxy 的外层请求。
 func (u *ReclaudeUpstream) buildProxyRequest(

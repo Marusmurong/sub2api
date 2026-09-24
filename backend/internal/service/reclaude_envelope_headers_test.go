@@ -93,16 +93,27 @@ func extractReclaudeEnvelopeMetaForTest(t *testing.T, envelope []byte) map[strin
 //
 // 当天我据一条 daemon 指向本地 sink 时的样本把它改成了动态主机名 ——
 // 那不是常态，方向是错的。这条测试钉住撤回后的行为。
-func TestReclaudeEnvelopeEdgeIsAlwaysUnknown(t *testing.T) {
-	for _, gateway := range []string{
-		"https://www.reclaude.ai",
-		"https://la.route.reclaude.ai",
-		"",
+// 信封 edge 跟随网关 host 查表，不是常量。
+//
+// 这个测试此前叫 ...IsAlwaysUnknown 并断言「三种 gateway 下恒为 unknown」——
+// 那是把**一个输出**当成了规则。真客户端自己落盘的遥测里 edge 是
+// "asia.route.reclaude.ai"，证明查表会命中；26/26 条 unknown 只是因为那批
+// 样本打的是主域/本地 sink。
+func TestReclaudeEnvelopeEdgeFollowsGatewayHost(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		gateway string
+		want    string
+	}{
+		{"主域不在表里", "https://www.reclaude.ai", `"edge":"unknown"`},
+		{"route 节点命中", "https://la.route.reclaude.ai", `"edge":"la.route.reclaude.ai"`},
+		{"空网关", "", `"edge":"unknown"`},
 	} {
-		envelope, _, err := buildReclaudeEnvelope(newInnerForEdgeTest(t), gateway)
-		require.NoError(t, err)
-		require.Contains(t, string(envelope), `"edge":"unknown"`,
-			"gateway %q 下 edge 应恒为 unknown", gateway)
+		t.Run(tc.name, func(t *testing.T) {
+			envelope, _, err := buildReclaudeEnvelope(newInnerForEdgeTest(t), tc.gateway)
+			require.NoError(t, err)
+			require.Contains(t, string(envelope), tc.want)
+		})
 	}
 }
 

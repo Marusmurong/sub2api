@@ -24,6 +24,7 @@ type ReclaudeScheduler struct {
 	lister     ReclaudeAccountLister
 	store      ReclaudeAccountStore
 	heartbeat  *ReclaudeHeartbeatRunner
+	telemetry  *ReclaudeTelemetryReporter
 	lockCache  LeaderLockCache
 	instanceID string
 
@@ -38,6 +39,7 @@ func NewReclaudeScheduler(
 	lister ReclaudeAccountLister,
 	store ReclaudeAccountStore,
 	heartbeat *ReclaudeHeartbeatRunner,
+	telemetry *ReclaudeTelemetryReporter,
 	lockCache LeaderLockCache,
 	instanceID string,
 ) *ReclaudeScheduler {
@@ -45,6 +47,7 @@ func NewReclaudeScheduler(
 		lister:     lister,
 		store:      store,
 		heartbeat:  heartbeat,
+		telemetry:  telemetry,
 		lockCache:  lockCache,
 		instanceID: instanceID,
 	}
@@ -159,4 +162,11 @@ func (s *ReclaudeScheduler) tickAccount(ctx context.Context, account *Account, a
 	if err := s.heartbeat.BeatAt(ctx, account, at); err != nil {
 		logger.LegacyPrintf("service.reclaude", "heartbeat failed: %v", err)
 	}
+
+	// 遥测搭在同一次 tick 上（上报器内部按 300 秒窗口自己决定发不发）。
+	// 🔴 刻意不给它单独的 ticker 与 leader 锁：两次独立选主可能落在不同副本，
+	// 同一台「设备」的控制面请求就会从两个出口发出去。
+	// 心跳失败也继续上报 —— 遥测的价值恰恰在于「有推理就有遥测」这条对账关系，
+	// 因一次心跳失败而跳过，等于在对端那里留下一个无法解释的空窗。
+	s.telemetry.ReportAt(ctx, account, at)
 }

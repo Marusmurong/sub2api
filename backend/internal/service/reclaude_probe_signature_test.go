@@ -38,7 +38,7 @@ func TestProbeControlPlaneRequestIsSigned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := probe.signControlPlaneRequest(req, account); err != nil {
+	if err := probe.signControlPlaneRequest(req, account, nil); err != nil {
 		t.Fatalf("签名失败: %v", err)
 	}
 
