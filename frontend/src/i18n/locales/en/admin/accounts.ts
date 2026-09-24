@@ -647,6 +647,8 @@ export default {
       reclaudeClaudeUserIdHint: 'The userID from ~/.claude.json on the machine that logged in (64 hex). rec identifies the device by it; a wrong or missing value is rejected as a client state error.',
       reclaudeAccountUuid: 'Account UUID',
       reclaudeAccountUuidHint: 'The account UUID from the same ~/.claude.json. Together with the field above it determines metadata.user_id.',
+      reclaudeOrganizationUuid: 'Organization UUID (optional)',
+      reclaudeOrganizationUuidHint: 'oauthAccount.organizationUuid from ~/.claude.json. Required by the auth block of telemetry events; leave empty to skip telemetry events rather than fabricate a value.',
       reclaudePlanTier: 'Plan tier',
       reclaudePlanTierHint: 'The tier sets the daily spend cap (USD), derived from observed usage of official subscription accounts in the pool. Accounts without a tier are never scheduled.',
       reclaudePlanTierPlaceholder: 'Select a tier',

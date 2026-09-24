@@ -22,6 +22,7 @@ function form(overrides: Partial<ReclaudeFormValues> = {}): ReclaudeFormValues {
     deviceHostname: 'MBP-Dev',
     claudeUserId: 'c'.repeat(64),
     accountUuid: '9c67eb02-4001-4cde-a6e2-e40f1a71649e',
+    organizationUuid: '47be3ed1-4b36-4bae-837d-40b5106369ec',
     timezone: 'America/Los_Angeles',
     userEmail: 'owner@example.com',
     planTier: '20x',
@@ -149,5 +150,20 @@ describe('reclaude 套餐档位', () => {
     const extra = buildReclaudeExtra({ ...form(), planTier: '20x-carpool-4' })
 
     expect(extra[RECLAUDE_PLAN_TIER_EXTRA_KEY]).toBe('20x-carpool-4')
+  })
+})
+
+describe('组织 UUID', () => {
+  it('填了就带上 —— 遥测事件的 auth 块需要它', () => {
+    const credentials = buildReclaudeCredentials(form())
+
+    expect(credentials.reclaude_organization_uuid).toBe('47be3ed1-4b36-4bae-837d-40b5106369ec')
+  })
+
+  it('留空时不写入该键，而不是写空串', () => {
+    // 后端据「缺失」决定整批不发遥测；空串会被当成一个真实但错误的值。
+    const credentials = buildReclaudeCredentials(form({ organizationUuid: '  ' }))
+
+    expect('reclaude_organization_uuid' in credentials).toBe(false)
   })
 })

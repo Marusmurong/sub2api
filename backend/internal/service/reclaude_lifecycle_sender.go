@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -100,8 +101,12 @@ func (s *ReclaudeLifecycleSender) sendOne(
 ) {
 	// 🔴 打上合成标记：没有它，这条请求进 Do 之后又会触发一批新的合成流量，
 	// 指数爆炸。见 WithReclaudeSynthetic 的注释。
+	var payload io.Reader = http.NoBody
+	if len(spec.Body) > 0 {
+		payload = bytes.NewReader(spec.Body)
+	}
 	req, err := http.NewRequestWithContext(
-		WithReclaudeSynthetic(ctx), spec.Method, spec.URL, http.NoBody)
+		WithReclaudeSynthetic(ctx), spec.Method, spec.URL, payload)
 	if err != nil {
 		logger.LegacyPrintf("service.reclaude",
 			"lifecycle request build failed (%s): %v", spec.URL, err)
@@ -114,6 +119,11 @@ func (s *ReclaudeLifecycleSender) sendOne(
 	}
 	if spec.NeedsAuthorization {
 		setHeaderRaw(req.Header, "authorization", "Bearer "+sk)
+	}
+	if len(spec.Body) > 0 {
+		// 装箱时 content-length 由 buildReclaudeEnvelope 按实际字节写入，
+		// 这里设 ContentLength 是为了让它读得到真实长度。
+		req.ContentLength = int64(len(spec.Body))
 	}
 
 	resp, err := s.forwarder.Do(req, account, proxyURL)

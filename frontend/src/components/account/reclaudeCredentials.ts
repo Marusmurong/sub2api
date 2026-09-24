@@ -43,6 +43,8 @@ export interface ReclaudeFormValues {
   deviceHostname: string
   claudeUserId: string
   accountUuid: string
+  /** 组织 UUID（~/.claude.json 的 oauthAccount.organizationUuid）。遥测事件必需。 */
+  organizationUuid: string
   timezone: string
   userEmail: string
   planTier: string
@@ -162,6 +164,13 @@ export function buildReclaudeCredentials(values: ReclaudeFormValues): Record<str
     reclaude_account_uuid: values.accountUuid.trim()
   }
 
+  // 组织 UUID：遥测事件的 auth 块必带。
+  // 🔴 缺它时后端**整批不发遥测**（不编造），所以留空是安全的降级，
+  // 而不是错误 —— 见后端 BuildReclaudeEventBatch。
+  if (values.organizationUuid.trim() !== '') {
+    credentials.reclaude_organization_uuid = values.organizationUuid.trim()
+  }
+
   // 时区决定「模拟关机」作息的生成，留空则后端按默认时区生成。
   if (values.timezone.trim() !== '') {
     credentials.reclaude_timezone = values.timezone.trim()
@@ -233,6 +242,8 @@ export interface ReclaudeBundle {
   // 的 userID（64 位 hex，发在 body 里）。
   reclaude_claude_user_id: string
   reclaude_account_uuid: string
+  /** 组织 UUID。缺失时后端不发遥测事件（不编造），因此不列入必填。 */
+  reclaude_organization_uuid?: string
   reclaude_timezone?: string
   reclaude_user_email?: string
 }
@@ -299,6 +310,7 @@ export function parseReclaudeBundle(raw: string): ReclaudeParseResult {
       deviceHostname: text('reclaude_device_hostname'),
       claudeUserId: text('reclaude_claude_user_id'),
       accountUuid: text('reclaude_account_uuid'),
+      organizationUuid: text('reclaude_organization_uuid'),
       timezone: text('reclaude_timezone'),
       userEmail: text('reclaude_user_email')
     }

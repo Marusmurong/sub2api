@@ -204,7 +204,7 @@ func (u *ReclaudeUpstream) Do(inner *http.Request, account *Account, proxyURL st
 	// 自己就会发这些，我们再补一份就成了双份。
 	//
 	// 🔴 合成请求自己不能再触发合成（IsReclaudeSynthetic），否则指数爆炸。
-	u.lifecycle.OnInference(inner.Context(), account, proxyURL)
+	u.lifecycle.OnInference(inner.Context(), account, proxyURL, reclaudeRequestModel(inner))
 
 	// daemon 模式：本机真客户端负责封信封与签名，我们只做 CC 伪装。
 	//

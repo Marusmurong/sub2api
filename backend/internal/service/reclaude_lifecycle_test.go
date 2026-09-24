@@ -17,6 +17,7 @@ type recordedLifecycleCall struct {
 	method  string
 	url     string
 	headers http.Header
+	body    []byte
 }
 
 type recordingLifecycleForwarder struct {
@@ -28,9 +29,14 @@ type recordingLifecycleForwarder struct {
 func (f *recordingLifecycleForwarder) Do(
 	inner *http.Request, _ *Account, _ string,
 ) (*http.Response, error) {
+	var body []byte
+	if inner.Body != nil {
+		body, _ = io.ReadAll(inner.Body)
+	}
 	f.mu.Lock()
 	f.calls = append(f.calls, recordedLifecycleCall{
-		method: inner.Method, url: inner.URL.String(), headers: inner.Header.Clone(),
+		method: inner.Method, url: inner.URL.String(),
+		headers: inner.Header.Clone(), body: body,
 	})
 	f.mu.Unlock()
 	if f.err != nil {

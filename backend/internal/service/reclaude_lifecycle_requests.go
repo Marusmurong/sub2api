@@ -39,6 +39,10 @@ type ReclaudeLifecycleRequest struct {
 	// 🔴 mcp-registry 真值里**没有** authorization 头，却带 x-organization-uuid。
 	// 给它补上 Authorization 是「照着别的请求抄」的直接特征。
 	NeedsAuthorization bool
+	// Body 是请求体；为 nil 即 GET 语义。
+	//
+	// 🔴 必须与签名覆盖的字节完全一致 —— 签一份发另一份等于自造签名失败。
+	Body []byte
 	// Delay 是相对会话起点的发送时刻，用来复刻真值的时序。
 	Delay time.Duration
 }
@@ -204,4 +208,28 @@ func reclaudeClientVersionOr(clientVersion string) string {
 	}
 	// 建号表单里可能填成 "v1.4.0"；UA 里真值不带 v 前缀。
 	return strings.TrimPrefix(trimmed, "v")
+}
+
+// BuildReclaudeEventLoggingRequest 把一批事件包成一条内层请求。
+//
+// ✅ 头逐字对齐真值：UA 是 claude-code/<version>（**不是** claude-cli），
+// 另有 x-service-name 与 anthropic-beta —— 这条路径在真客户端里由
+// 遥测模块发出，与 CLI 本体的请求分属不同代码路径，头也因此不同。
+func BuildReclaudeEventLoggingRequest(
+	clientVersion string, body []byte, delay time.Duration,
+) ReclaudeLifecycleRequest {
+	headers := reclaudeBootstrapAcceptHeaders()
+	headers["user-agent"] = reclaudeInnerUAClaudeCode(clientVersion)
+	headers["content-type"] = "application/json"
+	headers["anthropic-beta"] = "oauth-2025-04-20"
+	headers["x-service-name"] = "claude-code"
+
+	return ReclaudeLifecycleRequest{
+		Method:             "POST",
+		URL:                ReclaudeEventLoggingPath,
+		Headers:            headers,
+		Body:               body,
+		NeedsAuthorization: true,
+		Delay:              delay,
+	}
 }

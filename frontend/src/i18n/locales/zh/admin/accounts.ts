@@ -764,6 +764,8 @@ export default {
       reclaudeClaudeUserIdHint: '登录那台机器 ~/.claude.json 的 userID（64 位 hex）。rec 按它识别设备，填错或缺失会被拒为「客户端状态异常」。',
       reclaudeAccountUuid: '账号 UUID',
       reclaudeAccountUuidHint: '同一份 ~/.claude.json 里的账号 UUID。与上一项一起决定 metadata.user_id。',
+      reclaudeOrganizationUuid: '组织 UUID（可选）',
+      reclaudeOrganizationUuidHint: '~/.claude.json 里 oauthAccount.organizationUuid。遥测事件的 auth 块需要它；留空则不发遥测事件（不会编造假值）。',
       reclaudePlanTier: '套餐档位',
       reclaudePlanTierHint: '档位决定日消费上限（美元），由号池里官方订阅号的实测用量反推。未选档位的账号不会被调度——未标定就售卖等于超卖。',
       reclaudePlanTierPlaceholder: '请选择档位',

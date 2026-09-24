@@ -23,6 +23,17 @@ const (
 	// 早期实现以为「reclaude 不给我们这个值」而一律用合成 UUID，那是错的 ——
 	// 逆向报告 §9 的 pollResponse 里就有 AccountUUID，真实信封里也是这个真值。
 	CredKeyReclaudeAccountUUID = "reclaude_account_uuid"
+
+	// CredKeyReclaudeOrganizationUUID 是 Claude 组织 UUID。
+	//
+	// ✅ 真值：event_logging 每个事件的 `auth.organization_uuid`，
+	// 以及 mcp-registry 请求的 `x-organization-uuid` 头。
+	//
+	// 🔴 它**只出现在客户端自己产生的请求里**，网关从不下发 ——
+	// 只能在建号时从真机采集（`~/.claude.json` 的 oauthAccount）。
+	// 缺失时**不发遥测事件**，绝不编造：org UUID 与账号的归属关系
+	// 对端一查就知道，编一个等于主动提供一条矛盾证据。
+	CredKeyReclaudeOrganizationUUID = "reclaude_organization_uuid"
 )
 
 // claudeUserIDPattern 是 Claude Code userID 的形态：sha256 的 64 位小写 hex。
