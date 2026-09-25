@@ -64,15 +64,21 @@ func overrideReclaudeStainlessHeaders(headers map[string]string, account *Accoun
 
 // reclaudeInnerBetaHeader 是 reclaude 出站 /v1/messages 的 anthropic-beta。
 //
-// ✅ 基于真客户端 2.1.280 抓包 18 token(逐字逐序)，**剔除 2 个 fallback 相关**:
+// ✅ 基于真客户端 **2.1.282** 抓包(2026-09-26 同机存活抓包,12/12 真 /v1/messages
+// 逐字逐序一致),**剔除 2 个 fallback 相关**:
 //   - server-side-fallback-2026-06-01  ← 我们删了 body.fallbacks,不能声称支持
 //   - fallback-credit-2026-06-01       ← 同上,信用消费红线
 //
-// 剩 16 token。⚠️ 随 claude-cli 版本漂移,抬版本按新抓包重核。
+// 🔴 2026-09-26 第八次撤销排查修正(相对 2.1.280 校准的两处漂移):
+//   - **去掉 context-1m-2025-08-07**:真客户端非 1M 请求 0/12 发(它是 1M 上下文
+//     专属,恒发反而声称一个本请求不用的能力)。
+//   - **加上 advisor-tool-2026-03-01**:真客户端 2.1.282 恒发(12/12),此前缺失。
+//
+// 剩 16 token。⚠️ 这仍是硬编码,随 claude-cli 版本漂移;根治办法是透传下游真 CC 的
+// 原始 beta(见排查记录),此处是点位止血。抬版本必按新抓包逐序重核。
 var reclaudeInnerBetaHeader = strings.Join([]string{
 	"claude-code-20250219",
 	"oauth-2025-04-20",
-	"context-1m-2025-08-07",
 	"interleaved-thinking-2025-05-14",
 	"thinking-token-count-2026-05-13",
 	"context-management-2025-06-27",
@@ -80,6 +86,7 @@ var reclaudeInnerBetaHeader = strings.Join([]string{
 	"mid-conversation-system-2026-04-07",
 	"per-turn-control-2026-07-01",
 	"mid-conversation-tool-changes-2026-07-01",
+	"advisor-tool-2026-03-01",
 	"advanced-tool-use-2025-11-20",
 	"mid-conversation-system-clear-at-2026-08-21",
 	"effort-2025-11-24",
