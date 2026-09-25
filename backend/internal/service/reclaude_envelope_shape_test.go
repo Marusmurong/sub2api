@@ -31,7 +31,7 @@ func TestBuildReclaudeEnvelope_MatchesRealClientShape(t *testing.T) {
 	inner.Header.Set("Content-Type", "application/json")
 	inner.Header.Set("User-Agent", "claude-cli/2.1.280 (external, cli)")
 
-	envelope, traceID, err := buildReclaudeEnvelope(inner, "https://www.reclaude.ai")
+	envelope, traceID, err := buildReclaudeEnvelope(inner, "https://www.reclaude.ai", nil)
 	if err != nil {
 		t.Fatalf("build envelope: %v", err)
 	}

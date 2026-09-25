@@ -25,14 +25,14 @@ func TestBuildReclaudeEnvelopeIncludesRequiredClientHeaders(t *testing.T) {
 	}
 
 	t.Run("补齐 x-claude-code-request-class", func(t *testing.T) {
-		envelope, _, err := buildReclaudeEnvelope(newInner(), "https://www.reclaude.ai")
+		envelope, _, err := buildReclaudeEnvelope(newInner(), "https://www.reclaude.ai", nil)
 
 		require.NoError(t, err)
 		require.Contains(t, string(envelope), `"x-claude-code-request-class":"main"`)
 	})
 
 	t.Run("补齐 x-client-request-id 且是 uuid", func(t *testing.T) {
-		envelope, _, err := buildReclaudeEnvelope(newInner(), "https://www.reclaude.ai")
+		envelope, _, err := buildReclaudeEnvelope(newInner(), "https://www.reclaude.ai", nil)
 
 		require.NoError(t, err)
 		require.Contains(t, string(envelope), `"x-client-request-id":"`)
@@ -44,9 +44,9 @@ func TestBuildReclaudeEnvelopeIncludesRequiredClientHeaders(t *testing.T) {
 
 	t.Run("每次请求的 x-client-request-id 都不同", func(t *testing.T) {
 		// 固定值等于给所有请求盖同一个戳，是最直接的同源特征。
-		first, _, err := buildReclaudeEnvelope(newInner(), "https://www.reclaude.ai")
+		first, _, err := buildReclaudeEnvelope(newInner(), "https://www.reclaude.ai", nil)
 		require.NoError(t, err)
-		second, _, err := buildReclaudeEnvelope(newInner(), "https://www.reclaude.ai")
+		second, _, err := buildReclaudeEnvelope(newInner(), "https://www.reclaude.ai", nil)
 		require.NoError(t, err)
 
 		m1 := extractReclaudeEnvelopeMetaForTest(t, first)
@@ -62,7 +62,7 @@ func TestBuildReclaudeEnvelopeIncludesRequiredClientHeaders(t *testing.T) {
 		inner.Header.Set("x-claude-code-request-class", "background")
 		inner.Header.Set("x-client-request-id", "11111111-2222-3333-4444-555555555555")
 
-		envelope, _, err := buildReclaudeEnvelope(inner, "https://www.reclaude.ai")
+		envelope, _, err := buildReclaudeEnvelope(inner, "https://www.reclaude.ai", nil)
 
 		require.NoError(t, err)
 		meta := extractReclaudeEnvelopeMetaForTest(t, envelope)
@@ -110,7 +110,7 @@ func TestReclaudeEnvelopeEdgeFollowsGatewayHost(t *testing.T) {
 		{"空网关", "", `"edge":"unknown"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			envelope, _, err := buildReclaudeEnvelope(newInnerForEdgeTest(t), tc.gateway)
+			envelope, _, err := buildReclaudeEnvelope(newInnerForEdgeTest(t), tc.gateway, nil)
 			require.NoError(t, err)
 			require.Contains(t, string(envelope), tc.want)
 		})

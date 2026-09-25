@@ -165,8 +165,11 @@ func TestReclaudeEndToEnd(t *testing.T) {
 		defer func() { _ = resp.Body.Close() }()
 
 		require.Equal(t, "https://api.anthropic.com/v1/messages", gateway.seenRequest.URL)
-		require.Equal(t, "claude-cli/2.1.263 (external, cli)", gateway.seenRequest.Headers["user-agent"],
-			"内层 header 的取值是 CC 伪装的产物，不能被改动")
+		// 🔴 UA 后缀被改成 sdk-cli：真客户端 /v1/messages 内层是
+		// (external, sdk-cli)，CC 伪装默认 (external, cli)。第六次撤销复盘确认
+		// 这是与真客户端的可判别差异之一，reclaude 出站必须对齐（见
+		// overrideReclaudeStainlessHeaders）。版本段不变。
+		require.Equal(t, "claude-cli/2.1.263 (external, sdk-cli)", gateway.seenRequest.Headers["user-agent"])
 		require.JSONEq(t, `{"model":"claude"}`, string(gateway.seenInnerBody))
 	})
 

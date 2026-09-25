@@ -41,7 +41,7 @@ func TestReclaudeInnerAuthorizationSingleLowercaseKey(t *testing.T) {
 	}
 
 	// 装箱后同样只能剩一项，且是 SK。
-	envelope, _, err := buildReclaudeEnvelope(inner, "https://www.reclaude.ai")
+	envelope, _, err := buildReclaudeEnvelope(inner, "https://www.reclaude.ai", nil)
 	if err != nil {
 		t.Fatalf("build envelope: %v", err)
 	}

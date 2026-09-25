@@ -152,7 +152,8 @@ func TestReclaudeUpstream_Do_Request(t *testing.T) {
 		for name := range meta.Headers {
 			require.Equal(t, strings.ToLower(name), name, "header %q 没有小写化", name)
 		}
-		require.Equal(t, "claude-cli/2.1.263 (external, cli)", meta.Headers["user-agent"])
+		// UA 后缀对齐真客户端 sdk-cli（见 overrideReclaudeStainlessHeaders）。
+		require.Equal(t, "claude-cli/2.1.263 (external, sdk-cli)", meta.Headers["user-agent"])
 
 		body := upstream.gotBody[reclaude.EnvelopeLengthPrefixBytes+metaLen:]
 		require.JSONEq(t, `{"model":"claude"}`, string(body))

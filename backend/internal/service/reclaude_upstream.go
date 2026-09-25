@@ -226,7 +226,7 @@ func (u *ReclaudeUpstream) Do(inner *http.Request, account *Account, proxyURL st
 		return u.doViaDaemon(inner, account, daemonProxy)
 	}
 
-	envelope, traceID, err := buildReclaudeEnvelope(inner, gatewayURL)
+	envelope, traceID, err := buildReclaudeEnvelope(inner, gatewayURL, account)
 	if err != nil {
 		return nil, err
 	}
@@ -363,7 +363,7 @@ func (u *ReclaudeUpstream) deviceSignerFor(account *Account) (*reclaude.DeviceSi
 //
 // 请求体必须完整 buffer：签名覆盖的是整个信封的 sha256，没法 chunked 流式上传。
 // 对 /v1/messages 无影响（请求体小）。响应侧仍然是流式的。
-func buildReclaudeEnvelope(inner *http.Request, gatewayURL string) ([]byte, string, error) {
+func buildReclaudeEnvelope(inner *http.Request, gatewayURL string, account *Account) ([]byte, string, error) {
 	var body []byte
 	if inner.Body != nil {
 		read, err := io.ReadAll(inner.Body)
@@ -382,6 +382,19 @@ func buildReclaudeEnvelope(inner *http.Request, gatewayURL string) ([]byte, stri
 		// 对端要求全小写。内层 header 的**取值**一个字不改 —— 那是 CC 伪装的产物。
 		headers[strings.ToLower(name)] = values[0]
 	}
+
+	// 🔴 用真机指纹覆盖 x-stainless-os/arch/runtime-version（第六次撤销根因）。
+	//
+	// CC 伪装（applyClaudeCodeMimicHeaders）给所有 OAuth 账号无差别注入
+	// x-stainless-os=MacOS —— 那是**给 Anthropic 上游选的**（23 样本 0 个 Linux，
+	// 避免独特化）。但 reclaude 网关不是 Anthropic：真客户端的 x-stainless-os 由
+	// claude-cli SDK 运行时读 process.platform 现算，**恒等于真机 OS**
+	// （反编译到函数体 + 7/7 抓包印证），且登录 /auth/start 已把真机 os/arch
+	// 落库。给 Anthropic 的 MacOS 装进 reclaude 信封内层，就是「同一设备内层报
+	// Mac、登录档案报 Linux」的自相矛盾 —— 没有任何合理解释的一枪毙命信号。
+	//
+	// 只在这里覆盖：Anthropic 直连路径完全不经过这里，其 MacOS 伪装原样保留。
+	overrideReclaudeStainlessHeaders(headers, account)
 
 	// 🔴 host / content-length 必须显式补进去。
 	//
