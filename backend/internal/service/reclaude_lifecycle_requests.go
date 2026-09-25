@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -81,7 +82,25 @@ func reclaudeBootstrapAcceptHeaders() map[string]string {
 //
 // mcp_servers 重复四次是真值 —— Claude Code 在启动过程中确实反复拉它
 // （不同阶段各拉一次）。抹平成一次反而与真值不符。
-func BuildReclaudeBootstrapRequests(clientVersion string) []ReclaudeLifecycleRequest {
+//
+// 🔴 2026-09-26 第八次撤销排查后补齐 **CLI 启动三件套**（claude_cli/bootstrap、
+// oauth/organizations/{org}/skills/list-skills、oauth/account/settings）——同机存活
+// 真客户端抓包里每次启动必发，此前 sub2api 全缺。它们是"真 CLI 在这台设备启动过"
+// 的印证流量，收敛的撤销根因（会话段缺 CLI 印证）指向补齐它们。形状逐字段照抄
+// docs/captures/reclaude-live-2026-09-26。
+type ReclaudeBootstrapParams struct {
+	// CLIVersion 是 **claude-cli** 版本（machine_env.cli_version，如 2.1.282）。
+	// 🔴 内层 claude-cli/claude-code UA 必须用它,不是 reclaude 包装器版本(v1.4.0)——
+	// 抓包实证真客户端全是 claude-cli/2.1.282,而旧代码误用 reclaude 版本发成
+	// claude-cli/1.4.0(不存在的版本,每条合成请求都在自曝)。
+	CLIVersion string
+	// OrgUUID 是 reclaude_organization_uuid,给 organizations/skills 端点;空则跳过该条。
+	OrgUUID string
+	// Model 是本次推理模型,进 claude_cli/bootstrap 的 model 参数;空则省略该参数。
+	Model string
+}
+
+func BuildReclaudeBootstrapRequests(p ReclaudeBootstrapParams) []ReclaudeLifecycleRequest {
 	axios := func(url string, delay time.Duration, beta string) ReclaudeLifecycleRequest {
 		headers := reclaudeBootstrapAcceptHeaders()
 		headers["user-agent"] = reclaudeInnerUAAxios
@@ -117,7 +136,7 @@ func BuildReclaudeBootstrapRequests(clientVersion string) []ReclaudeLifecycleReq
 
 	cliHeaders := func() map[string]string {
 		headers := reclaudeBootstrapAcceptHeaders()
-		headers["user-agent"] = reclaudeInnerUACLI(clientVersion)
+		headers["user-agent"] = reclaudeInnerUACLI(p.CLIVersion)
 		return headers
 	}
 
@@ -127,7 +146,27 @@ func BuildReclaudeBootstrapRequests(clientVersion string) []ReclaudeLifecycleReq
 	registryHeaders := cliHeaders()
 	registryHeaders["content-type"] = "application/json"
 
-	return []ReclaudeLifecycleRequest{
+	// CLI 启动三件套 -----------------------------------------------------------
+	// claude_cli/bootstrap：UA=claude-code/<cli>,带 model 参数(本次推理模型)。
+	bootstrapURL := "https://api.anthropic.com/api/claude_cli/bootstrap?entrypoint=sdk-cli"
+	if m := strings.TrimSpace(p.Model); m != "" {
+		bootstrapURL += "&model=" + url.QueryEscape(m)
+	}
+	bootstrapHeaders := reclaudeBootstrapAcceptHeaders()
+	bootstrapHeaders["user-agent"] = reclaudeInnerUAClaudeCode(p.CLIVersion)
+	bootstrapHeaders["content-type"] = "application/json"
+	bootstrapHeaders["anthropic-beta"] = "oauth-2025-04-20"
+
+	// oauth/account/settings：UA=claude-cli sdk-cli,beta oauth,无 content-type。
+	settingsHeaders := reclaudeBootstrapAcceptHeaders()
+	settingsHeaders["user-agent"] = reclaudeInnerUACLI(p.CLIVersion)
+	settingsHeaders["anthropic-beta"] = "oauth-2025-04-20"
+
+	reqs := []ReclaudeLifecycleRequest{
+		{
+			Method: "GET", URL: bootstrapURL, Headers: bootstrapHeaders,
+			NeedsAuthorization: true, Delay: 2 * time.Millisecond,
+		},
 		axios("https://api.anthropic.com/api/oauth/profile", 4*time.Millisecond, ""),
 		mcp(mcpServersURL, 5*time.Millisecond),
 		mcp(mcpServersURL, 520*time.Millisecond),
@@ -151,7 +190,35 @@ func BuildReclaudeBootstrapRequests(clientVersion string) []ReclaudeLifecycleReq
 			NeedsAuthorization: true,
 			Delay:              3162 * time.Millisecond,
 		},
+		{
+			Method:             "GET",
+			URL:                "https://api.anthropic.com/api/oauth/account/settings",
+			Headers:            settingsHeaders,
+			NeedsAuthorization: true,
+			Delay:              3163 * time.Millisecond,
+		},
 	}
+
+	// organizations/skills：需要 org uuid;缺则跳过(编不出真 org 更危险)。
+	if org := strings.TrimSpace(p.OrgUUID); org != "" {
+		skillsHeaders := reclaudeBootstrapAcceptHeaders()
+		skillsHeaders["user-agent"] = reclaudeInnerUACLI(p.CLIVersion)
+		skillsHeaders["content-type"] = "application/json"
+		skillsHeaders["anthropic-version"] = "2023-06-01"
+		// ✅ 真值定值:不是 OS 平台,是 SDK 自报的客户端平台标识。
+		skillsHeaders["anthropic-client-platform"] = "claude_code_sdk"
+		skillsHeaders["x-organization-uuid"] = org
+		reqs = append(reqs, ReclaudeLifecycleRequest{
+			Method: "GET",
+			URL: "https://api.anthropic.com/api/oauth/organizations/" + org +
+				"/skills/list-skills?include_wiggle_skills=true&entrypoint=sdk-cli",
+			Headers:            skillsHeaders,
+			NeedsAuthorization: true,
+			Delay:              3164 * time.Millisecond,
+		})
+	}
+
+	return reqs
 }
 
 // BuildReclaudeInferenceFollowups 产出跟随一次推理的生命周期请求。

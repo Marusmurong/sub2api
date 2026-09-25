@@ -44,8 +44,8 @@ func TestReclaudeLifecycleDriver(t *testing.T) {
 
 		driver.OnInference(ctx, account, "http://proxy:8080", "claude-opus-5-5")
 
-		calls := waitForCalls(t, forwarder, 8)
-		require.Len(t, calls, 8)
+		calls := waitForCalls(t, forwarder, 10)
+		require.Len(t, calls, 10)
 	})
 
 	t.Run("同一会话内不重复引导", func(t *testing.T) {
@@ -53,9 +53,9 @@ func TestReclaudeLifecycleDriver(t *testing.T) {
 		driver, forwarder, account := driverFixture(t)
 
 		driver.OnInference(ctx, account, "http://proxy:8080", "claude-opus-5-5")
-		waitForCalls(t, forwarder, 8)
+		waitForCalls(t, forwarder, 10)
 		driver.OnInference(ctx, account, "http://proxy:8080", "claude-opus-5-5")
-		calls := waitForCalls(t, forwarder, 9)
+		calls := waitForCalls(t, forwarder, 11)
 
 		bootstraps := 0
 		for _, c := range calls {
@@ -72,11 +72,11 @@ func TestReclaudeLifecycleDriver(t *testing.T) {
 		driver.now = func() time.Time { return base }
 
 		driver.OnInference(ctx, account, "http://proxy:8080", "claude-opus-5-5")
-		waitForCalls(t, forwarder, 8)
+		waitForCalls(t, forwarder, 10)
 		driver.now = func() time.Time { return base.Add(ReclaudeSessionIdleGap) }
 		driver.OnInference(ctx, account, "http://proxy:8080", "claude-opus-5-5")
 
-		calls := waitForCalls(t, forwarder, 16)
+		calls := waitForCalls(t, forwarder, 20)
 		bootstraps := 0
 		for _, c := range calls {
 			if strings.Contains(c.url, "/api/oauth/profile") {
@@ -113,7 +113,7 @@ func TestReclaudeLifecycleDriver(t *testing.T) {
 		driver.OnInference(context.Background(), account, "http://proxy:8080", "claude-opus-5-5")
 		time.Sleep(300 * time.Millisecond)
 
-		require.EqualValues(t, 8, calls.Load(), "只应发一轮引导，不该有二次放大")
+		require.EqualValues(t, 10, calls.Load(), "只应发一轮引导，不该有二次放大")
 	})
 
 	t.Run("无代理时不发 —— 不从机房 IP 出去", func(t *testing.T) {
@@ -171,7 +171,7 @@ func TestReclaudeLifecycleDriverEmitsEvents(t *testing.T) {
 
 		driver.OnInference(ctx, account, "http://proxy:8080", "claude-opus-5-5")
 
-		calls := waitForCalls(t, forwarder, 9)
+		calls := waitForCalls(t, forwarder, 11)
 		events := 0
 		for _, c := range calls {
 			if strings.Contains(c.url, "/api/event_logging/v2/batch") {
@@ -192,8 +192,8 @@ func TestReclaudeLifecycleDriverEmitsEvents(t *testing.T) {
 
 		driver.OnInference(ctx, account, "http://proxy:8080", "claude-opus-5-5")
 
-		calls := waitForCalls(t, forwarder, 8)
-		require.Len(t, calls, 8, "引导流量不受影响")
+		calls := waitForCalls(t, forwarder, 10)
+		require.Len(t, calls, 10, "引导流量不受影响(含 CLI 启动三件套;删了 org 故无 org/skills)")
 		for _, c := range calls {
 			require.NotContains(t, c.url, "/api/event_logging/")
 		}
@@ -205,7 +205,7 @@ func TestReclaudeLifecycleDriverEmitsEvents(t *testing.T) {
 		driver.now = func() time.Time { return base }
 
 		driver.OnInference(ctx, account, "http://proxy:8080", "claude-opus-5-5")
-		waitForCalls(t, forwarder, 9)
+		waitForCalls(t, forwarder, 11)
 		driver.OnInference(ctx, account, "http://proxy:8080", "claude-opus-5-5")
 		waitForCalls(t, forwarder, 11)
 		driver.now = func() time.Time { return base.Add(ReclaudeSessionIdleGap) }
@@ -275,7 +275,7 @@ func TestReclaudeEventBatching(t *testing.T) {
 		driver, forwarder, account := fixture(t)
 		driver.now = func() time.Time { return base }
 		driver.OnInference(ctx, account, "http://p", "m") // 新会话：立刻发
-		waitForCalls(t, forwarder, 9)
+		waitForCalls(t, forwarder, 11)
 
 		for i := 1; i <= 10; i++ {
 			driver.now = func() time.Time { return base.Add(time.Duration(i) * time.Second) }
@@ -291,7 +291,7 @@ func TestReclaudeEventBatching(t *testing.T) {
 		driver, forwarder, account := fixture(t)
 		driver.now = func() time.Time { return base }
 		driver.OnInference(ctx, account, "http://p", "m")
-		waitForCalls(t, forwarder, 9)
+		waitForCalls(t, forwarder, 11)
 
 		for i := 1; i <= 3; i++ {
 			driver.now = func() time.Time { return base.Add(time.Duration(i) * time.Second) }
@@ -326,7 +326,7 @@ func TestReclaudeEventBatching(t *testing.T) {
 		driver, forwarder, account := fixture(t)
 		driver.now = func() time.Time { return base }
 		driver.OnInference(ctx, account, "http://p", "m")
-		waitForCalls(t, forwarder, 9)
+		waitForCalls(t, forwarder, 11)
 		require.Equal(t, 1, countEventPosts(forwarder.snapshot()))
 
 		driver.now = func() time.Time { return base.Add(ReclaudeSessionIdleGap) }

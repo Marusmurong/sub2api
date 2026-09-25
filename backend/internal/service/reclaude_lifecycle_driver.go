@@ -73,13 +73,22 @@ func (d *ReclaudeLifecycleDriver) OnInference(
 		return
 	}
 
-	clientVersion := account.GetCredential(CredKeyReclaudeClientVersion)
+	// 🔴 内层 claude-cli/claude-code UA 用 **claude-cli 版本**(machine_env.cli_version,
+	// 如 2.1.282),不是 reclaude 包装器版本(client_version=v1.4.0)。2026-09-26 抓包实证
+	// 旧代码误用后者,合成流量全发成 claude-cli/1.4.0(不存在的版本)。cli_version 缺失时
+	// 由 reclaudeClientVersionOr 兜底到基线,不再退回 v1.4.0。
+	cliVersion := parseReclaudeMachineEnv(account.GetCredential(CredKeyReclaudeMachineEnv)).CliVersion
+	orgUUID := account.GetCredential(CredKeyReclaudeOrganizationUUID)
 	now := d.now()
 
 	var requests []ReclaudeLifecycleRequest
 	if d.tracker.ObserveAt(account.ID, now) {
 		d.startSession(account.ID, now)
-		requests = BuildReclaudeBootstrapRequests(clientVersion)
+		requests = BuildReclaudeBootstrapRequests(ReclaudeBootstrapParams{
+			CLIVersion: cliVersion,
+			OrgUUID:    orgUUID,
+			Model:      model,
+		})
 	} else {
 		// 非新会话：只有会话早期的几次推理带 MCP 复查。
 		requests = BuildReclaudeInferenceFollowups(d.nextTurn(account.ID))
@@ -91,7 +100,7 @@ func (d *ReclaudeLifecycleDriver) OnInference(
 	// 于是 3 分钟内发了 11 次。真值是攒批语义 ——
 	// ✅ 抓包实测每批 **103~107 个事件**，一次会话共 7 批。
 	// 批大小差 50 倍、频次差一个量级，这是我自己引入的可判别特征。
-	if event := d.maybeFlushEvents(account, clientVersion, model, now); event != nil {
+	if event := d.maybeFlushEvents(account, cliVersion, model, now); event != nil {
 		requests = append(requests, *event)
 	}
 

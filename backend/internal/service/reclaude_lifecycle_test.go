@@ -56,14 +56,19 @@ func (f *recordingLifecycleForwarder) snapshot() []recordedLifecycleCall {
 
 // 引导流量的形状必须逐字对齐抓包。
 func TestBuildReclaudeBootstrapRequests(t *testing.T) {
-	requests := BuildReclaudeBootstrapRequests("2.1.280")
+	requests := BuildReclaudeBootstrapRequests(ReclaudeBootstrapParams{
+		CLIVersion: "2.1.280",
+		OrgUUID:    "47be3ed1-4b36-4bae-837d-40b5106369ec",
+		Model:      "claude-opus-5-5",
+	})
 
 	t.Run("端点与真值一致，且不含 eval/sdk", func(t *testing.T) {
 		urls := make([]string, 0, len(requests))
 		for _, r := range requests {
 			urls = append(urls, r.URL)
 		}
-		require.Len(t, requests, 8)
+		// 8 条原有 + CLI 启动三件套(bootstrap/settings/org-skills) = 11。
+		require.Len(t, requests, 11)
 		for _, u := range urls {
 			// 🔴 eval/sdk-… 路径里带我们编不出来的 SDK 实例 ID，伪造比缺席更危险。
 			require.NotContains(t, u, "/api/eval/")
@@ -71,6 +76,39 @@ func TestBuildReclaudeBootstrapRequests(t *testing.T) {
 		require.Contains(t, urls, "https://api.anthropic.com/api/oauth/profile")
 		require.Contains(t, urls, "https://api.anthropic.com/api/claude_code_penguin_mode")
 		require.Contains(t, urls, "https://api.anthropic.com/api/claude_code_grove")
+	})
+
+	t.Run("CLI 启动三件套齐全且形状对(第八次撤销补齐)", func(t *testing.T) {
+		byURL := map[string]ReclaudeLifecycleRequest{}
+		for _, r := range requests {
+			byURL[r.URL] = r
+		}
+		// bootstrap: UA=claude-code/<cli>, 带 model, beta oauth
+		b, ok := byURL["https://api.anthropic.com/api/claude_cli/bootstrap?entrypoint=sdk-cli&model=claude-opus-5-5"]
+		require.True(t, ok, "缺 claude_cli/bootstrap")
+		require.Equal(t, "claude-code/2.1.280", b.Headers["user-agent"])
+		require.Equal(t, "oauth-2025-04-20", b.Headers["anthropic-beta"])
+		require.True(t, b.NeedsAuthorization)
+		// account/settings: UA=claude-cli sdk-cli, beta oauth, 无 content-type
+		s, ok := byURL["https://api.anthropic.com/api/oauth/account/settings"]
+		require.True(t, ok, "缺 oauth/account/settings")
+		require.Equal(t, "claude-cli/2.1.280 (external, sdk-cli)", s.Headers["user-agent"])
+		require.Equal(t, "oauth-2025-04-20", s.Headers["anthropic-beta"])
+		require.NotContains(t, s.Headers, "content-type")
+		// org/skills: 带 x-organization-uuid + anthropic-client-platform=claude_code_sdk, 无 beta
+		sk, ok := byURL["https://api.anthropic.com/api/oauth/organizations/47be3ed1-4b36-4bae-837d-40b5106369ec/skills/list-skills?include_wiggle_skills=true&entrypoint=sdk-cli"]
+		require.True(t, ok, "缺 organizations/skills")
+		require.Equal(t, "claude_code_sdk", sk.Headers["anthropic-client-platform"])
+		require.Equal(t, "47be3ed1-4b36-4bae-837d-40b5106369ec", sk.Headers["x-organization-uuid"])
+		require.NotContains(t, sk.Headers, "anthropic-beta")
+	})
+
+	t.Run("无 OrgUUID 时跳过 org/skills(不编造 org)", func(t *testing.T) {
+		reqs := BuildReclaudeBootstrapRequests(ReclaudeBootstrapParams{CLIVersion: "2.1.280"})
+		require.Len(t, reqs, 10) // 少了 org/skills
+		for _, r := range reqs {
+			require.NotContains(t, r.URL, "/skills/list-skills")
+		}
 	})
 
 	t.Run("mcp_servers 保留真值的四次重复", func(t *testing.T) {
@@ -110,7 +148,8 @@ func TestBuildReclaudeBootstrapRequests(t *testing.T) {
 		for i := 1; i < len(requests); i++ {
 			require.GreaterOrEqual(t, requests[i].Delay, requests[i-1].Delay)
 		}
-		require.Equal(t, 3162*time.Millisecond, requests[len(requests)-1].Delay)
+		// 末条现在是 org/skills(+3164ms)。
+		require.Equal(t, 3164*time.Millisecond, requests[len(requests)-1].Delay)
 	})
 
 	t.Run("每条都带三个固定头", func(t *testing.T) {
@@ -126,7 +165,7 @@ func TestBuildReclaudeBootstrapRequests(t *testing.T) {
 func TestReclaudeClientVersionInUA(t *testing.T) {
 	t.Run("按账号版本拼，不写死", func(t *testing.T) {
 		// 写死会让整个设备群停在同一个版本上（D9）。
-		requests := BuildReclaudeBootstrapRequests("2.1.300")
+		requests := BuildReclaudeBootstrapRequests(ReclaudeBootstrapParams{CLIVersion: "2.1.300"})
 		found := false
 		for _, r := range requests {
 			if strings.Contains(r.Headers["user-agent"], "claude-cli/") {
@@ -177,7 +216,7 @@ func lifecycleSenderFixture(t *testing.T) (*ReclaudeLifecycleSender, *recordingL
 func TestReclaudeLifecycleSender(t *testing.T) {
 	t.Run("按顺序发完整批", func(t *testing.T) {
 		sender, forwarder, account := lifecycleSenderFixture(t)
-		requests := BuildReclaudeBootstrapRequests("2.1.280")
+		requests := BuildReclaudeBootstrapRequests(ReclaudeBootstrapParams{CLIVersion: "2.1.280"})
 
 		sender.send(account, "http://proxy:8080", requests)
 
@@ -191,7 +230,7 @@ func TestReclaudeLifecycleSender(t *testing.T) {
 	t.Run("Authorization 按 spec 注入", func(t *testing.T) {
 		sender, forwarder, account := lifecycleSenderFixture(t)
 
-		sender.send(account, "", BuildReclaudeBootstrapRequests("2.1.280"))
+		sender.send(account, "", BuildReclaudeBootstrapRequests(ReclaudeBootstrapParams{CLIVersion: "2.1.280"}))
 
 		for _, call := range forwarder.snapshot() {
 			// 🔴 用 map 直读而不是 Header.Get：setHeaderRaw 刻意存**小写**键
@@ -214,9 +253,9 @@ func TestReclaudeLifecycleSender(t *testing.T) {
 		forwarder.err = io.ErrUnexpectedEOF
 
 		require.NotPanics(t, func() {
-			sender.send(account, "", BuildReclaudeBootstrapRequests("2.1.280"))
+			sender.send(account, "", BuildReclaudeBootstrapRequests(ReclaudeBootstrapParams{CLIVersion: "2.1.280"}))
 		})
-		require.Len(t, forwarder.snapshot(), 8)
+		require.Len(t, forwarder.snapshot(), 10)
 	})
 
 	t.Run("依赖缺席时静默跳过", func(t *testing.T) {
