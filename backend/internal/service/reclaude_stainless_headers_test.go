@@ -88,3 +88,38 @@ func TestOverrideReclaudeStainlessHeaders(t *testing.T) {
 		})
 	})
 }
+
+func TestReclaudeInnerBetaOverride(t *testing.T) {
+	menv := `{"node_version":"v26.3.0","arch":"x64"}`
+
+	t.Run("anthropic-beta 被 reclaude 16-token 集覆盖", func(t *testing.T) {
+		headers := map[string]string{"anthropic-beta": "claude-code-20250219,oauth-2025-04-20"}
+		overrideReclaudeStainlessHeaders(headers, stainlessAccount("linux/amd64", menv))
+
+		beta := headers["anthropic-beta"]
+		require.Contains(t, beta, "advanced-tool-use-2025-11-20", "补齐真客户端 token")
+		require.Contains(t, beta, "cache-diagnosis-2026-04-07")
+	})
+
+	t.Run("剔除 fallback 相关 token —— 与我们删了 body.fallbacks 对称", func(t *testing.T) {
+		// 🔴 beta 声称支持 fallback 而 body 没有 = 不对称。红线。
+		headers := map[string]string{"anthropic-beta": "x"}
+		overrideReclaudeStainlessHeaders(headers, stainlessAccount("linux/amd64", menv))
+
+		require.NotContains(t, headers["anthropic-beta"], "server-side-fallback")
+		require.NotContains(t, headers["anthropic-beta"], "fallback-credit")
+	})
+
+	t.Run("无 anthropic-beta 时不凭空造", func(t *testing.T) {
+		headers := map[string]string{}
+		overrideReclaudeStainlessHeaders(headers, stainlessAccount("linux/amd64", menv))
+		_, present := headers["anthropic-beta"]
+		require.False(t, present)
+	})
+}
+
+func TestReclaudeNormalizeNodeVersion(t *testing.T) {
+	require.Equal(t, "v26.3.0", reclaudeNormalizeNodeVersion("26.3.0"), "裸版本补 v")
+	require.Equal(t, "v26.3.0", reclaudeNormalizeNodeVersion("v26.3.0"), "已有 v 不重复")
+	require.Equal(t, "", reclaudeNormalizeNodeVersion(""), "空串不动")
+}

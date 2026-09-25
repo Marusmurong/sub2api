@@ -47,15 +47,22 @@ const (
 
 	// CredKeyReclaudeMachineEnv 是**登录机器的真机指纹快照**（JSON）。
 	//
-	// 🔴 2026-09-25 撤销复盘定位的根因：event_logging 每个事件的 env 块带
-	// kernel / arch / node_version / distro，而登录时 /api/cli/auth/start
-	// 已把这台机器的真机指纹上报给服务端并落库。两者必须**同源一致** ——
-	// 我们此前硬编码抄样本值（arm64 / v26.3.0），与服务器真机（x86_64 /
-	// v18.19.1 / kernel 6.17-aws）对不上：同一 device_id 自报了两副矛盾硬件，
-	// 服务端一致性校验一对账就撤销。
+	// 🔴 2026-09-25 撤销复盘定位的根因：event_logging 的 env 块与内层
+	// x-stainless-* 头都带机器指纹，而登录 /api/cli/auth/start 已把真机指纹
+	// 上报落库。两者必须**同源一致**，否则同一 device_id 自报两副矛盾硬件，
+	// 服务端对账即撤销。
 	//
-	// 建号时从登录机器采集（uname -m / uname -r / os-release / node -v），
-	// 存这里；event_logging 按账号读，绝不再硬编码。
+	// 字段来源分三类，**不要混**（各有正确来源，混了就是新的不一致）：
+	//   - arch / linux_distro_id / linux_distro_version / linux_kernel / shell
+	//     → 跟**登录机器真机**走（uname -m / os-release / uname -r）。
+	//   - node_version → 🔴 是 **claude-cli 二进制内嵌的运行时版本**
+	//     （strings ~/.reclaude/claude-cli/claude 抠出的 node/vXX，实测 v26.3.0），
+	//     **不是系统 node -v**（服务器系统 node 是 v18.19.1，绝不能填它）。
+	//     x-stainless-runtime-version 与 event_logging env.node_version 都用它。
+	//   - cli_version → claude-cli 版本（metadata.json，实测 2.1.280），
+	//     进 env.version / UA 版本段。
+	//
+	// event_logging 与内层 stainless 头都按账号读它，绝不再硬编码。
 	CredKeyReclaudeMachineEnv = "reclaude_machine_env"
 )
 
