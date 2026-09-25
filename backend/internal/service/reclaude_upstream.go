@@ -383,18 +383,38 @@ func buildReclaudeEnvelope(inner *http.Request, gatewayURL string, account *Acco
 		headers[strings.ToLower(name)] = values[0]
 	}
 
-	// 🔴 用真机指纹覆盖 x-stainless-os/arch/runtime-version（第六次撤销根因）。
+	// 🔴 下面三处（stainless 覆盖 / beta 冲刷 / request-class / client-request-id）
+	// 全是给 **/v1/messages 推理路径** 写的（第六、第七次撤销修复）。它们**只能**
+	// 作用于推理请求，不能碰我们自己合成的生命周期流量（D3）。
 	//
-	// CC 伪装（applyClaudeCodeMimicHeaders）给所有 OAuth 账号无差别注入
-	// x-stainless-os=MacOS —— 那是**给 Anthropic 上游选的**（23 样本 0 个 Linux，
-	// 避免独特化）。但 reclaude 网关不是 Anthropic：真客户端的 x-stainless-os 由
-	// claude-cli SDK 运行时读 process.platform 现算，**恒等于真机 OS**
-	// （反编译到函数体 + 7/7 抓包印证），且登录 /auth/start 已把真机 os/arch
-	// 落库。给 Anthropic 的 MacOS 装进 reclaude 信封内层，就是「同一设备内层报
-	// Mac、登录档案报 Linux」的自相矛盾 —— 没有任何合理解释的一枪毙命信号。
+	// ✅ 真值（reclaude-lab/sink/dump 26 条抓包）：只有 /v1/messages 带 x-stainless /
+	// x-claude-code-request-class / x-client-request-id / 长 beta；mcp_servers /
+	// oauth / grove / event_logging 一个都不带，且 mcp_servers 的 anthropic-beta
+	// 恒为单 token mcp-servers-2025-12-04（端点硬要求）。
 	//
-	// 只在这里覆盖：Anthropic 直连路径完全不经过这里，其 MacOS 伪装原样保留。
-	overrideReclaudeStainlessHeaders(headers, account)
+	// 🔴 第七次撤销（2026-09-25 设备 4395）根因：这三处**无差别**作用于所有信封，
+	// 把推理专用头盖到了合成的 axios 生命周期请求上 —— mcp_servers 的 beta 被冲成
+	// messages 集后缺 mcp-servers-2025-12-04,每 60s 被上游 400,而真客户端是 200。
+	// 一条每请求成立、跨设备一致的可判别信号。
+	//
+	// 合成请求已在 reclaude_lifecycle_requests.go 逐字对齐真值,原样透传即可 ——
+	// 只保留每条信封都需要的 host / content-length / traceId。
+	synthetic := IsReclaudeSynthetic(inner.Context())
+
+	if !synthetic {
+		// 🔴 用真机指纹覆盖 x-stainless-os/arch/runtime-version（第六次撤销根因）。
+		//
+		// CC 伪装（applyClaudeCodeMimicHeaders）给所有 OAuth 账号无差别注入
+		// x-stainless-os=MacOS —— 那是**给 Anthropic 上游选的**（23 样本 0 个 Linux，
+		// 避免独特化）。但 reclaude 网关不是 Anthropic：真客户端的 x-stainless-os 由
+		// claude-cli SDK 运行时读 process.platform 现算，**恒等于真机 OS**
+		// （反编译到函数体 + 7/7 抓包印证），且登录 /auth/start 已把真机 os/arch
+		// 落库。给 Anthropic 的 MacOS 装进 reclaude 信封内层，就是「同一设备内层报
+		// Mac、登录档案报 Linux」的自相矛盾 —— 没有任何合理解释的一枪毙命信号。
+		//
+		// 只在这里覆盖：Anthropic 直连路径完全不经过这里，其 MacOS 伪装原样保留。
+		overrideReclaudeStainlessHeaders(headers, account)
+	}
 
 	// 🔴 host / content-length 必须显式补进去。
 	//
@@ -408,17 +428,23 @@ func buildReclaudeEnvelope(inner *http.Request, gatewayURL string, account *Acco
 	}
 	headers["content-length"] = strconv.Itoa(len(body))
 
-	// 🔴 这两个头缺一不可 —— 2026-09-24 抓真实客户端信封实测：少了会被网关
-	// 拒为 {"code":"bad_envelope"}（而信封二进制结构、六个顶层字段、base64
-	// 变体全部一致，差异只在这里）。
-	//
-	// 只在下游没带时补：下游真是 Claude Code 时，它自己的值才是真的。
-	if headers["x-claude-code-request-class"] == "" {
-		headers["x-claude-code-request-class"] = "main"
-	}
-	if headers["x-client-request-id"] == "" {
-		// 逐请求随机：固定值等于给所有请求盖同一个戳。
-		headers["x-client-request-id"] = uuid.NewString()
+	if !synthetic {
+		// 🔴 这两个头缺一不可 —— 2026-09-24 抓真实客户端信封实测：少了会被网关
+		// 拒为 {"code":"bad_envelope"}（而信封二进制结构、六个顶层字段、base64
+		// 变体全部一致，差异只在这里）。
+		//
+		// ⚠️ 只对 /v1/messages 推理路径成立：真客户端的生命周期请求（axios /
+		// claude-code UA）内层**从不带**这两个头,却照样被网关 200 —— 所以合成流量
+		// 绝不能补（见上方 synthetic 说明）。
+		//
+		// 只在下游没带时补：下游真是 Claude Code 时，它自己的值才是真的。
+		if headers["x-claude-code-request-class"] == "" {
+			headers["x-claude-code-request-class"] = "main"
+		}
+		if headers["x-client-request-id"] == "" {
+			// 逐请求随机：固定值等于给所有请求盖同一个戳。
+			headers["x-client-request-id"] = uuid.NewString()
+		}
 	}
 
 	// 🔴 必须用 reclaude.NewTraceID()，不能用 uuid.NewString()：
