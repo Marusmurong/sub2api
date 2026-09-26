@@ -78,9 +78,36 @@ func TestBuildReclaudeEventBatch(t *testing.T) {
 			"is_claude_code_action", "is_claude_ai_auth", "version", "arch",
 			"is_claude_code_remote", "deployment_environment", "is_conductor",
 			"version_base", "is_local_agent_mode", "platform_raw", "shell",
+			// build_time：交互式真值每条 env 都带（2026-09-27 抓包），
+			// 缺它是"非真实 CLI"的直接特征。
+			"build_time",
 			// linux_* 带 omitempty：eventAccount 注入了 Linux 真机快照，故应出现。
 			"linux_distro_id", "linux_distro_version", "linux_kernel",
 		}, keysOf(decoded))
+	})
+
+	// 🔴 2026-09-27 交互式抓包：is_interactive=true / entrypoint=cli 的会话里，
+	// terminal / package_managers / runtimes / build_time 是交互式 CLI 形态，
+	// 不是 SDK 的 unknown / 空串 / 缺字段。翻转 cli 后这四处若仍是 SDK 形态，
+	// 就与 is_interactive=true 自相矛盾（一枪毙命）。
+	t.Run("env 是交互式 CLI 形态,不是 SDK 形态", func(t *testing.T) {
+		env := BuildReclaudeEventBatch(eventContext(t), []string{ReclaudeEventAPIQuery}).
+			Events[0].EventData.Env
+		require.Equal(t, "xterm-256color", env.Terminal, "交互式真值 terminal 不是 unknown")
+		require.Equal(t, "npm", env.PackageManagers, "交互式真值 package_managers 非空")
+		require.Equal(t, "node", env.Runtimes, "交互式真值 runtimes 非空")
+		require.Equal(t, reclaudeDefaultBuildTime, env.BuildTime, "build_time 必须存在")
+	})
+
+	t.Run("快照可覆盖 terminal / build_time", func(t *testing.T) {
+		ctx := eventContext(t)
+		ctx.Account.Credentials[CredKeyReclaudeMachineEnv] = `{"node_version":"v26.3.0",` +
+			`"arch":"x64","linux_distro_id":"ubuntu","linux_distro_version":"24.04",` +
+			`"linux_kernel":"6.17.0-1017-aws","shell":"bash","cli_version":"2.1.282",` +
+			`"terminal":"screen-256color","build_time":"2026-09-20T01:02:03Z"}`
+		env := BuildReclaudeEventBatch(ctx, []string{ReclaudeEventAPIQuery}).Events[0].EventData.Env
+		require.Equal(t, "screen-256color", env.Terminal, "有快照 terminal 就用快照")
+		require.Equal(t, "2026-09-20T01:02:03Z", env.BuildTime, "有快照 build_time 就用快照")
 	})
 
 	t.Run("时间戳格式对齐真值（毫秒 + Z）", func(t *testing.T) {

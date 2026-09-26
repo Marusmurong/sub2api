@@ -40,11 +40,15 @@ const (
 // 不是硬编码 —— 一批设备共用同一套 linux_distro/kernel/node_version
 // 是比沉默更强的批量特征。
 type ReclaudeEventEnv struct {
-	Platform              string `json:"platform"`
-	NodeVersion           string `json:"node_version"`
-	Terminal              string `json:"terminal"`
-	PackageManagers       string `json:"package_managers"`
-	Runtimes              string `json:"runtimes"`
+	Platform        string `json:"platform"`
+	NodeVersion     string `json:"node_version"`
+	Terminal        string `json:"terminal"`
+	PackageManagers string `json:"package_managers"`
+	Runtimes        string `json:"runtimes"`
+	// BuildTime 是 claude-cli 二进制的打包时间戳（交互式真值每条 env 都带，
+	// 如 2026-09-24T03:59:36Z）。缺字段是"非真实 CLI"的直接特征。
+	// ⚠️ 字段在 env 里的确切位置待信封解码确认；服务端按 map 解析,键序不敏感。
+	BuildTime             string `json:"build_time"`
 	IsRunningWithBun      bool   `json:"is_running_with_bun"`
 	IsCI                  bool   `json:"is_ci"`
 	IsClaubbit            bool   `json:"is_claubbit"`
@@ -259,6 +263,10 @@ type ReclaudeMachineEnv struct {
 	LinuxDistroVersion string `json:"linux_distro_version"`
 	LinuxKernel        string `json:"linux_kernel"`
 	Shell              string `json:"shell"`
+	// Terminal / BuildTime 是交互式 CLI 的真机可变项（TERM、claude-cli 打包时间）。
+	// 建号时能采到就采（与 /auth/start 同源更好）；采不到回落到交互式默认常量。
+	Terminal  string `json:"terminal"`
+	BuildTime string `json:"build_time"`
 	// CliVersion 是 **claude-cli** 版本（如 2.1.280），进 env.version / version_base。
 	//
 	// 🔴 2026-09-25 抓包实证它与外层信封头 X-Reclaude-Client-Version 是**两个值**：
@@ -310,6 +318,18 @@ func buildReclaudeEventEnv(account *Account) ReclaudeEventEnv {
 	if snapshot.CliVersion != "" {
 		version = snapshot.CliVersion
 	}
+	// 🔴 2026-09-27 交互式抓包：is_interactive=true / entrypoint=cli 的会话里
+	// terminal=xterm-256color、package_managers=npm、runtimes=node、build_time 每条都带。
+	// 翻转 cli 后这四处若仍是 SDK 形态（unknown / 空串 / 缺字段），与 is_interactive=true
+	// 自相矛盾——正是撤销复盘里"一枪毙命"那类矛盾。terminal / build_time 可被真机快照覆盖。
+	terminal := reclaudeInteractiveTerminal
+	if snapshot.Terminal != "" {
+		terminal = snapshot.Terminal
+	}
+	buildTime := reclaudeDefaultBuildTime
+	if snapshot.BuildTime != "" {
+		buildTime = snapshot.BuildTime
+	}
 
 	return ReclaudeEventEnv{
 		Platform:    osName,
@@ -318,10 +338,11 @@ func buildReclaudeEventEnv(account *Account) ReclaudeEventEnv {
 		Version:     version,
 		VersionBase: version,
 		NodeVersion: nodeVersion,
-		// ✅ 真值：非交互 SDK 场景下 terminal 恒为 unknown，两个列表恒为空串。
-		Terminal:        "unknown",
-		PackageManagers: "",
-		Runtimes:        "",
+		// ✅ 交互式 CLI 真值（2026-09-27 抓包）。
+		Terminal:        terminal,
+		PackageManagers: reclaudeInteractivePackageManagers,
+		Runtimes:        reclaudeInteractiveRuntimes,
+		BuildTime:       buildTime,
 		// ✅ 真值 is_running_with_bun=true（CLI 由 Bun 打包）。
 		IsRunningWithBun: true,
 		// ✅ 我们是订阅制 OAuth 账号，不是 CI/Action 环境。
@@ -367,6 +388,24 @@ func reclaudeDeploymentEnv(osName string, _ ReclaudeMachineEnv) string {
 // 它由 CLI 的打包运行时决定，同版本 CLI 的用户本来就会集中在同一个值上，
 // 因此这一项的批量特征风险显著低于 linux_distro / kernel 那类主机指纹。
 const reclaudeDefaultNodeVersion = "v26.3.0"
+
+// 交互式 CLI 的 env 形态常量（2026-09-27 交互式抓包）。
+//
+// terminal 可被真机快照覆盖（TERM 因终端而异）；package_managers / runtimes 对
+// node/npm 打包的 CLI 是稳定值，同版本用户本就集中在这两个值上，批量特征风险低。
+const (
+	reclaudeInteractiveTerminal        = "xterm-256color"
+	reclaudeInteractivePackageManagers = "npm"
+	reclaudeInteractiveRuntimes        = "node"
+)
+
+// reclaudeDefaultBuildTime 是 env.build_time 的回落值 —— claude-cli 二进制的打包
+// 时间戳（真值样本 2026-09-24T03:59:36Z，对应 2.1.282）。
+//
+// ⚠️ build_time 与 cli_version 相关,不同版本不同值。正解是建号时随快照采集
+// （ReclaudeMachineEnv.BuildTime）；这里的常量只是缺快照时的兜底,避免"缺字段"
+// 这个比批量特征更硬的破绽。
+const reclaudeDefaultBuildTime = "2026-09-24T03:59:36Z"
 
 // reclaudeDefaultShellFor 给出与平台自洽的 shell。
 //
