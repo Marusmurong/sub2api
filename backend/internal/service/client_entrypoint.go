@@ -64,12 +64,22 @@ func defaultClientEntrypoint() ClientEntrypoint {
 	return ClientEntrypoint{Product: "cli", UASuffix: "(external, cli)"}
 }
 
-// reclaudeClientEntrypoint 是 reclaude 账号钉死的入口：`claude -p` 的形态。
+// reclaudeClientEntrypoint 是 reclaude 账号钉死的入口：cli（交互式）形态。
 //
-// 真客户端（2026-09-26 同机存活抓包）推理 UA、billing 块 cc_entrypoint、event_logging
-// 的 entrypoint / client_type 全是 sdk-cli；合成引导里 skills 的 entrypoint 参数和
-// claude_cli/bootstrap 的 entrypoint 参数也是它。一台设备内所有声明取同一个值。
-var reclaudeClientEntrypoint = ClientEntrypoint{Product: "sdk-cli", UASuffix: "(external, sdk-cli)"}
+// 🔴 2026-09-27 翻转（原钉 sdk-cli，错）：sub 出站的 system[1] 身份块恒定用硬编码
+// 常量 claudeCodeSystemPrompt = "You are Claude Code, Anthropic's official CLI for
+// Claude."（cli 文案，见 gateway_service.go）。entrypoint 只改 billing 块的
+// cc_entrypoint 字段，改不动身份文案。sdk-cli 的真身份是 "You are a Claude agent,
+// built on Claude Agent SDK." + cc_turn_origin=sdk —— sub 都发不出来。
+//
+// 所以整条链路唯一自洽的入口是 cli：身份块（已 cli）、billing cc_entrypoint、UA 后缀、
+// bootstrap / skills / event_logging 的 entrypoint 全落在 cli。09-27 交互式 cli 会话
+// 17 条 /v1/messages 内层全 200，证明 cli 形态网关接受。钉 sdk-cli 则头说 sdk、
+// 身份块说 official CLI、还缺 cc_turn_origin —— 正是 09-26 被撤 sub 信封的三重矛盾。
+//
+// 对照抓包：docs/captures/reclaude-live-2026-09-27/interactive（cli）
+// vs reclaude-live-2026-09-26（sdk-cli）。
+var reclaudeClientEntrypoint = defaultClientEntrypoint()
 
 // resolveClientEntrypointForAccount 按账号判定入口。
 //

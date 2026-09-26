@@ -93,9 +93,9 @@ func TestReclaudeSubSideAdmissionControls(t *testing.T) {
 // 🔴 读写必须成对。
 //
 // 这是本项目第三次踩同一个坑：
-//   1. 日 token 闸 —— RecordUpstreamCall 零调用点，水位恒 0
-//   2. 美元日限额 —— shouldUpdateAccountQuota 不认 reclaude，quota_daily_used 恒 0
-//   3. RPM —— 调度端读计数，而 handler 的递增仍卡在 oauth
+//  1. 日 token 闸 —— RecordUpstreamCall 零调用点，水位恒 0
+//  2. 美元日限额 —— shouldUpdateAccountQuota 不认 reclaude，quota_daily_used 恒 0
+//  3. RPM —— 调度端读计数，而 handler 的递增仍卡在 oauth
 //
 // 三次的表现完全一致：**页面上限额显示得好好的，实际无限跑**。
 // 所以每加一个「读侧适用类型」，都必须有一条测试把对应的写侧钉住。

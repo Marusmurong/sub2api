@@ -117,12 +117,11 @@ func (a *Account) resolveForcedFingerprintSpec() *forcedFingerprintSpec {
 	// 🔴 reclaude 账号：推理 UA 的版本段与括号后缀钉在登录机器上（E2-L1）。
 	//
 	// 2026-09-26 sub 实发信封里三个版本号并存（引导 UA 1.4.0、推理 UA 2.1.280、
-	// event_logging env.version 2.1.282），推理 UA 说 sdk-cli 而 billing 块说 cli；
-	// 同机存活的真客户端从 UA、billing 到事件全是 2.1.282 + sdk-cli。
-	// 版本取 machine_env.cli_version（与合成引导、event_logging 同源）；后缀钉 sdk-cli
-	// （`claude -p` 的形态，与合成引导的 UA / skills 的 entrypoint 参数一致）。
-	// 这里只钉 UA；billing 块的 cc_entrypoint 由 resolveClientEntrypointForAccount 钉，
-	// 两处取同一个常量 reclaudeClientEntrypoint。显式 fingerprint 字段仍可在下面覆盖。
+	// event_logging env.version 2.1.282），推理 UA 说 sdk-cli 而 billing 块说 cli。
+	// 版本取 machine_env.cli_version（与合成引导、event_logging 同源）；后缀取
+	// reclaudeClientEntrypoint（2026-09-27 翻转为 cli —— sub 的身份块硬编码 cli 文案，
+	// 只有 cli 全链路自洽，见该常量注释）。这里只钉 UA；billing 块的 cc_entrypoint 由
+	// resolveClientEntrypointForAccount 钉，两处取同一个常量。显式 fingerprint 仍可覆盖。
 	if a.IsReclaude() {
 		if v := parseReclaudeMachineEnv(a.GetCredential(CredKeyReclaudeMachineEnv)).CliVersion; v != "" {
 			base.CLIVersion = strings.TrimPrefix(strings.TrimSpace(v), "v")

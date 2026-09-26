@@ -20,7 +20,7 @@ const (
 	reclaudeInnerUAAxios = "axios/1.15.2"
 	// 带版本号的两个由 reclaudeInnerUA* 函数按账号的 client_version 拼出来 ——
 	// 写死版本号会让整个设备群停在同一个版本上（D9）。
-	reclaudeInnerUACLIFormat       = "claude-cli/%s (external, sdk-cli)"
+	reclaudeInnerUACLIFormat       = "claude-cli/%s (external, cli)"
 	reclaudeInnerUAClaudeCodeForma = "claude-code/%s"
 )
 
@@ -153,19 +153,19 @@ func BuildReclaudeBootstrapRequests(p ReclaudeBootstrapParams) []ReclaudeLifecyc
 	// organizations/skills：需要 org uuid;缺则跳过(编不出真 org 更危险)。
 	if org := strings.TrimSpace(p.OrgUUID); org != "" {
 		skills := cli("https://api.anthropic.com/api/oauth/organizations/"+org+
-			"/skills/list-skills?include_wiggle_skills=true&entrypoint=sdk-cli",
+			"/skills/list-skills?include_wiggle_skills=true&entrypoint=cli",
 			212*time.Millisecond, "")
 		skills.Headers["content-type"] = "application/json"
 		skills.Headers["anthropic-version"] = "2023-06-01"
 		// ✅ 真值定值:不是 OS 平台,是 SDK 自报的客户端平台标识。
-		skills.Headers["anthropic-client-platform"] = "claude_code_sdk"
+		skills.Headers["anthropic-client-platform"] = "claude_code_cli"
 		skills.Headers["x-organization-uuid"] = org
 		reqs = append(reqs, skills)
 	}
 
 	if p.Cold {
 		// claude_cli/bootstrap：UA=claude-code/<cli>,带 model 参数(本次推理模型)。
-		bootstrapURL := "https://api.anthropic.com/api/claude_cli/bootstrap?entrypoint=sdk-cli"
+		bootstrapURL := "https://api.anthropic.com/api/claude_cli/bootstrap?entrypoint=cli"
 		if m := strings.TrimSpace(p.Model); m != "" {
 			bootstrapURL += "&model=" + url.QueryEscape(m)
 		}

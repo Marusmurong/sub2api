@@ -228,11 +228,13 @@ func BuildReclaudeEventBatch(ctx ReclaudeEventContext, names []string) *Reclaude
 				UserType: "external",
 				Betas:    reclaudeEventBetas,
 				Env:      env,
-				// ✅ 真值 entrypoint=sdk-cli / client_type=sdk-cli /
-				// is_interactive=false —— 与推理请求的 claude-cli UA 自洽。
-				Entrypoint:    "sdk-cli",
-				IsInteractive: false,
-				ClientType:    "sdk-cli",
+				// ✅ 真值 entrypoint=cli / client_type=cli / is_interactive=true
+				// （2026-09-27 交互式抓包）。与推理 UA (external, cli)、billing
+				// cc_entrypoint=cli、bootstrap/skills 的 entrypoint=cli 全链路自洽。
+				// 2026-09-27 翻转（原 sdk-cli，与 sub 硬编码的 cli 身份块矛盾）。
+				Entrypoint:    "cli",
+				IsInteractive: true,
+				ClientType:    "cli",
 				Process:       process,
 				Auth:          auth,
 				// 逐事件唯一：真值里每条事件的 event_id 都不同。

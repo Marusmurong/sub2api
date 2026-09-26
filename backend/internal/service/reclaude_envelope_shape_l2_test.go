@@ -45,7 +45,7 @@ func TestReclaudeUpstreamDoRespectsSyntheticNoAuth(t *testing.T) {
 		req, err := http.NewRequestWithContext(WithReclaudeSynthetic(context.Background()),
 			http.MethodGet, "https://api.anthropic.com/mcp-registry/v0/servers?version=latest", nil)
 		require.NoError(t, err)
-		setHeaderRaw(req.Header, "user-agent", "claude-cli/2.1.282 (external, sdk-cli)")
+		setHeaderRaw(req.Header, "user-agent", "claude-cli/2.1.282 (external, cli)")
 
 		headers := doSyntheticThroughUpstream(t, req)
 

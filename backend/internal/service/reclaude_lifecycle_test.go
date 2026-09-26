@@ -85,21 +85,21 @@ func TestBuildReclaudeBootstrapRequests(t *testing.T) {
 			byURL[r.URL] = r
 		}
 		// bootstrap: UA=claude-code/<cli>, 带 model, beta oauth
-		b, ok := byURL["https://api.anthropic.com/api/claude_cli/bootstrap?entrypoint=sdk-cli&model=claude-opus-5-5"]
+		b, ok := byURL["https://api.anthropic.com/api/claude_cli/bootstrap?entrypoint=cli&model=claude-opus-5-5"]
 		require.True(t, ok, "缺 claude_cli/bootstrap")
 		require.Equal(t, "claude-code/2.1.280", b.Headers["user-agent"])
 		require.Equal(t, "oauth-2025-04-20", b.Headers["anthropic-beta"])
 		require.True(t, b.NeedsAuthorization)
-		// account/settings: UA=claude-cli sdk-cli, beta oauth, 无 content-type
+		// account/settings: UA=claude-cli cli, beta oauth, 无 content-type
 		s, ok := byURL["https://api.anthropic.com/api/oauth/account/settings"]
 		require.True(t, ok, "缺 oauth/account/settings")
-		require.Equal(t, "claude-cli/2.1.280 (external, sdk-cli)", s.Headers["user-agent"])
+		require.Equal(t, "claude-cli/2.1.280 (external, cli)", s.Headers["user-agent"])
 		require.Equal(t, "oauth-2025-04-20", s.Headers["anthropic-beta"])
 		require.NotContains(t, s.Headers, "content-type")
-		// org/skills: 带 x-organization-uuid + anthropic-client-platform=claude_code_sdk, 无 beta
-		sk, ok := byURL["https://api.anthropic.com/api/oauth/organizations/47be3ed1-4b36-4bae-837d-40b5106369ec/skills/list-skills?include_wiggle_skills=true&entrypoint=sdk-cli"]
+		// org/skills: 带 x-organization-uuid + anthropic-client-platform=claude_code_cli, 无 beta
+		sk, ok := byURL["https://api.anthropic.com/api/oauth/organizations/47be3ed1-4b36-4bae-837d-40b5106369ec/skills/list-skills?include_wiggle_skills=true&entrypoint=cli"]
 		require.True(t, ok, "缺 organizations/skills")
-		require.Equal(t, "claude_code_sdk", sk.Headers["anthropic-client-platform"])
+		require.Equal(t, "claude_code_cli", sk.Headers["anthropic-client-platform"])
 		require.Equal(t, "47be3ed1-4b36-4bae-837d-40b5106369ec", sk.Headers["x-organization-uuid"])
 		require.NotContains(t, sk.Headers, "anthropic-beta")
 	})
@@ -131,7 +131,7 @@ func TestBuildReclaudeBootstrapRequests(t *testing.T) {
 		}
 		require.GreaterOrEqual(t, len(agents), 2)
 		require.True(t, agents["axios/1.15.2"])
-		require.True(t, agents["claude-cli/2.1.280 (external, sdk-cli)"])
+		require.True(t, agents["claude-cli/2.1.280 (external, cli)"])
 	})
 
 	t.Run("mcp-registry 不带 Authorization", func(t *testing.T) {
@@ -178,7 +178,7 @@ func TestReclaudeClientVersionInUA(t *testing.T) {
 	})
 
 	t.Run("去掉表单可能带的 v 前缀", func(t *testing.T) {
-		require.Equal(t, "claude-cli/1.4.0 (external, sdk-cli)", reclaudeInnerUACLI("v1.4.0"))
+		require.Equal(t, "claude-cli/1.4.0 (external, cli)", reclaudeInnerUACLI("v1.4.0"))
 	})
 
 	t.Run("缺版本时用兜底值而不是空串", func(t *testing.T) {

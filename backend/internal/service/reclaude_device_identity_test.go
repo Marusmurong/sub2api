@@ -13,8 +13,9 @@ import (
 // `reclaude state mismatch, please restart reclaude`。
 //
 // 两个值的来源（都在 login 那台机器上）：
-//   device_id    = ~/.claude.json 的 userID（64 hex）
-//   account_uuid = /api/cli/auth/poll 响应的 AccountUUID
+//
+//	device_id    = ~/.claude.json 的 userID（64 hex）
+//	account_uuid = /api/cli/auth/poll 响应的 AccountUUID
 //
 // ⚠️ 注意同名不同物：凭据里的 reclaude_device_id（如 44186）是**设备号**，
 // 发在 X-Reclaude-Device-Id 头上；这里的 device_id 是 Claude Code 的 userID，
