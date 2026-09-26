@@ -73,6 +73,18 @@ const billingHeaderCCHSegment = " cch=00000;"
 // 生成，其取样口径含 transcript 的 isMeta 过滤，我们无法从 API body 完全复现，重算
 // 反而可能引入偏差，故保持客户端原值。
 func normalizeBillingHeaderBlock(body []byte, userAgent string, recomputeFingerprint bool, prevRequestID string) []byte {
+	return normalizeBillingHeaderBlockWithEntrypoint(body, userAgent, recomputeFingerprint, prevRequestID, "")
+}
+
+// normalizeBillingHeaderBlockWithEntrypoint 在 normalizeBillingHeaderBlock 之上再把
+// cc_entrypoint 对齐到本次请求判定出的入口（entrypoint 为空则不动）。
+//
+// 出站 UA 的括号后缀由同一个判定结果决定（applyClientEntrypointUserAgent）；透传路径
+// 的 billing 块是下游写的，若不在这里对齐，会出现「UA 说 sdk-cli、块说 cli」——
+// 2026-09-26 sub 实发的每条推理都是这个形态（E2-L1）。
+func normalizeBillingHeaderBlockWithEntrypoint(
+	body []byte, userAgent string, recomputeFingerprint bool, prevRequestID, entrypoint string,
+) []byte {
 	systemResult := gjson.GetBytes(body, "system")
 	if !systemResult.Exists() || !systemResult.IsArray() {
 		return body
@@ -97,6 +109,9 @@ func normalizeBillingHeaderBlock(body []byte, userAgent string, recomputeFingerp
 		next := original
 		if version != "" {
 			next = ccVersionInBillingRe.ReplaceAllString(next, "cc_version="+version)
+		}
+		if entrypoint != "" {
+			next = ccEntrypointValueRe.ReplaceAllString(next, "cc_entrypoint="+entrypoint+";")
 		}
 		if fingerprint != "" {
 			next = ccVersionFingerprintInBillingRe.ReplaceAllString(next, "${1}."+fingerprint)

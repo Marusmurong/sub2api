@@ -20,9 +20,6 @@ type ReclaudeLifecycleDriver struct {
 	now     func() time.Time
 
 	mu sync.Mutex
-	// turns 记每个账号在**当前会话内**已经发过几次推理，
-	// 用来决定要不要带 mcp 复查（真值里只有会话早期带）。
-	turns map[int64]int
 	// sessions 记每个账号当前会话的 id 与起点，供遥测事件填
 	// session_id / process.uptime —— 真值里同一会话的事件共享同一个 id。
 	sessions map[int64]reclaudeSessionState
@@ -43,7 +40,6 @@ func NewReclaudeLifecycleDriver(sender *ReclaudeLifecycleSender) *ReclaudeLifecy
 		tracker:        NewReclaudeSessionTracker(),
 		sender:         sender,
 		now:            time.Now,
-		turns:          map[int64]int{},
 		sessions:       map[int64]reclaudeSessionState{},
 		pendingEvents:  map[int64][]string{},
 		lastEventFlush: map[int64]time.Time{},
@@ -72,6 +68,15 @@ func (d *ReclaudeLifecycleDriver) OnInference(
 	if proxyURL == "" {
 		return
 	}
+	// 🔴 daemon 模式不合成（E1）。本机真客户端自己会发引导 / 遥测，再补一份就是
+	// 双份；而且我们的合成 GET 会带着自己的缺陷经 daemon 转出去，把「daemon 装箱
+	// 是否被撤」这个对照实验搞脏。Do 在 daemon 分支之前调用本函数，闸必须在这里。
+	if _, ok := ReclaudeDaemonEndpoint(account); ok {
+		return
+	}
+	if _, ok := ReclaudeDaemonProxy(account); ok {
+		return
+	}
 
 	// 🔴 内层 claude-cli/claude-code UA 用 **claude-cli 版本**(machine_env.cli_version,
 	// 如 2.1.282),不是 reclaude 包装器版本(client_version=v1.4.0)。2026-09-26 抓包实证
@@ -81,18 +86,21 @@ func (d *ReclaudeLifecycleDriver) OnInference(
 	orgUUID := account.GetCredential(CredKeyReclaudeOrganizationUUID)
 	now := d.now()
 
-	var requests []ReclaudeLifecycleRequest
+	// 冷/暖必须在 ObserveAt 之前算：ObserveAt 会覆盖 lastSeen。
+	cold := d.isColdStart(account.ID, now)
 	if d.tracker.ObserveAt(account.ID, now) {
 		d.startSession(account.ID, now)
-		requests = BuildReclaudeBootstrapRequests(ReclaudeBootstrapParams{
+		// 🔴 引导批**同步**发完再放推理（E2-L3）。09-26 sub 实发信封里推理比 profile
+		// 早 4 毫秒签名出门，真客户端是引导发完（约 2.4 秒）再发第一条推理。
+		// 代价是每次新会话的首条推理多等约 2.4 秒；上限见 reclaudeBootstrapSyncTimeout。
+		d.sender.SendSync(account, proxyURL, BuildReclaudeBootstrapRequests(ReclaudeBootstrapParams{
 			CLIVersion: cliVersion,
 			OrgUUID:    orgUUID,
 			Model:      model,
-		})
-	} else {
-		// 非新会话：只有会话早期的几次推理带 MCP 复查。
-		requests = BuildReclaudeInferenceFollowups(d.nextTurn(account.ID))
+			Cold:       cold,
+		}))
 	}
+	// 09-26 真值里两次推理之间没有 mcp_servers 复查，会话内的后续推理不再带任何引导。
 
 	// 🔴 遥测**攒批**，不是每条推理发一次。
 	//
@@ -100,13 +108,29 @@ func (d *ReclaudeLifecycleDriver) OnInference(
 	// 于是 3 分钟内发了 11 次。真值是攒批语义 ——
 	// ✅ 抓包实测每批 **103~107 个事件**，一次会话共 7 批。
 	// 批大小差 50 倍、频次差一个量级，这是我自己引入的可判别特征。
+	//
+	// 遥测仍异步：真值里它跟在推理之后几秒，不阻塞推理。
 	if event := d.maybeFlushEvents(account, cliVersion, model, now); event != nil {
-		requests = append(requests, *event)
+		logger.LegacyPrintf("service.reclaude",
+			"lifecycle dispatch: account=%d event_logging", account.ID)
+		d.sender.SendAsync(account, proxyURL, []ReclaudeLifecycleRequest{*event})
 	}
+}
 
-	logger.LegacyPrintf("service.reclaude",
-		"lifecycle dispatch: account=%d requests=%d", account.ID, len(requests))
-	d.sender.SendAsync(account, proxyURL, requests)
+// ReclaudeColdStartGap 是「静默多久之后再来的启动算冷启动」。
+//
+// 真值：09-26 同一台机器 35 分钟后第二次启动**没有** claude_cli/bootstrap 与
+// penguin_mode —— 它们有缓存，不是每次进程启动都拉。缓存 TTL 抓包推不出来，
+// 取 6 小时是工程取舍：短于它会让一天冷启动十几次，长于它又回到「从不冷启动」。
+const ReclaudeColdStartGap = 6 * time.Hour
+
+// isColdStart 判断这次启动该不该带冷启动才有的引导（bootstrap / penguin）。
+func (d *ReclaudeLifecycleDriver) isColdStart(accountID int64, now time.Time) bool {
+	last, seen := d.tracker.LastSeen(accountID)
+	if !seen {
+		return true
+	}
+	return now.Sub(last) >= ReclaudeColdStartGap
 }
 
 // ReclaudeEventFlushInterval 是遥测攒批的最小间隔。
@@ -189,7 +213,6 @@ func (d *ReclaudeLifecycleDriver) accumulateEvents(accountID int64, now time.Tim
 func (d *ReclaudeLifecycleDriver) startSession(accountID int64, now time.Time) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.turns[accountID] = 1
 	d.sessions[accountID] = reclaudeSessionState{id: uuid.NewString(), startAt: now}
 	// 新会话重置攒批状态：不清的话，上一个会话的事件会带着旧 session_id
 	// 被算进新会话的第一批里。同时删掉 lastEventFlush，让新会话立刻上报一次
@@ -203,11 +226,4 @@ func (d *ReclaudeLifecycleDriver) sessionState(accountID int64) (reclaudeSession
 	defer d.mu.Unlock()
 	session, ok := d.sessions[accountID]
 	return session, ok
-}
-
-func (d *ReclaudeLifecycleDriver) nextTurn(accountID int64) int {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.turns[accountID]++
-	return d.turns[accountID]
 }

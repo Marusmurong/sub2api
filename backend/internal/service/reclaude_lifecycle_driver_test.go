@@ -36,6 +36,29 @@ func waitForCalls(t *testing.T, forwarder *recordingLifecycleForwarder, want int
 	return forwarder.snapshot()
 }
 
+func countEventPosts(calls []recordedLifecycleCall) int {
+	n := 0
+	for _, c := range calls {
+		if strings.Contains(c.url, "/api/event_logging/") {
+			n++
+		}
+	}
+	return n
+}
+
+// 引导批是同步发的，事件是异步的：断言事件时按事件条数等。
+func waitForEventPosts(t *testing.T, forwarder *recordingLifecycleForwarder, want int) []recordedLifecycleCall {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if calls := forwarder.snapshot(); countEventPosts(calls) >= want {
+			return calls
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return forwarder.snapshot()
+}
+
 func TestReclaudeLifecycleDriver(t *testing.T) {
 	ctx := context.Background()
 
@@ -55,7 +78,8 @@ func TestReclaudeLifecycleDriver(t *testing.T) {
 		driver.OnInference(ctx, account, "http://proxy:8080", "claude-opus-5-5")
 		waitForCalls(t, forwarder, 10)
 		driver.OnInference(ctx, account, "http://proxy:8080", "claude-opus-5-5")
-		calls := waitForCalls(t, forwarder, 11)
+		time.Sleep(50 * time.Millisecond)
+		calls := forwarder.snapshot()
 
 		bootstraps := 0
 		for _, c := range calls {
@@ -171,7 +195,7 @@ func TestReclaudeLifecycleDriverEmitsEvents(t *testing.T) {
 
 		driver.OnInference(ctx, account, "http://proxy:8080", "claude-opus-5-5")
 
-		calls := waitForCalls(t, forwarder, 11)
+		calls := waitForCalls(t, forwarder, 12)
 		events := 0
 		for _, c := range calls {
 			if strings.Contains(c.url, "/api/event_logging/v2/batch") {
@@ -205,13 +229,13 @@ func TestReclaudeLifecycleDriverEmitsEvents(t *testing.T) {
 		driver.now = func() time.Time { return base }
 
 		driver.OnInference(ctx, account, "http://proxy:8080", "claude-opus-5-5")
-		waitForCalls(t, forwarder, 11)
+		waitForEventPosts(t, forwarder, 1)
 		driver.OnInference(ctx, account, "http://proxy:8080", "claude-opus-5-5")
-		waitForCalls(t, forwarder, 11)
 		driver.now = func() time.Time { return base.Add(ReclaudeSessionIdleGap) }
 		driver.OnInference(ctx, account, "http://proxy:8080", "claude-opus-5-5")
 
-		sessions := collectEventSessionIDs(t, waitForCalls(t, forwarder, 20))
+		// 引导批同步、事件异步：等的是事件条数，不是总条数。
+		sessions := collectEventSessionIDs(t, waitForEventPosts(t, forwarder, 2))
 		require.GreaterOrEqual(t, len(sessions), 2)
 		require.Len(t, uniqueStrings(sessions), 2,
 			"同会话内 session_id 相同，跨会话必须变化")
@@ -259,16 +283,6 @@ func TestReclaudeEventBatching(t *testing.T) {
 		sender := NewReclaudeLifecycleSender(forwarder, cipher)
 		sender.sleep = func(time.Duration) {}
 		return NewReclaudeLifecycleDriver(sender), forwarder, account
-	}
-
-	countEventPosts := func(calls []recordedLifecycleCall) int {
-		n := 0
-		for _, c := range calls {
-			if strings.Contains(c.url, "/api/event_logging/") {
-				n++
-			}
-		}
-		return n
 	}
 
 	t.Run("间隔内的多次推理只上报一次", func(t *testing.T) {
@@ -326,8 +340,7 @@ func TestReclaudeEventBatching(t *testing.T) {
 		driver, forwarder, account := fixture(t)
 		driver.now = func() time.Time { return base }
 		driver.OnInference(ctx, account, "http://p", "m")
-		waitForCalls(t, forwarder, 11)
-		require.Equal(t, 1, countEventPosts(forwarder.snapshot()))
+		require.Equal(t, 1, countEventPosts(waitForEventPosts(t, forwarder, 1)))
 
 		driver.now = func() time.Time { return base.Add(ReclaudeSessionIdleGap) }
 		driver.OnInference(ctx, account, "http://p", "m")

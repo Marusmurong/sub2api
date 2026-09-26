@@ -152,8 +152,10 @@ func TestReclaudeUpstream_Do_Request(t *testing.T) {
 		for name := range meta.Headers {
 			require.Equal(t, strings.ToLower(name), name, "header %q 没有小写化", name)
 		}
-		// UA 后缀对齐真客户端 sdk-cli（见 overrideReclaudeStainlessHeaders）。
-		require.Equal(t, "claude-cli/2.1.263 (external, sdk-cli)", meta.Headers["user-agent"])
+		// UA 在信封层原样透传：版本段与括号后缀由账号强制身份在 forward 阶段钉死
+		// （resolveForcedFingerprintSpec / resolveClientEntrypointForAccount），
+		// 与 billing 块同源。信封层不再改后缀，见 E2-L1。
+		require.Equal(t, "claude-cli/2.1.263 (external, cli)", meta.Headers["user-agent"])
 
 		body := upstream.gotBody[reclaude.EnvelopeLengthPrefixBytes+metaLen:]
 		require.JSONEq(t, `{"model":"claude"}`, string(body))

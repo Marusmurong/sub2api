@@ -49,13 +49,13 @@ func TestOverrideReclaudeStainlessHeaders(t *testing.T) {
 		require.False(t, present, "真客户端内层不发 helper-method")
 	})
 
-	t.Run("UA 后缀改成 sdk-cli", func(t *testing.T) {
+	t.Run("UA 不在信封层改(入口由账号身份钉死,块与头同源)", func(t *testing.T) {
 		headers := map[string]string{
-			"user-agent": "claude-cli/2.1.280 (external, cli)",
+			"user-agent": "claude-cli/2.1.282 (external, sdk-cli)",
 		}
 		overrideReclaudeStainlessHeaders(headers, stainlessAccount("linux/amd64", menvLinuxX64))
 
-		require.Equal(t, "claude-cli/2.1.280 (external, sdk-cli)", headers["user-agent"])
+		require.Equal(t, "claude-cli/2.1.282 (external, sdk-cli)", headers["user-agent"])
 	})
 
 	t.Run("darwin 账号保持 MacOS（不强改）", func(t *testing.T) {

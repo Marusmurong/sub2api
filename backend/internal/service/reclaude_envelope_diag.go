@@ -241,7 +241,7 @@ func innerBodyShape(envelope []byte, metaLen, bodyLen int) string {
 		strings.Join(top, " "), sysShape, msgCount, hasFallbacks, hasFallbackTok)
 }
 
-// reclaudeEnvelopeDumpEnv 指定一个目录，把被拒的信封**完整字节**写进去。
+// reclaudeEnvelopeDumpEnv 指定一个目录，把出站信封**完整字节**写进去。
 //
 // 🔴 只在排障时临时打开，用完必须清掉环境变量并删除转储文件：
 // 落盘的是完整信封，内含 authorization（SK）与全量明文 prompt。
@@ -249,8 +249,16 @@ func innerBodyShape(envelope []byte, metaLen, bodyLen int) string {
 // 常态下不该有任何一处把这些写进磁盘。
 const reclaudeEnvelopeDumpEnv = "SUB2API_DEBUG_RECLAUDE_ENVELOPE_DIR"
 
-// dumpRejectedEnvelope 在配置了目录时把信封原样落盘，供离线逐字节比对。
-func dumpRejectedEnvelope(envelope []byte, traceID string) {
+// dumpReclaudeEnvelope 在配置了目录时把信封原样落盘，供离线逐字节比对。
+//
+// 🔴 不论内层 status 都落盘（E0，RECLAUDE_REVOCATION_VERIFY_PLAN_2026-09-26 §2.1）。
+// 此前只 dump 被拒的信封：09-26 拿到的 10 条 sub 实发信封是驱动一个已撤销账号
+// 触发 reject 得到的，其中 /v1/messages 是 curl 测试体 —— 没有一条是成功的
+// 真实推理，与真客户端对照时缺了最关键的那条。
+//
+// 文件名带 status：外层 /proxy 永远 200，内层 status 才是网关的真实回答；
+// 09-26 曾把 8 条内层 502 的重放当成 200 数进去，得出了错误结论。
+func dumpReclaudeEnvelope(envelope []byte, traceID string, status int) {
 	dir := strings.TrimSpace(os.Getenv(reclaudeEnvelopeDumpEnv))
 	if dir == "" || len(envelope) == 0 {
 		return
@@ -258,7 +266,11 @@ func dumpRejectedEnvelope(envelope []byte, traceID string) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return
 	}
-	name := filepath.Join(dir, fmt.Sprintf("envelope-%s.bin", traceID))
+	statusLabel := "err"
+	if status > 0 {
+		statusLabel = strconv.Itoa(status)
+	}
+	name := filepath.Join(dir, fmt.Sprintf("envelope-%s-%s.bin", traceID, statusLabel))
 	// 0600：内含 SK 与明文 prompt。
 	if err := os.WriteFile(name, envelope, 0o600); err != nil {
 		logger.LegacyPrintf("service.reclaude", "reclaude envelope dump failed: %v", err)

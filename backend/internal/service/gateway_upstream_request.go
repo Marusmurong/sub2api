@@ -136,8 +136,14 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		if c != nil && sessionID != "" {
 			c.Set(ccPrevReqSessionIDKey, sessionID)
 		}
-		body = normalizeBillingHeaderBlock(body, userAgent, mimicClaudeCode,
-			s.lookupPrevRequestID(ctx, account, sessionID))
+		// 入口只在 mimic 路径对齐：那条路径的出站 UA 后缀取自同一个 ctx 判定
+		// （applyClientEntrypointUserAgent），块与头必须同源。
+		entrypoint := ""
+		if mimicClaudeCode {
+			entrypoint = ClientEntrypointFromContext(ctx).Product
+		}
+		body = normalizeBillingHeaderBlockWithEntrypoint(body, userAgent, mimicClaudeCode,
+			s.lookupPrevRequestID(ctx, account, sessionID), entrypoint)
 	}
 
 	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===

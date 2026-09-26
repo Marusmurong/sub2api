@@ -63,31 +63,33 @@ func reclaudeBootstrapAcceptHeaders() map[string]string {
 
 // BuildReclaudeBootstrapRequests 产出一次「Claude Code 启动」的引导流量。
 //
-// ✅ 真值时序（2026-09-23 抓包，143742.675 起算）：
+// ✅ 真值（2026-09-26 同机存活真客户端 2.1.282 抓包，
+// docs/captures/reclaude-live-2026-09-26/reccap，第一次启动以 profile 起算）：
 //
-//	+0.000  POST /api/eval/sdk-…                        Bun/1.4.3       ← 不合成
-//	+0.004  GET  /api/oauth/profile                     axios
-//	+0.005  GET  /v1/mcp_servers?…&include_additional…  axios
-//	+0.520  GET  /v1/mcp_servers?…&include_additional…  axios
-//	+2.030  GET  /v1/mcp_servers?…&include_additional…  axios
-//	+2.034  GET  /v1/mcp_servers?limit=1000             axios
-//	+3.160  GET  /api/claude_code_penguin_mode          axios
-//	+3.161  GET  /mcp-registry/v0/servers?…             claude-cli（无 auth）
-//	+3.162  GET  /api/claude_code_grove                 claude-cli
+//	+0.000  POST /api/eval/sdk-…                        Bun/1.4.3     ← 不合成
+//	+0.000  GET  /api/oauth/profile                     axios         cache-control: no-cache
+//	+0.001  GET  /v1/mcp_servers?…&include_additional…  axios         只 1 次
+//	+0.212  GET  /api/oauth/organizations/{org}/skills  claude-cli
+//	+0.213  GET  /api/claude_cli/bootstrap?…            claude-code   ← 冷启动才有
+//	+0.214  GET  /api/claude_code_penguin_mode          axios         ← 冷启动才有,无 content-type
+//	+0.215  GET  /mcp-registry/v0/servers?…  #1         claude-cli    无 auth、无 content-type
+//	+0.217  GET  /api/oauth/account/settings            claude-cli
+//	+0.218  GET  /api/claude_code_grove                 claude-cli
+//	+1.293  GET  /mcp-registry/v0/servers?…  #2
+//	+1.933  GET  /mcp-registry/v0/servers?…  #3
+//	+2.436  GET  /mcp-registry/v0/servers?…  #4
+//
+// 第二次启动（35 分钟后）同样的结构，但**没有 bootstrap 和 penguin** ——
+// 它们是冷启动（进程首次 / 缓存过期）才拉的，不是每会话必发。
 //
 // 🔴 **不合成 /api/eval/sdk-…**：它的路径里带一个我们编不出来的 SDK 实例 ID
 // （`sdk-zAZezfDKGoZuXXKe`），而且 UA 是 Bun —— 那是 SDK 侧的东西，不是 CLI。
 // 编一个假 ID 发过去，比不发更容易穿帮：对端只要校验 ID 是否属于真实 SDK 会话
 // 就能抓出来。**缺席是可以解释的（没装 SDK），伪造不行。**
 //
-// mcp_servers 重复四次是真值 —— Claude Code 在启动过程中确实反复拉它
-// （不同阶段各拉一次）。抹平成一次反而与真值不符。
-//
-// 🔴 2026-09-26 第八次撤销排查后补齐 **CLI 启动三件套**（claude_cli/bootstrap、
-// oauth/organizations/{org}/skills/list-skills、oauth/account/settings）——同机存活
-// 真客户端抓包里每次启动必发，此前 sub2api 全缺。它们是"真 CLI 在这台设备启动过"
-// 的印证流量，收敛的撤销根因（会话段缺 CLI 印证）指向补齐它们。形状逐字段照抄
-// docs/captures/reclaude-live-2026-09-26。
+// ⚠️ 09-23 那份 SDK 抓包里 mcp_servers 重复了四次、推理之间还有 mcp_servers 复查；
+// 09-26 这份（当前基线版本 2.1.282、同机存活）都没有。两份真值不一致时取 09-26，
+// 记录在案（RECLAUDE_REVOCATION_VERIFY_PLAN_2026-09-26 §4 L4），不要两种都发。
 type ReclaudeBootstrapParams struct {
 	// CLIVersion 是 **claude-cli** 版本（machine_env.cli_version，如 2.1.282）。
 	// 🔴 内层 claude-cli/claude-code UA 必须用它,不是 reclaude 包装器版本(v1.4.0)——
@@ -98,13 +100,23 @@ type ReclaudeBootstrapParams struct {
 	OrgUUID string
 	// Model 是本次推理模型,进 claude_cli/bootstrap 的 model 参数;空则省略该参数。
 	Model string
+	// Cold 为 true 表示冷启动：带 claude_cli/bootstrap 与 penguin_mode。
+	// 真值里第二次启动（35 分钟后）没有这两条，见 ReclaudeColdStartGap。
+	Cold bool
 }
 
 func BuildReclaudeBootstrapRequests(p ReclaudeBootstrapParams) []ReclaudeLifecycleRequest {
-	axios := func(url string, delay time.Duration, beta string) ReclaudeLifecycleRequest {
+	axios := func(url string, delay time.Duration) ReclaudeLifecycleRequest {
 		headers := reclaudeBootstrapAcceptHeaders()
 		headers["user-agent"] = reclaudeInnerUAAxios
-		headers["content-type"] = "application/json"
+		return ReclaudeLifecycleRequest{
+			Method: "GET", URL: url, Headers: headers,
+			NeedsAuthorization: true, Delay: delay,
+		}
+	}
+	cli := func(url string, delay time.Duration, beta string) ReclaudeLifecycleRequest {
+		headers := reclaudeBootstrapAcceptHeaders()
+		headers["user-agent"] = reclaudeInnerUACLI(p.CLIVersion)
 		if beta != "" {
 			headers["anthropic-beta"] = beta
 		}
@@ -113,141 +125,73 @@ func BuildReclaudeBootstrapRequests(p ReclaudeBootstrapParams) []ReclaudeLifecyc
 			NeedsAuthorization: true, Delay: delay,
 		}
 	}
-
-	mcpServersURL := "https://api.anthropic.com/v1/mcp_servers?limit=1000&include_additional_installs=true"
-	mcpHeaders := func() map[string]string {
-		headers := reclaudeBootstrapAcceptHeaders()
-		headers["user-agent"] = reclaudeInnerUAAxios
-		headers["content-type"] = "application/json"
-		headers["anthropic-beta"] = "mcp-servers-2025-12-04"
-		headers["anthropic-version"] = "2023-06-01"
-		headers["mcp-protocol-version"] = "2025-11-25"
-		// ✅ 真值里的定值：base64 of {"roots":{"listChanged":true},"elicitation":{}}
-		headers["anthropic-mcp-client-capabilities"] =
-			"eyJyb290cyI6eyJsaXN0Q2hhbmdlZCI6dHJ1ZX0sImVsaWNpdGF0aW9uIjp7fX0="
-		return headers
-	}
-	mcp := func(url string, delay time.Duration) ReclaudeLifecycleRequest {
-		return ReclaudeLifecycleRequest{
-			Method: "GET", URL: url, Headers: mcpHeaders(),
-			NeedsAuthorization: true, Delay: delay,
-		}
+	registry := func(delay time.Duration) ReclaudeLifecycleRequest {
+		r := cli("https://api.anthropic.com/mcp-registry/v0/servers?version=latest&limit=100"+
+			"&visibility=commercial%2Cgsuite%2Centerprise%2Chealth", delay, "")
+		// 🔴 真值里这条没有 Authorization 也没有 content-type。补上就是抄错。
+		r.NeedsAuthorization = false
+		return r
 	}
 
-	cliHeaders := func() map[string]string {
-		headers := reclaudeBootstrapAcceptHeaders()
-		headers["user-agent"] = reclaudeInnerUACLI(p.CLIVersion)
-		return headers
-	}
+	profile := axios("https://api.anthropic.com/api/oauth/profile", 0)
+	profile.Headers["content-type"] = "application/json"
+	profile.Headers["cache-control"] = "no-cache"
 
-	groveHeaders := cliHeaders()
-	groveHeaders["anthropic-beta"] = "oauth-2025-04-20"
+	mcpServers := axios(
+		"https://api.anthropic.com/v1/mcp_servers?limit=1000&include_additional_installs=true",
+		1*time.Millisecond)
+	mcpServers.Headers["content-type"] = "application/json"
+	mcpServers.Headers["anthropic-beta"] = "mcp-servers-2025-12-04"
+	mcpServers.Headers["anthropic-version"] = "2023-06-01"
+	mcpServers.Headers["mcp-protocol-version"] = "2025-11-25"
+	// ✅ 真值里的定值：base64 of {"roots":{"listChanged":true},"elicitation":{}}
+	mcpServers.Headers["anthropic-mcp-client-capabilities"] =
+		"eyJyb290cyI6eyJsaXN0Q2hhbmdlZCI6dHJ1ZX0sImVsaWNpdGF0aW9uIjp7fX0="
 
-	registryHeaders := cliHeaders()
-	registryHeaders["content-type"] = "application/json"
-
-	// CLI 启动三件套 -----------------------------------------------------------
-	// claude_cli/bootstrap：UA=claude-code/<cli>,带 model 参数(本次推理模型)。
-	bootstrapURL := "https://api.anthropic.com/api/claude_cli/bootstrap?entrypoint=sdk-cli"
-	if m := strings.TrimSpace(p.Model); m != "" {
-		bootstrapURL += "&model=" + url.QueryEscape(m)
-	}
-	bootstrapHeaders := reclaudeBootstrapAcceptHeaders()
-	bootstrapHeaders["user-agent"] = reclaudeInnerUAClaudeCode(p.CLIVersion)
-	bootstrapHeaders["content-type"] = "application/json"
-	bootstrapHeaders["anthropic-beta"] = "oauth-2025-04-20"
-
-	// oauth/account/settings：UA=claude-cli sdk-cli,beta oauth,无 content-type。
-	settingsHeaders := reclaudeBootstrapAcceptHeaders()
-	settingsHeaders["user-agent"] = reclaudeInnerUACLI(p.CLIVersion)
-	settingsHeaders["anthropic-beta"] = "oauth-2025-04-20"
-
-	reqs := []ReclaudeLifecycleRequest{
-		{
-			Method: "GET", URL: bootstrapURL, Headers: bootstrapHeaders,
-			NeedsAuthorization: true, Delay: 2 * time.Millisecond,
-		},
-		axios("https://api.anthropic.com/api/oauth/profile", 4*time.Millisecond, ""),
-		mcp(mcpServersURL, 5*time.Millisecond),
-		mcp(mcpServersURL, 520*time.Millisecond),
-		mcp(mcpServersURL, 2030*time.Millisecond),
-		mcp("https://api.anthropic.com/v1/mcp_servers?limit=1000", 2034*time.Millisecond),
-		axios("https://api.anthropic.com/api/claude_code_penguin_mode",
-			3160*time.Millisecond, "oauth-2025-04-20"),
-		{
-			Method: "GET",
-			URL: "https://api.anthropic.com/mcp-registry/v0/servers?version=latest&limit=100" +
-				"&visibility=commercial%2Cgsuite%2Centerprise%2Chealth",
-			Headers: registryHeaders,
-			// 🔴 真值里这条没有 Authorization。补上就是抄错。
-			NeedsAuthorization: false,
-			Delay:              3161 * time.Millisecond,
-		},
-		{
-			Method:             "GET",
-			URL:                "https://api.anthropic.com/api/claude_code_grove",
-			Headers:            groveHeaders,
-			NeedsAuthorization: true,
-			Delay:              3162 * time.Millisecond,
-		},
-		{
-			Method:             "GET",
-			URL:                "https://api.anthropic.com/api/oauth/account/settings",
-			Headers:            settingsHeaders,
-			NeedsAuthorization: true,
-			Delay:              3163 * time.Millisecond,
-		},
-	}
+	reqs := []ReclaudeLifecycleRequest{profile, mcpServers}
 
 	// organizations/skills：需要 org uuid;缺则跳过(编不出真 org 更危险)。
 	if org := strings.TrimSpace(p.OrgUUID); org != "" {
-		skillsHeaders := reclaudeBootstrapAcceptHeaders()
-		skillsHeaders["user-agent"] = reclaudeInnerUACLI(p.CLIVersion)
-		skillsHeaders["content-type"] = "application/json"
-		skillsHeaders["anthropic-version"] = "2023-06-01"
+		skills := cli("https://api.anthropic.com/api/oauth/organizations/"+org+
+			"/skills/list-skills?include_wiggle_skills=true&entrypoint=sdk-cli",
+			212*time.Millisecond, "")
+		skills.Headers["content-type"] = "application/json"
+		skills.Headers["anthropic-version"] = "2023-06-01"
 		// ✅ 真值定值:不是 OS 平台,是 SDK 自报的客户端平台标识。
-		skillsHeaders["anthropic-client-platform"] = "claude_code_sdk"
-		skillsHeaders["x-organization-uuid"] = org
-		reqs = append(reqs, ReclaudeLifecycleRequest{
-			Method: "GET",
-			URL: "https://api.anthropic.com/api/oauth/organizations/" + org +
-				"/skills/list-skills?include_wiggle_skills=true&entrypoint=sdk-cli",
-			Headers:            skillsHeaders,
-			NeedsAuthorization: true,
-			Delay:              3164 * time.Millisecond,
-		})
+		skills.Headers["anthropic-client-platform"] = "claude_code_sdk"
+		skills.Headers["x-organization-uuid"] = org
+		reqs = append(reqs, skills)
 	}
 
+	if p.Cold {
+		// claude_cli/bootstrap：UA=claude-code/<cli>,带 model 参数(本次推理模型)。
+		bootstrapURL := "https://api.anthropic.com/api/claude_cli/bootstrap?entrypoint=sdk-cli"
+		if m := strings.TrimSpace(p.Model); m != "" {
+			bootstrapURL += "&model=" + url.QueryEscape(m)
+		}
+		bootstrap := ReclaudeLifecycleRequest{
+			Method: "GET", URL: bootstrapURL, Headers: reclaudeBootstrapAcceptHeaders(),
+			NeedsAuthorization: true, Delay: 213 * time.Millisecond,
+		}
+		bootstrap.Headers["user-agent"] = reclaudeInnerUAClaudeCode(p.CLIVersion)
+		bootstrap.Headers["content-type"] = "application/json"
+		bootstrap.Headers["anthropic-beta"] = "oauth-2025-04-20"
+
+		penguin := axios("https://api.anthropic.com/api/claude_code_penguin_mode", 214*time.Millisecond)
+		penguin.Headers["anthropic-beta"] = "oauth-2025-04-20"
+
+		reqs = append(reqs, bootstrap, penguin)
+	}
+
+	reqs = append(reqs,
+		registry(215*time.Millisecond),
+		cli("https://api.anthropic.com/api/oauth/account/settings", 217*time.Millisecond, "oauth-2025-04-20"),
+		cli("https://api.anthropic.com/api/claude_code_grove", 218*time.Millisecond, "oauth-2025-04-20"),
+		registry(1293*time.Millisecond),
+		registry(1933*time.Millisecond),
+		registry(2436*time.Millisecond),
+	)
 	return reqs
-}
-
-// BuildReclaudeInferenceFollowups 产出跟随一次推理的生命周期请求。
-//
-// ✅ 真值：稳态里 Claude Code 在推理前后会复查 mcp_servers
-// （143746.349 / 143747.862 / 143747.867 三条，夹在推理之间）。
-//
-// 只在**会话的前几次推理**跟随：真值里这种复查集中在会话早期，
-// 后面的推理（143754 / 143803 / 143822）不再带它。
-func BuildReclaudeInferenceFollowups(turn int) []ReclaudeLifecycleRequest {
-	if turn < 1 || turn > 2 {
-		return nil
-	}
-	headers := reclaudeBootstrapAcceptHeaders()
-	headers["user-agent"] = reclaudeInnerUAAxios
-	headers["content-type"] = "application/json"
-	headers["anthropic-beta"] = "mcp-servers-2025-12-04"
-	headers["anthropic-version"] = "2023-06-01"
-	headers["mcp-protocol-version"] = "2025-11-25"
-	headers["anthropic-mcp-client-capabilities"] =
-		"eyJyb290cyI6eyJsaXN0Q2hhbmdlZCI6dHJ1ZX0sImVsaWNpdGF0aW9uIjp7fX0="
-
-	return []ReclaudeLifecycleRequest{{
-		Method:             "GET",
-		URL:                "https://api.anthropic.com/v1/mcp_servers?limit=1000&include_additional_installs=true",
-		Headers:            headers,
-		NeedsAuthorization: true,
-		Delay:              550 * time.Millisecond,
-	}}
 }
 
 // reclaudeInnerUACLI 拼 CLI 的 UA。

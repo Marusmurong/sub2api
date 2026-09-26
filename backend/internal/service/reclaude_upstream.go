@@ -196,7 +196,14 @@ func (u *ReclaudeUpstream) Do(inner *http.Request, account *Account, proxyURL st
 	// Header.Set 会另建一个规范大小写的 "Authorization" 键 —— 两个键并存，装箱时
 	// 统一转小写互相覆盖，谁赢取决于 map 遍历顺序，于是一半的请求带着空凭据出门，
 	// 网关回 400 bad_envelope。setHeaderRaw 会把两种大小写都删掉再写小写键。
-	setHeaderRaw(inner.Header, "authorization", "Bearer "+sk)
+	//
+	// 🔴 合成的生命周期请求例外（E2-L2）：它们由 reclaude_lifecycle_sender 按
+	// NeedsAuthorization 决定带不带 —— 真值里 mcp-registry **没有** authorization
+	// （reccap 20260925-170504.213），而这里无条件覆写把那个标记盖掉了，09-26 实发
+	// 信封里 mcp-registry 就带着 auth 出门。合成请求没带就是刻意不带，不补。
+	if !IsReclaudeSynthetic(inner.Context()) || getHeaderRaw(inner.Header, "authorization") != "" {
+		setHeaderRaw(inner.Header, "authorization", "Bearer "+sk)
+	}
 
 	// D3：补上真客户端的生命周期流量（启动引导 / MCP 复查）。
 	//
@@ -281,9 +288,10 @@ func (u *ReclaudeUpstream) Do(inner *http.Request, account *Account, proxyURL st
 	}
 	if err != nil || status >= http.StatusBadRequest {
 		logEnvelopeShapeOnReject(inner, outer, envelope, traceID, status)
-		// 排障用：仅在 SUB2API_DEBUG_RECLAUDE_ENVELOPE_DIR 配置时落盘完整字节。
-		dumpRejectedEnvelope(envelope, traceID)
 	}
+	// 排障用：仅在 SUB2API_DEBUG_RECLAUDE_ENVELOPE_DIR 配置时落盘完整字节。
+	// 成功的也落：与真客户端对照需要的恰恰是 200 的那条（E0）。
+	dumpReclaudeEnvelope(envelope, traceID, status)
 	if isGatewayErr && u.events != nil {
 		u.events.HandleReclaudeGatewayError(account, gatewayErr.StatusCode)
 	}
@@ -426,7 +434,14 @@ func buildReclaudeEnvelope(inner *http.Request, gatewayURL string, account *Acco
 	} else if inner.URL != nil {
 		headers["host"] = inner.URL.Host
 	}
-	headers["content-length"] = strconv.Itoa(len(body))
+	// 🔴 只在有 body 时写 content-length（E2-L2）。真值里所有 GET
+	// （penguin / grove / settings / mcp-registry，reccap 20260925-170504.21x）
+	// 都没有这个头；09-26 sub 实发的每条 GET 都带着 content-length: 0。
+	if len(body) > 0 {
+		headers["content-length"] = strconv.Itoa(len(body))
+	} else {
+		delete(headers, "content-length")
+	}
 
 	if !synthetic {
 		// 🔴 这两个头缺一不可 —— 2026-09-24 抓真实客户端信封实测：少了会被网关

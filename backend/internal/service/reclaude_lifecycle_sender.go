@@ -20,9 +20,13 @@ type ReclaudeLifecycleForwarder interface {
 
 // ReclaudeLifecycleSender 发送合成的生命周期流量。
 //
-// 🔴 **全程异步、永不阻塞下游**。下游等的是它自己那条推理，
-// 为了让画像好看而让用户多等三秒是本末倒置；而且合成流量失败
-// （网关 429、代理抖动）绝不能把用户的请求也带失败。
+// 两种发法：
+//   - SendAsync：遥测等旁路流量，永不阻塞下游；
+//   - SendSync：新会话的引导批，**发完才返回**（E2-L3）—— 真客户端是引导发完再发
+//     第一条推理，09-26 sub 实发里推理先出门是每次新会话都能看出来的时序矛盾。
+//
+// 🔴 无论哪种，合成流量失败（网关 429、代理抖动）绝不能把用户的请求也带失败：
+// 失败只记日志，不传播。
 type ReclaudeLifecycleSender struct {
 	forwarder ReclaudeLifecycleForwarder
 	cipher    *ReclaudeCredentialCipher
@@ -47,6 +51,12 @@ func NewReclaudeLifecycleSender(
 // 一批卡住的合成请求会一直占着代理连接，而那条代理是推理流量共用的。
 const reclaudeLifecycleTimeout = 45 * time.Second
 
+// reclaudeBootstrapSyncTimeout 是同步引导批的上限。
+//
+// 引导批末条在 +2.436s；这个上限是「推理最多被引导拖多久」的兜底，
+// 超时后剩余引导直接放弃、推理照常出门 —— 宁可引导缺一截，不能让用户请求挂死。
+const reclaudeBootstrapSyncTimeout = 8 * time.Second
+
 // SendAsync 起一个后台任务按时序发完这批请求。
 //
 // 🔴 ctx 不能用请求的 context：下游的 ctx 在响应返回时就被取消了，
@@ -58,11 +68,21 @@ func (s *ReclaudeLifecycleSender) SendAsync(
 	if s == nil || s.forwarder == nil || account == nil || len(requests) == 0 {
 		return
 	}
-	go s.send(account, proxyURL, requests)
+	go s.send(account, proxyURL, requests, reclaudeLifecycleTimeout)
+}
+
+// SendSync 同步发完这批请求后才返回（引导批专用，见 reclaudeBootstrapSyncTimeout）。
+func (s *ReclaudeLifecycleSender) SendSync(
+	account *Account, proxyURL string, requests []ReclaudeLifecycleRequest,
+) {
+	if s == nil || s.forwarder == nil || account == nil || len(requests) == 0 {
+		return
+	}
+	s.send(account, proxyURL, requests, reclaudeBootstrapSyncTimeout)
 }
 
 func (s *ReclaudeLifecycleSender) send(
-	account *Account, proxyURL string, requests []ReclaudeLifecycleRequest,
+	account *Account, proxyURL string, requests []ReclaudeLifecycleRequest, timeout time.Duration,
 ) {
 	defer func() {
 		// 合成流量是旁路，panic 绝不能掀翻进程。
@@ -72,7 +92,7 @@ func (s *ReclaudeLifecycleSender) send(
 		}
 	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), reclaudeLifecycleTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	sk, err := s.cipher.DecryptSecret(account, CredKeyReclaudeSK)

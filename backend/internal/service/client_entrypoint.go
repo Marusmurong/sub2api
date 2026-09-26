@@ -64,6 +64,24 @@ func defaultClientEntrypoint() ClientEntrypoint {
 	return ClientEntrypoint{Product: "cli", UASuffix: "(external, cli)"}
 }
 
+// reclaudeClientEntrypoint 是 reclaude 账号钉死的入口：`claude -p` 的形态。
+//
+// 真客户端（2026-09-26 同机存活抓包）推理 UA、billing 块 cc_entrypoint、event_logging
+// 的 entrypoint / client_type 全是 sdk-cli；合成引导里 skills 的 entrypoint 参数和
+// claude_cli/bootstrap 的 entrypoint 参数也是它。一台设备内所有声明取同一个值。
+var reclaudeClientEntrypoint = ClientEntrypoint{Product: "sdk-cli", UASuffix: "(external, sdk-cli)"}
+
+// resolveClientEntrypointForAccount 按账号判定入口。
+//
+// reclaude 账号无视下游：一台 reclaude 设备就是一台跑 `claude -p` 的机器，下游是
+// 交互式 CLI 还是别的产品，对这台设备的画像没有意义（E2-L1）。其它账号照旧跟随下游。
+func resolveClientEntrypointForAccount(account *Account, clientUA string, body []byte) ClientEntrypoint {
+	if account != nil && account.IsReclaude() {
+		return reclaudeClientEntrypoint
+	}
+	return ResolveClientEntrypoint(clientUA, body)
+}
+
 // ResolveClientEntrypoint 判定本次请求该声明哪个入口。
 //
 // 安全性质：**只有下游 UA 后缀解析出的产品名，与下游自己 billing 块里的

@@ -38,11 +38,10 @@ func overrideReclaudeStainlessHeaders(headers map[string]string, account *Accoun
 	// 而 CC 伪装在流式时会加 stream。删掉 —— 多一个头就是一处可判别差异。
 	delete(headers, "x-stainless-helper-method")
 
-	// UA 后缀：真客户端 /v1/messages 是 (external, sdk-cli)，CC 伪装默认 (external, cli)。
-	// 只改后缀，版本段不动。
-	if ua := headers["user-agent"]; strings.Contains(ua, "(external, cli)") {
-		headers["user-agent"] = strings.Replace(ua, "(external, cli)", "(external, sdk-cli)", 1)
-	}
+	// UA 不在这里改（E2-L1）。版本段与括号后缀由账号强制身份钉死
+	// （resolveForcedFingerprintSpec + resolveClientEntrypointForAccount），
+	// billing 块的 cc_entrypoint 也从同一个判定来。在信封层再替换后缀会让
+	// 「块已按 cli 归一化、头却被改成 sdk-cli」—— 正是 09-26 实发的矛盾。
 
 	// 🔴 anthropic-beta 对齐 reclaude 真客户端(2.1.280)，但**必须与我们实际
 	// 发出的 body 对称**，不是照抄真客户端。

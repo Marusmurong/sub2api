@@ -53,7 +53,8 @@ func (a *Account) HasForcedFingerprint() bool {
 	}
 	// 与 resolveForcedFingerprintSpec 保持同一判据：按平台定型的账号也是「强制身份」，
 	// 否则 persistFingerprintClientID 会把它当 legacy 路径，ClientID 不落库。
-	return a.IsTLSFingerprintEnabled() || a.ClientPlatform() != ClientPlatformUnknown
+	// reclaude 账号同理：它的身份钉在登录机器的 machine_env 上（见下方 reclaude 段）。
+	return a.IsTLSFingerprintEnabled() || a.ClientPlatform() != ClientPlatformUnknown || a.IsReclaude()
 }
 
 func (a *Account) rawFingerprintMap() map[string]any {
@@ -88,7 +89,7 @@ func (a *Account) resolveForcedFingerprintSpec() *forcedFingerprintSpec {
 	fpMap := a.rawFingerprintMap()
 	tlsOn := a.IsTLSFingerprintEnabled()
 	clientPlatform := a.ClientPlatform()
-	if len(fpMap) == 0 && !tlsOn && clientPlatform == ClientPlatformUnknown {
+	if len(fpMap) == 0 && !tlsOn && clientPlatform == ClientPlatformUnknown && !a.IsReclaude() {
 		return nil
 	}
 
@@ -111,6 +112,22 @@ func (a *Account) resolveForcedFingerprintSpec() *forcedFingerprintSpec {
 	// 见 ClientPlatformIdentity）。显式 fingerprint 字段仍可在下面覆盖它。
 	if os, arch, ok := ClientPlatformIdentity(clientPlatform); ok {
 		base.OS, base.Arch = os, arch
+	}
+
+	// 🔴 reclaude 账号：推理 UA 的版本段与括号后缀钉在登录机器上（E2-L1）。
+	//
+	// 2026-09-26 sub 实发信封里三个版本号并存（引导 UA 1.4.0、推理 UA 2.1.280、
+	// event_logging env.version 2.1.282），推理 UA 说 sdk-cli 而 billing 块说 cli；
+	// 同机存活的真客户端从 UA、billing 到事件全是 2.1.282 + sdk-cli。
+	// 版本取 machine_env.cli_version（与合成引导、event_logging 同源）；后缀钉 sdk-cli
+	// （`claude -p` 的形态，与合成引导的 UA / skills 的 entrypoint 参数一致）。
+	// 这里只钉 UA；billing 块的 cc_entrypoint 由 resolveClientEntrypointForAccount 钉，
+	// 两处取同一个常量 reclaudeClientEntrypoint。显式 fingerprint 字段仍可在下面覆盖。
+	if a.IsReclaude() {
+		if v := parseReclaudeMachineEnv(a.GetCredential(CredKeyReclaudeMachineEnv)).CliVersion; v != "" {
+			base.CLIVersion = strings.TrimPrefix(strings.TrimSpace(v), "v")
+		}
+		base.UASuffix = reclaudeClientEntrypoint.UASuffix
 	}
 
 	if v := mapString(fpMap, "os", "OS", "stainless_os"); v != "" {

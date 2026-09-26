@@ -54,6 +54,20 @@ func (t *ReclaudeSessionTracker) ObserveAt(accountID int64, at time.Time) bool {
 	return at.Sub(previous) >= ReclaudeSessionIdleGap
 }
 
+// LastSeen 返回某账号上一次推理的时刻；从未见过返回 false。
+//
+// 给冷/暖启动判定用（ReclaudeColdStartGap）：必须在 ObserveAt 之前读，
+// ObserveAt 会把它覆盖成当前时刻。
+func (t *ReclaudeSessionTracker) LastSeen(accountID int64) (time.Time, bool) {
+	if t == nil {
+		return time.Time{}, false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	last, seen := t.lastSeen[accountID]
+	return last, seen
+}
+
 // Forget 丢弃某账号的会话状态（账号被删或停用时调用，避免 map 无限增长）。
 func (t *ReclaudeSessionTracker) Forget(accountID int64) {
 	if t == nil {

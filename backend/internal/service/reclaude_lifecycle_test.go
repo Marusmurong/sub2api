@@ -60,6 +60,7 @@ func TestBuildReclaudeBootstrapRequests(t *testing.T) {
 		CLIVersion: "2.1.280",
 		OrgUUID:    "47be3ed1-4b36-4bae-837d-40b5106369ec",
 		Model:      "claude-opus-5-5",
+		Cold:       true,
 	})
 
 	t.Run("端点与真值一致，且不含 eval/sdk", func(t *testing.T) {
@@ -67,7 +68,7 @@ func TestBuildReclaudeBootstrapRequests(t *testing.T) {
 		for _, r := range requests {
 			urls = append(urls, r.URL)
 		}
-		// 8 条原有 + CLI 启动三件套(bootstrap/settings/org-skills) = 11。
+		// 09-26 真值冷启动 11 条：profile/mcp_servers/skills/bootstrap/penguin/registry×4/settings/grove。
 		require.Len(t, requests, 11)
 		for _, u := range urls {
 			// 🔴 eval/sdk-… 路径里带我们编不出来的 SDK 实例 ID，伪造比缺席更危险。
@@ -104,22 +105,22 @@ func TestBuildReclaudeBootstrapRequests(t *testing.T) {
 	})
 
 	t.Run("无 OrgUUID 时跳过 org/skills(不编造 org)", func(t *testing.T) {
-		reqs := BuildReclaudeBootstrapRequests(ReclaudeBootstrapParams{CLIVersion: "2.1.280"})
+		reqs := BuildReclaudeBootstrapRequests(ReclaudeBootstrapParams{CLIVersion: "2.1.280", Cold: true})
 		require.Len(t, reqs, 10) // 少了 org/skills
 		for _, r := range reqs {
 			require.NotContains(t, r.URL, "/skills/list-skills")
 		}
 	})
 
-	t.Run("mcp_servers 保留真值的四次重复", func(t *testing.T) {
-		// 抹平成一次反而与真值不符 —— Claude Code 启动时确实反复拉它。
+	t.Run("mcp_servers 按 09-26 真值只发一次", func(t *testing.T) {
+		// 09-23 抓包是四次、09-26（当前基线 2.1.282 同机存活）是一次；两份不一致取 09-26。
 		count := 0
 		for _, r := range requests {
 			if strings.Contains(r.URL, "/v1/mcp_servers") {
 				count++
 			}
 		}
-		require.Equal(t, 4, count)
+		require.Equal(t, 1, count)
 	})
 
 	t.Run("UA 是异构的，不是一种", func(t *testing.T) {
@@ -148,8 +149,8 @@ func TestBuildReclaudeBootstrapRequests(t *testing.T) {
 		for i := 1; i < len(requests); i++ {
 			require.GreaterOrEqual(t, requests[i].Delay, requests[i-1].Delay)
 		}
-		// 末条现在是 org/skills(+3164ms)。
-		require.Equal(t, 3164*time.Millisecond, requests[len(requests)-1].Delay)
+		// 末条是 mcp-registry #4(+2436ms)。
+		require.Equal(t, 2436*time.Millisecond, requests[len(requests)-1].Delay)
 	})
 
 	t.Run("每条都带三个固定头", func(t *testing.T) {
@@ -185,24 +186,6 @@ func TestReclaudeClientVersionInUA(t *testing.T) {
 	})
 }
 
-func TestBuildReclaudeInferenceFollowups(t *testing.T) {
-	t.Run("会话早期的推理带 mcp 复查", func(t *testing.T) {
-		require.Len(t, BuildReclaudeInferenceFollowups(1), 1)
-		require.Len(t, BuildReclaudeInferenceFollowups(2), 1)
-	})
-
-	t.Run("后续推理不再带", func(t *testing.T) {
-		// 真值里复查集中在会话早期；每条推理都带会凭空放大请求量。
-		require.Empty(t, BuildReclaudeInferenceFollowups(3))
-		require.Empty(t, BuildReclaudeInferenceFollowups(50))
-	})
-
-	t.Run("非法轮次不 panic", func(t *testing.T) {
-		require.Empty(t, BuildReclaudeInferenceFollowups(0))
-		require.Empty(t, BuildReclaudeInferenceFollowups(-1))
-	})
-}
-
 func lifecycleSenderFixture(t *testing.T) (*ReclaudeLifecycleSender, *recordingLifecycleForwarder, *Account) {
 	t.Helper()
 	account, cipher := probeAccount(t)
@@ -218,7 +201,7 @@ func TestReclaudeLifecycleSender(t *testing.T) {
 		sender, forwarder, account := lifecycleSenderFixture(t)
 		requests := BuildReclaudeBootstrapRequests(ReclaudeBootstrapParams{CLIVersion: "2.1.280"})
 
-		sender.send(account, "http://proxy:8080", requests)
+		sender.send(account, "http://proxy:8080", requests, reclaudeLifecycleTimeout)
 
 		calls := forwarder.snapshot()
 		require.Len(t, calls, len(requests))
@@ -230,7 +213,7 @@ func TestReclaudeLifecycleSender(t *testing.T) {
 	t.Run("Authorization 按 spec 注入", func(t *testing.T) {
 		sender, forwarder, account := lifecycleSenderFixture(t)
 
-		sender.send(account, "", BuildReclaudeBootstrapRequests(ReclaudeBootstrapParams{CLIVersion: "2.1.280"}))
+		sender.send(account, "", BuildReclaudeBootstrapRequests(ReclaudeBootstrapParams{CLIVersion: "2.1.280", Cold: true}), reclaudeLifecycleTimeout)
 
 		for _, call := range forwarder.snapshot() {
 			// 🔴 用 map 直读而不是 Header.Get：setHeaderRaw 刻意存**小写**键
@@ -253,7 +236,7 @@ func TestReclaudeLifecycleSender(t *testing.T) {
 		forwarder.err = io.ErrUnexpectedEOF
 
 		require.NotPanics(t, func() {
-			sender.send(account, "", BuildReclaudeBootstrapRequests(ReclaudeBootstrapParams{CLIVersion: "2.1.280"}))
+			sender.send(account, "", BuildReclaudeBootstrapRequests(ReclaudeBootstrapParams{CLIVersion: "2.1.280", Cold: true}), reclaudeLifecycleTimeout)
 		})
 		require.Len(t, forwarder.snapshot(), 10)
 	})

@@ -288,7 +288,7 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 		if c != nil && c.Request != nil {
 			clientUA = c.Request.UserAgent()
 		}
-		entrypoint := ResolveClientEntrypoint(clientUA, body)
+		entrypoint := resolveClientEntrypointForAccount(account, clientUA, body)
 		ctx = WithClientEntrypoint(ctx, entrypoint)
 		if c != nil && c.Request != nil {
 			c.Request = c.Request.WithContext(ctx)
