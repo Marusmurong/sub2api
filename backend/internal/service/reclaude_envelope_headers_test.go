@@ -100,13 +100,16 @@ func extractReclaudeEnvelopeMetaForTest(t *testing.T, envelope []byte) map[strin
 // "asia.route.reclaude.ai"，证明查表会命中；26/26 条 unknown 只是因为那批
 // 样本打的是主域/本地 sink。
 func TestReclaudeEnvelopeEdgeFollowsGatewayHost(t *testing.T) {
+	// 🔴 2026-09-27 逐字节 diff 实证:信封 meta 的 edge **恒为 unknown**,25/25 条
+	// (含 daemon 打 la.route 时)。此前断言"route 节点 → edge=节点名"基于错误假设,
+	// 真值证伪。信封 meta edge 恒 unknown;遥测 rollup 的 edge 才走 reclaudeEdgeLabel 查表。
 	for _, tc := range []struct {
 		name    string
 		gateway string
 		want    string
 	}{
-		{"主域不在表里", "https://www.reclaude.ai", `"edge":"unknown"`},
-		{"route 节点命中", "https://la.route.reclaude.ai", `"edge":"la.route.reclaude.ai"`},
+		{"主域", "https://www.reclaude.ai", `"edge":"unknown"`},
+		{"route 节点也恒 unknown", "https://la.route.reclaude.ai", `"edge":"unknown"`},
 		{"空网关", "", `"edge":"unknown"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

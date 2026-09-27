@@ -2,6 +2,15 @@ package service
 
 import "net/url"
 
+// reclaudeEnvelopeEdge 是 /proxy **信封 meta** 的 edge 字段值。
+//
+// 🔴 2026-09-27 逐字节 diff 实证:真客户端信封 meta 的 edge **恒为 "unknown"**,
+// 25/25 条一致,包括 daemon 打 la.route.reclaude.ai 时。信封 meta 的 edge 与
+// **遥测 rollup** 的 edge(reclaudeEdgeLabel 查表,asia.route 实测命中)是两个
+// 不同的东西——此前误用查表结果填信封 meta,让每条信封 edge=节点名,与真客户端
+// 系统性不符,是撤销破绽。信封 meta 恒 unknown,遥测 edge 仍走 reclaudeEdgeLabel。
+const reclaudeEnvelopeEdge = "unknown"
+
 // reclaudeKnownEdgeHosts 是 computeEdgeLabel 查表命中的那批主机。
 //
 // 表里装的是**区域 route 节点**，不含 login 默认下发的主域 www.reclaude.ai。

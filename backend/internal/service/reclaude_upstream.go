@@ -473,9 +473,13 @@ func buildReclaudeEnvelope(inner *http.Request, gatewayURL string, account *Acco
 		// 真实客户端恒发这两项。结构体上它们是 omitempty，不显式赋值整个字段
 		// 就从 JSON 里消失，信封形状与真值对不上。
 		//
-		// edge 按真实现查表（见 reclaudeEdgeLabel）：打主域时是 "unknown"，
-		// 打 route 节点时是 host 本身。**不要写死成任一个输出**。
-		Edge:      reclaudeEdgeLabel(gatewayURL),
+		// 🔴 2026-09-27 逐字节 diff 实证(reclaude-proxy-cli-full 抓包,daemon 打的
+		// 就是 la.route.reclaude.ai): **信封 meta 的 edge 恒为 "unknown"**,25/25 条
+		// 一致,包括打 route 节点时。此前用 reclaudeEdgeLabel(查表返回节点名)是错的——
+		// 那让每条信封都带 edge=la.route.reclaude.ai,与真客户端(unknown)系统性不符,
+		// 是"发越多信封越快撤"的破绽。reclaudeEdgeLabel 的查表语义只适用于**遥测
+		// rollup** 的 edge(telemetry-pending.json,asia.route 实测命中),不是信封 meta。
+		Edge:      reclaudeEnvelopeEdge,
 		Keepalive: true,
 	}, body)
 	if err != nil {
