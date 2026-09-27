@@ -198,7 +198,9 @@ func lifecycleSenderFixture(t *testing.T) (*ReclaudeLifecycleSender, *recordingL
 }
 
 func TestReclaudeLifecycleSender(t *testing.T) {
-	t.Run("按顺序发完整批", func(t *testing.T) {
+	t.Run("发完整批(并发,顺序无关)", func(t *testing.T) {
+		// 🔴 2026-09-27 从串行改并发(绕开串行累计超时的撤销根因),不再保证发送顺序。
+		// 断言改为「整批都发了」:数量相符 + URL 集合一致,不比顺序。
 		sender, forwarder, account := lifecycleSenderFixture(t)
 		requests := BuildReclaudeBootstrapRequests(ReclaudeBootstrapParams{CLIVersion: "2.1.280"})
 
@@ -206,9 +208,15 @@ func TestReclaudeLifecycleSender(t *testing.T) {
 
 		calls := forwarder.snapshot()
 		require.Len(t, calls, len(requests))
-		for i := range requests {
-			require.Equal(t, requests[i].URL, calls[i].url)
+		want := map[string]int{}
+		for _, r := range requests {
+			want[r.URL]++
 		}
+		got := map[string]int{}
+		for _, c := range calls {
+			got[c.url]++
+		}
+		require.Equal(t, want, got, "整批 URL 集合应完全一致(不比顺序)")
 	})
 
 	t.Run("Authorization 按 spec 注入", func(t *testing.T) {

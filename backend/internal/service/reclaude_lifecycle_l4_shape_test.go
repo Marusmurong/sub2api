@@ -151,7 +151,20 @@ func TestReclaudeLifecycleDriverBootstrapsBeforeInference(t *testing.T) {
 		// 不等：同步语义就是「返回即发完」。
 		calls := forwarder.snapshot()
 		require.GreaterOrEqual(t, len(calls), 10, "引导批必须在返回前发完")
-		require.Contains(t, calls[0].url, "/api/oauth/profile", "首条是 profile")
+		// 🔴 并发发送后顺序不保证(2026-09-27 从串行改并发,绕开串行累计超时的撤销根因),
+		// 断言改为「引导批集合含 profile」而非「首条是 profile」。
+		urls := make([]string, 0, len(calls))
+		for _, c := range calls {
+			urls = append(urls, c.url)
+		}
+		require.Condition(t, func() bool {
+			for _, u := range urls {
+				if strings.Contains(u, "/api/oauth/profile") {
+					return true
+				}
+			}
+			return false
+		}, "引导批必须包含 profile")
 	})
 
 	t.Run("遥测仍异步,不阻塞推理", func(t *testing.T) {

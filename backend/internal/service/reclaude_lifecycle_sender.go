@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -51,11 +52,13 @@ func NewReclaudeLifecycleSender(
 // 一批卡住的合成请求会一直占着代理连接，而那条代理是推理流量共用的。
 const reclaudeLifecycleTimeout = 45 * time.Second
 
-// reclaudeBootstrapSyncTimeout 是同步引导批的上限。
+// reclaudeBootstrapSyncTimeout 是同步引导批的整批上限。
 //
-// 引导批末条在 +2.436s；这个上限是「推理最多被引导拖多久」的兜底，
-// 超时后剩余引导直接放弃、推理照常出门 —— 宁可引导缺一截，不能让用户请求挂死。
-const reclaudeBootstrapSyncTimeout = 8 * time.Second
+// 🔴 2026-09-27 从 8s 上调到 30s:并发发送后,整批墙钟 = 末条 Delay(+2.4s) +
+// 单条经代理 RTT,正常 ~7s 就 wg.Wait() 返回;只有代理全卡才会等满。8s 太短会
+// 在慢代理下又截断引导(撤销根因)。这个上限只是"全卡住"的兜底,不是常态耗时。
+// 并发 + 每条独立超时(reclaudePerRequestTimeout)后,单条慢不再拖垮整批。
+const reclaudeBootstrapSyncTimeout = 30 * time.Second
 
 // SendAsync 起一个后台任务按时序发完这批请求。
 //
@@ -81,6 +84,14 @@ func (s *ReclaudeLifecycleSender) SendSync(
 	s.send(account, proxyURL, requests, reclaudeBootstrapSyncTimeout)
 }
 
+// reclaudePerRequestTimeout 是**单条**合成信封的超时。
+//
+// 🔴 2026-09-27 根因:此前整批共用一个 8s ctx，串行发。经住宅代理打 /proxy 每条
+// RTT 高，发到第 5 条(penguin)就耗尽 8s → context deadline exceeded → 整批 return，
+// 后 7 条引导(registry/settings/grove/model_selector)全丢，会话形态残缺 → 撤销。
+// 改为每条独立超时:一条慢/失败不拖垮、不中断其余。
+const reclaudePerRequestTimeout = 20 * time.Second
+
 func (s *ReclaudeLifecycleSender) send(
 	account *Account, proxyURL string, requests []ReclaudeLifecycleRequest, timeout time.Duration,
 ) {
@@ -92,8 +103,10 @@ func (s *ReclaudeLifecycleSender) send(
 		}
 	}()
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+	// 整批总预算:防止一批卡住的合成请求无限占用代理连接（推理流量共用）。
+	// 不再用它做单条超时——单条各自独立(reclaudePerRequestTimeout)。
+	batchCtx, cancelBatch := context.WithTimeout(context.Background(), timeout)
+	defer cancelBatch()
 
 	sk, err := s.cipher.DecryptSecret(account, CredKeyReclaudeSK)
 	if err != nil {
@@ -102,18 +115,38 @@ func (s *ReclaudeLifecycleSender) send(
 		return
 	}
 
-	var elapsed time.Duration
+	// 🔴 并发发送:真客户端的引导批时序密集(末条 +2.4s),串行经代理发 12 条会
+	// 累计到几十秒。并发既贴近真值时序,又绕开"串行累计超时"这个撤销根因。
+	// 每条按自己的 Delay 起跑(复刻时序),各自独立超时,一条失败不影响其余。
+	var wg sync.WaitGroup
 	for _, spec := range requests {
-		if ctx.Err() != nil {
-			return
+		if batchCtx.Err() != nil {
+			break // 整批总预算耗尽才停(极端情况),正常不会到这
 		}
-		// Delay 是相对会话起点的绝对时刻，这里换算成相对上一条的增量。
-		if wait := spec.Delay - elapsed; wait > 0 {
-			s.sleep(wait)
-			elapsed = spec.Delay
-		}
-		s.sendOne(ctx, account, proxyURL, sk, spec)
+		wg.Add(1)
+		go func(spec ReclaudeLifecycleRequest) {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					logger.LegacyPrintf("service.reclaude",
+						"lifecycle sendOne panicked for account %d: %v", account.ID, r)
+				}
+			}()
+			// 按 Delay 复刻真值时序(相对会话起点的绝对时刻)。
+			// 用 s.sleep 注入点:测试可换成立即返回,不真的等。
+			if spec.Delay > 0 {
+				s.sleep(spec.Delay)
+				if batchCtx.Err() != nil {
+					return
+				}
+			}
+			// 🔴 每条独立超时:不共享整批预算,一条慢不拖垮后面。
+			reqCtx, cancel := context.WithTimeout(context.Background(), reclaudePerRequestTimeout)
+			defer cancel()
+			s.sendOne(reqCtx, account, proxyURL, sk, spec)
+		}(spec)
 	}
+	wg.Wait()
 }
 
 func (s *ReclaudeLifecycleSender) sendOne(
