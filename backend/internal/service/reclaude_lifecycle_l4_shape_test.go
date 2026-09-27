@@ -71,17 +71,17 @@ func TestBuildReclaudeBootstrapRequestsMatchesLiveCapture(t *testing.T) {
 		require.Equal(t, 0, countURL(warm, "/api/claude_code_penguin_mode"))
 	})
 
-	t.Run("model_selector/cc 跟在 skills 之后（org 端点，client-platform 跟 cli 画像）", func(t *testing.T) {
+	t.Run("model_selector/cc 跟在 skills 之后（org 端点，client-platform 跟 sdk-cli 画像）", func(t *testing.T) {
 		require.Equal(t, 1, countURL(cold, "/model_selector/cc"))
 		require.Equal(t, 1, countURL(warm, "/model_selector/cc"))
 		ms := find(cold, "/model_selector/cc")
 		require.Equal(t, "GET", ms.Method)
 		require.True(t, ms.NeedsAuthorization)
-		// 🔴 cli 画像：claude_code_cli，不是 sdk 真值的 claude_code_sdk。
-		require.Equal(t, "claude_code_cli", ms.Headers["anthropic-client-platform"])
+		// 🔴 sdk-cli 画像（2026-09-28 翻回）：claude_code_sdk。
+		require.Equal(t, "claude_code_sdk", ms.Headers["anthropic-client-platform"])
 		require.Equal(t, "47be3ed1-4b36-4bae-837d-40b5106369ec", ms.Headers["x-organization-uuid"])
 		require.Equal(t, "2023-06-01", ms.Headers["anthropic-version"])
-		require.Equal(t, "claude-cli/2.1.282 (external, cli)", ms.Headers["user-agent"])
+		require.Equal(t, "claude-cli/2.1.282 (external, sdk-cli)", ms.Headers["user-agent"])
 		// 时序：紧跟 skills(212ms)。
 		require.Equal(t, 219*time.Millisecond, ms.Delay)
 	})

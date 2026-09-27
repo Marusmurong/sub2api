@@ -11,9 +11,10 @@ import (
 // E2-L1（RECLAUDE_REVOCATION_VERIFY_PLAN_2026-09-26 §4 L1）：版本与入口同源。
 //
 // 09-26 sub 实发信封里同时出现三个版本号（引导 UA 1.4.0、推理 UA 2.1.280、
-// event_logging env.version 2.1.282），而且推理 UA 说 sdk-cli、billing 块说 cli。
-// 2026-09-27 翻转：sub 身份块硬编码 cli 文案，只有 cli 全链路自洽 —— 出站身份取
-// machine_env.cli_version + (external, cli)，billing cc_entrypoint=cli，三处共用。
+// event_logging env.version 2.1.282）。
+// 2026-09-28 翻回 sdk-cli（8x 存活黄金基准：内嵌 claude 跑 headless `claude -p`，
+// 发的就是 (external, sdk-cli) + cc_entrypoint=sdk-cli + Agent SDK 身份块）—— 出站
+// 身份取 machine_env.cli_version + (external, sdk-cli)，billing cc_entrypoint=sdk-cli。
 
 func reclaudeIdentityAccount(machineEnv string) *Account {
 	return &Account{
@@ -37,19 +38,19 @@ func TestReclaudeForcedFingerprintPinsCLIVersion(t *testing.T) {
 		require.NotNil(t, acct.resolveForcedFingerprintSpec())
 	})
 
-	t.Run("推理 UA 版本取 machine_env.cli_version,后缀 cli", func(t *testing.T) {
+	t.Run("推理 UA 版本取 machine_env.cli_version,后缀 sdk-cli", func(t *testing.T) {
 		spec := reclaudeIdentityAccount(menv).resolveForcedFingerprintSpec()
 		require.NotNil(t, spec)
 		require.Equal(t, "2.1.282", spec.CLIVersion)
-		require.Equal(t, "(external, cli)", spec.UASuffix)
-		require.Equal(t, "claude-cli/2.1.282 (external, cli)", spec.toFingerprint().UserAgent)
+		require.Equal(t, "(external, sdk-cli)", spec.UASuffix)
+		require.Equal(t, "claude-cli/2.1.282 (external, sdk-cli)", spec.toFingerprint().UserAgent)
 	})
 
-	t.Run("缺 cli_version 时版本走基线,后缀仍 cli", func(t *testing.T) {
+	t.Run("缺 cli_version 时版本走基线,后缀仍 sdk-cli", func(t *testing.T) {
 		spec := reclaudeIdentityAccount(`{"arch":"x64"}`).resolveForcedFingerprintSpec()
 		require.NotNil(t, spec)
 		require.NotEmpty(t, spec.CLIVersion)
-		require.Equal(t, "(external, cli)", spec.UASuffix)
+		require.Equal(t, "(external, sdk-cli)", spec.UASuffix)
 	})
 
 	t.Run("显式 fingerprint.cli_version 仍优先", func(t *testing.T) {
@@ -69,12 +70,12 @@ func TestReclaudeForcedFingerprintPinsCLIVersion(t *testing.T) {
 func TestResolveClientEntrypointForAccountPinsReclaude(t *testing.T) {
 	body := []byte(`{"system":[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.282.abc; cc_entrypoint=cli; cch=00000;"}]}`)
 
-	t.Run("reclaude 账号钉 cli（身份块硬编码 cli,只有 cli 自洽）", func(t *testing.T) {
+	t.Run("reclaude 账号钉 sdk-cli（内嵌 claude headless 真值,Agent SDK 身份块）", func(t *testing.T) {
 		acct := reclaudeIdentityAccount(`{"cli_version":"2.1.282"}`)
-		// 下游哪怕是 sdk-cli,也钉成 cli —— sub 发不出真 sdk 身份块。
-		e := resolveClientEntrypointForAccount(acct, "claude-cli/2.1.282 (external, sdk-cli)", body)
-		require.Equal(t, "cli", e.Product)
-		require.Equal(t, "(external, cli)", e.UASuffix)
+		// 下游哪怕是交互式 cli,也钉成 sdk-cli —— 内嵌 claude 跑的是 `claude -p`。
+		e := resolveClientEntrypointForAccount(acct, "claude-cli/2.1.282 (external, cli)", body)
+		require.Equal(t, "sdk-cli", e.Product)
+		require.Equal(t, "(external, sdk-cli)", e.UASuffix)
 	})
 
 	t.Run("非 reclaude 账号照旧跟随下游", func(t *testing.T) {

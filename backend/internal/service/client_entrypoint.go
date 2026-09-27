@@ -64,27 +64,28 @@ func defaultClientEntrypoint() ClientEntrypoint {
 	return ClientEntrypoint{Product: "cli", UASuffix: "(external, cli)"}
 }
 
-// reclaudeClientEntrypoint 是 reclaude 账号钉死的入口：cli（交互式）形态。
+// reclaudeClientEntrypoint 是 reclaude 账号钉死的入口：**sdk-cli**（headless `claude -p`）形态。
 //
-// 🔴 2026-09-27 翻转（原钉 sdk-cli，错）：sub 出站的 system[1] 身份块恒定用硬编码
-// 常量 claudeCodeSystemPrompt = "You are Claude Code, Anthropic's official CLI for
-// Claude."（cli 文案，见 gateway_service.go）。entrypoint 只改 billing 块的
-// cc_entrypoint 字段，改不动身份文案。sdk-cli 的真身份是 "You are a Claude agent,
-// built on Claude Agent SDK." + cc_turn_origin=sdk —— sub 都发不出来。
+// 🔴 2026-09-28 翻回 sdk-cli（依据 8x 存活黄金基准，docs/captures/reclaude-embedded-8x-2026-09-28，
+// device 44511，142 条 /proxy 全 200）：内嵌 claude 存活时逐字节发的就是完整 sdk-cli 画像 ——
+//   - 内层 UA = `claude-cli/2.1.280 (external, sdk-cli)`（8/8）
+//   - billing = `cc_version=…; cc_entrypoint=sdk-cli; …; cc_turn_origin=sdk;`
+//   - system[1] = "You are a Claude agent, built on Anthropic's Claude Agent SDK."
+//   - bootstrap `?entrypoint=sdk-cli`、event_logging / datadog entrypoint=sdk-cli、is_interactive=false
 //
-// 所以整条链路唯一自洽的入口是 cli：身份块（已 cli）、billing cc_entrypoint、UA 后缀、
-// bootstrap / skills / event_logging 的 entrypoint 全落在 cli。09-27 交互式 cli 会话
-// 17 条 /v1/messages 内层全 200，证明 cli 形态网关接受。钉 sdk-cli 则头说 sdk、
-// 身份块说 official CLI、还缺 cc_turn_origin —— 正是 09-26 被撤 sub 信封的三重矛盾。
+// 之前（163016c61）钉 cli 的前提错了：以为 sub 的 system[1] 硬编码 official CLI 文案"改不动"，
+// 只能钉 cli。但真客户端跑的是 `claude -p`（sdk-cli），身份块本来就是 Agent SDK 文案 ——
+// 那块"改不动"的硬编码恰恰是必须改的（现由 reclaude 路径注入 claudeAgentSDKSystemPrompt）。
+// 钉 cli 时每条推理的 UA/cc_entrypoint/身份块/dispatch-id 都与真客户端不同 → 累计约 7 次撤。
 //
-// 对照抓包：docs/captures/reclaude-live-2026-09-27/interactive（cli）
-// vs reclaude-live-2026-09-26（sdk-cli）。
-var reclaudeClientEntrypoint = defaultClientEntrypoint()
+// 对照抓包：docs/captures/reclaude-embedded-8x-2026-09-28（存活 sdk-cli 黄金基准）
+// + docs/captures/reclaude-proxy-sdkcli-full-2026-09-27（60 条完整 sdk-cli 会话）。
+var reclaudeClientEntrypoint = ClientEntrypoint{Product: "sdk-cli", UASuffix: "(external, sdk-cli)"}
 
 // resolveClientEntrypointForAccount 按账号判定入口。
 //
-// reclaude 账号无视下游：一台 reclaude 设备就是一台跑 `claude -p` 的机器，下游是
-// 交互式 CLI 还是别的产品，对这台设备的画像没有意义（E2-L1）。其它账号照旧跟随下游。
+// reclaude 账号无视下游：一台 reclaude 设备就是一台跑 `claude -p`（sdk-cli）的机器，
+// 下游是交互式 CLI 还是别的产品，对这台设备的画像没有意义（E2-L1）。其它账号照旧跟随下游。
 func resolveClientEntrypointForAccount(account *Account, clientUA string, body []byte) ClientEntrypoint {
 	if account != nil && account.IsReclaude() {
 		return reclaudeClientEntrypoint

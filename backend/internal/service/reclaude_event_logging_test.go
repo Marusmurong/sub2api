@@ -87,17 +87,21 @@ func TestBuildReclaudeEventBatch(t *testing.T) {
 		}, keysOf(decoded))
 	})
 
-	// 🔴 2026-09-27 交互式抓包：is_interactive=true / entrypoint=cli 的会话里，
-	// terminal / package_managers / runtimes / build_time 是交互式 CLI 形态，
-	// 不是 SDK 的 unknown / 空串 / 缺字段。翻转 cli 后这四处若仍是 SDK 形态，
-	// 就与 is_interactive=true 自相矛盾（一枪毙命）。
-	t.Run("env 是交互式 CLI 形态,不是 SDK 形态", func(t *testing.T) {
-		env := BuildReclaudeEventBatch(eventContext(t), []string{ReclaudeEventAPIQuery}).
-			Events[0].EventData.Env
-		require.Equal(t, "xterm-256color", env.Terminal, "交互式真值 terminal 不是 unknown")
-		require.Equal(t, "npm", env.PackageManagers, "交互式真值 package_managers 非空")
-		require.Equal(t, "node", env.Runtimes, "交互式真值 runtimes 非空")
+	// 🔴 2026-09-28 8x 存活黄金基准：sdk-cli（headless）会话里 terminal=non-interactive、
+	// package_managers=npm、runtimes=node、build_time 每条都带。翻回 sdk-cli 后这四处
+	// 与 is_interactive=false / entrypoint=sdk-cli 自洽。
+	t.Run("env 是 sdk-cli 形态,terminal=non-interactive", func(t *testing.T) {
+		data := BuildReclaudeEventBatch(eventContext(t), []string{ReclaudeEventAPIQuery}).
+			Events[0].EventData
+		env := data.Env
+		require.Equal(t, "non-interactive", env.Terminal, "headless sdk-cli terminal 是 non-interactive")
+		require.Equal(t, "npm", env.PackageManagers, "sdk-cli 真值 package_managers 非空")
+		require.Equal(t, "node", env.Runtimes, "sdk-cli 真值 runtimes 非空")
 		require.Equal(t, reclaudeDefaultBuildTime, env.BuildTime, "build_time 必须存在")
+		// 入口三处全 sdk-cli（headless），is_interactive=false。
+		require.Equal(t, "sdk-cli", data.Entrypoint)
+		require.Equal(t, "sdk-cli", data.ClientType)
+		require.False(t, data.IsInteractive)
 	})
 
 	t.Run("快照可覆盖 terminal / build_time", func(t *testing.T) {

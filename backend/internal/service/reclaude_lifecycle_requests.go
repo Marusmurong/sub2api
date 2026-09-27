@@ -20,16 +20,16 @@ const (
 	reclaudeInnerUAAxios = "axios/1.15.2"
 	// 带版本号的两个由 reclaudeInnerUA* 函数按账号的 client_version 拼出来 ——
 	// 写死版本号会让整个设备群停在同一个版本上（D9）。
-	reclaudeInnerUACLIFormat       = "claude-cli/%s (external, cli)"
+	reclaudeInnerUACLIFormat       = "claude-cli/%s (external, sdk-cli)"
 	reclaudeInnerUAClaudeCodeForma = "claude-code/%s"
 )
 
-// reclaudeClientPlatformCLI 是 anthropic-client-platform 头在 cli 画像下的值。
+// reclaudeClientPlatformCLI 是 anthropic-client-platform 头在 reclaude(sdk-cli)画像下的值。
 //
-// 🔴 严格跟画像（2026-09-27 真值两画像逐字对比）：cli=claude_code_cli /
+// 🔴 严格跟画像（2026-09-28 8x 存活黄金基准逐字确认）：cli=claude_code_cli /
 // sdk-cli=claude_code_sdk。skills 与 model_selector 两个 org 端点都带它。
-// 生产钉 cli，故统一 claude_code_cli；不能照搬 sdk-cli 真值的 sdk 值。
-const reclaudeClientPlatformCLI = "claude_code_cli"
+// 2026-09-28 翻回 sdk-cli，故用 claude_code_sdk（内嵌 claude headless 真值）。
+const reclaudeClientPlatformCLI = "claude_code_sdk"
 
 // ReclaudeLifecycleRequest 描述一条要合成的生命周期请求。
 //
@@ -165,14 +165,14 @@ func BuildReclaudeBootstrapRequests(p ReclaudeBootstrapParams) []ReclaudeLifecyc
 		r.Headers["content-type"] = "application/json"
 		r.Headers["anthropic-version"] = "2023-06-01"
 		// ✅ 真值定值:不是 OS 平台,是自报的客户端平台标识。
-		// 🔴 严格跟画像:cli=claude_code_cli / sdk-cli=claude_code_sdk（真值两画像
-		// 逐字对比确认）。生产钉 cli，故用 claude_code_cli，不照搬 sdk 值。
+		// 🔴 严格跟画像:cli=claude_code_cli / sdk-cli=claude_code_sdk（8x 黄金基准
+		// 逐字确认）。翻回 sdk-cli，故用 claude_code_sdk。
 		r.Headers["anthropic-client-platform"] = reclaudeClientPlatformCLI
 		return r
 	}
 	if org := strings.TrimSpace(p.OrgUUID); org != "" {
 		skills := orgEndpoint("https://api.anthropic.com/api/oauth/organizations/"+org+
-			"/skills/list-skills?include_wiggle_skills=true&entrypoint=cli",
+			"/skills/list-skills?include_wiggle_skills=true&entrypoint=sdk-cli",
 			212*time.Millisecond)
 		skills.Headers["x-organization-uuid"] = org
 		reqs = append(reqs, skills)
@@ -180,7 +180,7 @@ func BuildReclaudeBootstrapRequests(p ReclaudeBootstrapParams) []ReclaudeLifecyc
 
 	if p.Cold {
 		// claude_cli/bootstrap：UA=claude-code/<cli>,带 model 参数(本次推理模型)。
-		bootstrapURL := "https://api.anthropic.com/api/claude_cli/bootstrap?entrypoint=cli"
+		bootstrapURL := "https://api.anthropic.com/api/claude_cli/bootstrap?entrypoint=sdk-cli"
 		if m := strings.TrimSpace(p.Model); m != "" {
 			bootstrapURL += "&model=" + url.QueryEscape(m)
 		}

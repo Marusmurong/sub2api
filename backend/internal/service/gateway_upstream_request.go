@@ -144,6 +144,14 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 		}
 		body = normalizeBillingHeaderBlockWithEntrypoint(body, userAgent, mimicClaudeCode,
 			s.lookupPrevRequestID(ctx, account, sessionID), entrypoint)
+		// 🔴 reclaude(sdk-cli) 身份块换 Agent SDK 文案：内嵌 claude 跑 headless
+		// `claude -p`，system[1] 恒是 "You are a Claude agent, built on ... Agent SDK."，
+		// 不是 official CLI（8x 存活黄金基准 2026-09-28）。钉 cli 时身份块与真客户端
+		// 每条不同是撤销直接原因。只对 reclaude + sdk-cli 入口、且只替换那一条精确
+		// 的 official-CLI 身份块（不碰用户正文）。
+		if account.IsReclaude() && entrypoint == "sdk-cli" {
+			body = rewriteReclaudeIdentityBlockToAgentSDK(body)
+		}
 	}
 
 	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===

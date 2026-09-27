@@ -25,12 +25,12 @@ func TestBuildReclaudeDatadogBatch(t *testing.T) {
 		require.False(t, batch[0].WorktreeFlag)
 	})
 
-	t.Run("入口画像钉 cli 且 is_interactive 是字符串 true", func(t *testing.T) {
+	t.Run("入口画像钉 sdk-cli 且 is_interactive 是字符串 false", func(t *testing.T) {
 		e := BuildReclaudeDatadogBatch(eventContext(t))[0]
-		require.Equal(t, "cli", e.Entrypoint)
-		require.Equal(t, "cli", e.ClientType)
-		// 🔴 真值 is_interactive 是字符串 "true"，不是 bool true。
-		require.Equal(t, "true", e.IsInteractive)
+		require.Equal(t, "sdk-cli", e.Entrypoint)
+		require.Equal(t, "sdk-cli", e.ClientType)
+		// 🔴 真值 is_interactive 是字符串 "false"（headless），不是 bool。
+		require.Equal(t, "false", e.IsInteractive)
 		require.True(t, e.IsClaudeAIAuth)
 	})
 
@@ -123,8 +123,8 @@ func TestReclaudeUserBucket(t *testing.T) {
 func TestReclaudeDatadogTagsAndRequest(t *testing.T) {
 	t.Run("ddtags 键序与真值一致", func(t *testing.T) {
 		e := BuildReclaudeDatadogBatch(eventContext(t))[0]
-		// event:...,arch:...,client_type:cli,entrypoint:cli,model:...,platform:...
-		require.True(t, strings.HasPrefix(e.DDTags, "event:tengu_started,arch:x64,client_type:cli,entrypoint:cli,model:"))
+		// event:...,arch:...,client_type:sdk-cli,entrypoint:sdk-cli,model:...,platform:...（2026-09-28 翻回 sdk-cli）
+		require.True(t, strings.HasPrefix(e.DDTags, "event:tengu_started,arch:x64,client_type:sdk-cli,entrypoint:sdk-cli,model:"))
 		require.Contains(t, e.DDTags, ",user_type:external,")
 		require.Contains(t, e.DDTags, ",platform:linux,")
 	})

@@ -460,6 +460,12 @@ func buildReclaudeEnvelope(inner *http.Request, gatewayURL string, account *Acco
 			// 逐请求随机：固定值等于给所有请求盖同一个戳。
 			headers["x-client-request-id"] = uuid.NewString()
 		}
+		// 🔴 2026-09-28 内嵌客户端 8 次会话黄金基准逐字节 diff:/v1/messages 信封
+		// 恒带 anthropic-dispatch-id=v2d(8/8),且**只有推理路径带**(其他端点无)。
+		// sub 此前完全缺这个头 —— 每条推理都露馅。固定值 v2d,下游没带时补。
+		if headers["anthropic-dispatch-id"] == "" {
+			headers["anthropic-dispatch-id"] = "v2d"
+		}
 	}
 
 	// 🔴 必须用 reclaude.NewTraceID()，不能用 uuid.NewString()：

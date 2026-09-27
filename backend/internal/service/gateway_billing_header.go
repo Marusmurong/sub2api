@@ -117,6 +117,10 @@ func normalizeBillingHeaderBlockWithEntrypoint(
 			next = ccVersionFingerprintInBillingRe.ReplaceAllString(next, "${1}."+fingerprint)
 		}
 		next = ensureBillingHeaderCCH(next)
+		// 🔴 sdk-cli（reclaude headless）独有：cc_turn_origin=sdk + cc_prompt_id。
+		// 真值顺序在 cch 之后、cc_prev_req 之前（8x 存活黄金基准 2026-09-28）。
+		// 只有 entrypoint=="sdk-cli" 才加；cli / 其它一字不变。
+		next = ensureBillingHeaderSDKSegments(next, entrypoint)
 		next = ensureBillingHeaderPrevReq(next, prevRequestID)
 
 		if next != original {
@@ -129,6 +133,25 @@ func normalizeBillingHeaderBlockWithEntrypoint(
 	})
 
 	return body
+}
+
+// ensureBillingHeaderSDKSegments 为 sdk-cli 入口追加 cc_prompt_id + cc_turn_origin=sdk。
+//
+// 🔴 只在 entrypoint=="sdk-cli" 时加（reclaude headless `claude -p`）。真值 8/8：
+// headless 恒带 cc_prompt_id=<uuid>（逐请求新）+ cc_turn_origin=sdk；交互式 cli 没有。
+// 已存在则不重复（透传路径上下游若自带以其为准）。
+func ensureBillingHeaderSDKSegments(text, entrypoint string) string {
+	if entrypoint != "sdk-cli" {
+		return text
+	}
+	trimmed := strings.TrimRight(text, " ")
+	if !strings.Contains(text, "cc_prompt_id=") {
+		trimmed += " cc_prompt_id=" + reclaudeNewCCPromptID() + ";"
+	}
+	if !strings.Contains(text, "cc_turn_origin=") {
+		trimmed += " cc_turn_origin=sdk;"
+	}
+	return trimmed
 }
 
 // ensureBillingHeaderPrevReq 在 block 末尾追加 cc_prev_req 段。

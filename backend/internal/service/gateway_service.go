@@ -43,6 +43,11 @@ const (
 	// to match real Claude CLI traffic as closely as possible. When we need a visual
 	// separator between system blocks, we add "\n\n" at concatenation time.
 	claudeCodeSystemPrompt = "You are Claude Code, Anthropic's official CLI for Claude."
+	// claudeAgentSDKSystemPrompt 是 headless `claude -p`（sdk-cli 入口）的 system[1]
+	// 身份文案，逐字取自 2026-09-28 8x 存活黄金基准（reclaude 内嵌 claude，device 44511）。
+	// 🔴 reclaude 账号（sdk-cli）注入这一条，不是 official CLI 文案 —— 钉 cli 时身份块
+	// 与真客户端每条都不同是撤销直接原因（见 client_entrypoint.go reclaudeClientEntrypoint）。
+	claudeAgentSDKSystemPrompt = "You are a Claude agent, built on Anthropic's Claude Agent SDK."
 	// claudeCodeSystemPromptExpansion 是真实 Claude Code 主系统提示词中"与具体工具无关"
 	// 的通用段落（身份/用途总述 + 安全声明 + URL 告警 + Tone and style），逐字取自真实
 	// CLI（2.1.x 一致）。伪装路径用它把 system 块数从 2 提升到 3、体量贴近真实 CC，同时

@@ -188,6 +188,16 @@ func extractFirstUserText(body []byte) string {
 // Claude Code prompt block 承担）。
 // entrypoint 为空时按 "cli" 处理（改动前的行为）。它跟随下游真实产品，
 // 与出站 UA 后缀同源（见 client_entrypoint.go），两处必须取同一个判定结果。
+//
+// 🔴 sdk-cli 独有的两段（2026-09-28 8x 存活黄金基准实证，reclaude 路径）：
+//   - cc_prompt_id=<uuid>：逐请求新 uuid（真值 8/8 各不相同）。
+//   - cc_turn_origin=sdk：headless `claude -p` 恒带；cli（交互式）没有这段。
+//
+// 出串顺序 cc_version; cc_entrypoint; [cc_prompt_id; cc_turn_origin]。cch 段由
+// ensureBillingHeaderCCH 在 cc_entrypoint 之后插入，最终形态
+// cc_version; cc_entrypoint; cch; cc_prompt_id; cc_turn_origin（对齐真值顺序）。
+//
+// ⚠️ 只有 entrypoint=="sdk-cli" 才追加这两段；cli / 其它入口一字不变。
 func buildBillingAttributionText(body []byte, cliVersion, entrypoint string) (string, error) {
 	if cliVersion == "" {
 		return "", fmt.Errorf("cliVersion required")
@@ -196,8 +206,12 @@ func buildBillingAttributionText(body []byte, cliVersion, entrypoint string) (st
 		entrypoint = "cli"
 	}
 	fp := computeClaudeCodeFingerprint(body, cliVersion)
-	return fmt.Sprintf(
+	text := fmt.Sprintf(
 		"x-anthropic-billing-header: cc_version=%s.%s; cc_entrypoint=%s;",
 		cliVersion, fp, entrypoint,
-	), nil
+	)
+	if entrypoint == "sdk-cli" {
+		text += fmt.Sprintf(" cc_prompt_id=%s; cc_turn_origin=sdk;", reclaudeNewCCPromptID())
+	}
+	return text, nil
 }

@@ -83,17 +83,17 @@ type ReclaudeEventAuth struct {
 
 // ReclaudeEventData 是单条事件的载荷。
 type ReclaudeEventData struct {
-	EventName       string            `json:"event_name"`
-	ClientTimestamp string            `json:"client_timestamp"`
-	Model           string            `json:"model"`
-	SessionID       string            `json:"session_id"`
-	UserType        string            `json:"user_type"`
-	Betas           string            `json:"betas"`
-	Env             ReclaudeEventEnv  `json:"env"`
-	Entrypoint      string            `json:"entrypoint"`
-	IsInteractive   bool              `json:"is_interactive"`
-	ClientType      string            `json:"client_type"`
-	Process         string            `json:"process"`
+	EventName       string           `json:"event_name"`
+	ClientTimestamp string           `json:"client_timestamp"`
+	Model           string           `json:"model"`
+	SessionID       string           `json:"session_id"`
+	UserType        string           `json:"user_type"`
+	Betas           string           `json:"betas"`
+	Env             ReclaudeEventEnv `json:"env"`
+	Entrypoint      string           `json:"entrypoint"`
+	IsInteractive   bool             `json:"is_interactive"`
+	ClientType      string           `json:"client_type"`
+	Process         string           `json:"process"`
 	// AdditionalMetadata 是 base64(JSON) 的事件专属元数据。
 	//
 	// 🔴 真值里 tengu_api_query / tengu_api_cache_breakpoints 恒带它，缺字段是
@@ -247,13 +247,14 @@ func BuildReclaudeEventBatch(ctx ReclaudeEventContext, names []string) *Reclaude
 				// 🔴 按事件名填 additional_metadata（真值 query/cache_breakpoints 恒带）。
 				AdditionalMetadata: reclaudeEventAdditionalMetadata(
 					name, ctx.Model, subscription, ccPromptID, buildAge),
-				// ✅ 真值 entrypoint=cli / client_type=cli / is_interactive=true
-				// （2026-09-27 交互式抓包）。与推理 UA (external, cli)、billing
-				// cc_entrypoint=cli、bootstrap/skills 的 entrypoint=cli 全链路自洽。
-				// 2026-09-27 翻转（原 sdk-cli，与 sub 硬编码的 cli 身份块矛盾）。
-				Entrypoint:    "cli",
-				IsInteractive: true,
-				ClientType:    "cli",
+				// ✅ 真值 entrypoint=sdk-cli / client_type=sdk-cli / is_interactive=false
+				// （2026-09-28 8x 存活黄金基准，reclaude 内嵌 claude 跑 headless `claude -p`）。
+				// 与推理 UA (external, sdk-cli)、billing cc_entrypoint=sdk-cli+cc_turn_origin=sdk、
+				// bootstrap/skills entrypoint=sdk-cli 全链路自洽。2026-09-28 翻回 sdk-cli
+				// （163016c61 钉 cli 的前提错了，见 client_entrypoint.go）。
+				Entrypoint:    "sdk-cli",
+				IsInteractive: false,
+				ClientType:    "sdk-cli",
 				Process:       process,
 				Auth:          auth,
 				// 逐事件唯一：真值里每条事件的 event_id 都不同。
@@ -333,11 +334,10 @@ func buildReclaudeEventEnv(account *Account) ReclaudeEventEnv {
 	if snapshot.CliVersion != "" {
 		version = snapshot.CliVersion
 	}
-	// 🔴 2026-09-27 交互式抓包：is_interactive=true / entrypoint=cli 的会话里
-	// terminal=xterm-256color、package_managers=npm、runtimes=node、build_time 每条都带。
-	// 翻转 cli 后这四处若仍是 SDK 形态（unknown / 空串 / 缺字段），与 is_interactive=true
-	// 自相矛盾——正是撤销复盘里"一枪毙命"那类矛盾。terminal / build_time 可被真机快照覆盖。
-	terminal := reclaudeInteractiveTerminal
+	// 🔴 2026-09-28 8x 存活黄金基准：sdk-cli（headless）会话里 terminal=non-interactive、
+	// package_managers=npm、runtimes=node、build_time 每条都带。翻回 sdk-cli 后这四处
+	// 与 is_interactive=false / entrypoint=sdk-cli 自洽。terminal / build_time 可被真机快照覆盖。
+	terminal := reclaudeSDKCLITerminal
 	if snapshot.Terminal != "" {
 		terminal = snapshot.Terminal
 	}
@@ -353,7 +353,7 @@ func buildReclaudeEventEnv(account *Account) ReclaudeEventEnv {
 		Version:     version,
 		VersionBase: version,
 		NodeVersion: nodeVersion,
-		// ✅ 交互式 CLI 真值（2026-09-27 抓包）。
+		// ✅ sdk-cli 真值（2026-09-28 8x 存活黄金基准）。
 		Terminal:        terminal,
 		PackageManagers: reclaudeInteractivePackageManagers,
 		Runtimes:        reclaudeInteractiveRuntimes,
@@ -404,12 +404,14 @@ func reclaudeDeploymentEnv(osName string, _ ReclaudeMachineEnv) string {
 // 因此这一项的批量特征风险显著低于 linux_distro / kernel 那类主机指纹。
 const reclaudeDefaultNodeVersion = "v26.3.0"
 
-// 交互式 CLI 的 env 形态常量（2026-09-27 交互式抓包）。
+// sdk-cli（headless `claude -p`）的 env 形态常量（2026-09-28 8x 存活黄金基准）。
 //
-// terminal 可被真机快照覆盖（TERM 因终端而异）；package_managers / runtimes 对
-// node/npm 打包的 CLI 是稳定值，同版本用户本就集中在这两个值上，批量特征风险低。
+// 🔴 terminal=non-interactive 是 headless 真值（不是交互式 cli 的 xterm-256color）——
+// reclaude 内嵌 claude 跑的是 `claude -p`。可被真机快照覆盖（snapshot.Terminal）。
+// package_managers / runtimes 对 node/npm 打包的 CLI 是稳定值，同版本用户本就集中在
+// 这两个值上，批量特征风险低。
 const (
-	reclaudeInteractiveTerminal        = "xterm-256color"
+	reclaudeSDKCLITerminal             = "non-interactive"
 	reclaudeInteractivePackageManagers = "npm"
 	reclaudeInteractiveRuntimes        = "node"
 )

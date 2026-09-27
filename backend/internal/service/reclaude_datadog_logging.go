@@ -41,7 +41,7 @@ const (
 // 结构 = event_logging 的 env 块**平铺** + Datadog 专属字段（ddsource/ddtags/
 // message/service/hostname/betas/subscription_type/user_bucket/process_metrics）。
 // 字段来源与 event_logging 完全一致（DRY）：env 取账号真机快照、process 现算、
-// entrypoint/is_interactive/client_type 钉 cli。
+// entrypoint/is_interactive/client_type 钉 sdk-cli（headless；2026-09-28 翻回）。
 type ReclaudeDatadogEvent struct {
 	DDSource string `json:"ddsource"`
 	DDTags   string `json:"ddtags"`
@@ -51,10 +51,10 @@ type ReclaudeDatadogEvent struct {
 	Env      string `json:"env"`
 	Model    string `json:"model"`
 
-	SessionID    string `json:"session_id"`
-	UserType     string `json:"user_type"`
-	Betas        string `json:"betas"`
-	IsClaudeAIAuth bool `json:"is_claude_ai_auth"`
+	SessionID      string `json:"session_id"`
+	UserType       string `json:"user_type"`
+	Betas          string `json:"betas"`
+	IsClaudeAIAuth bool   `json:"is_claude_ai_auth"`
 
 	Entrypoint    string `json:"entrypoint"`
 	IsInteractive string `json:"is_interactive"` // 🔴 真值是字符串 "true"，不是 bool
@@ -150,11 +150,11 @@ func BuildReclaudeDatadogBatch(ctx ReclaudeEventContext) []ReclaudeDatadogEvent 
 		UserType:       "external",
 		Betas:          reclaudeEventBetas,
 		IsClaudeAIAuth: true,
-		// 🔴 与 event_logging / 推理 UA / billing 全链路一致：cli。
-		// is_interactive 是**字符串** "true"（真值 2026-09-27）。
-		Entrypoint:    "cli",
-		IsInteractive: "true",
-		ClientType:    "cli",
+		// 🔴 与 event_logging / 推理 UA / billing 全链路一致：sdk-cli（headless）。
+		// is_interactive 是**字符串** "false"（8x 存活真值 2026-09-28）。
+		Entrypoint:     "sdk-cli",
+		IsInteractive:  "false",
+		ClientType:     "sdk-cli",
 		ProcessMetrics: process,
 
 		SubscriptionType: reclaudeDatadogSubscription,
@@ -211,15 +211,15 @@ func reclaudeUserBucket(accountUUID string) int {
 
 // reclaudeDatadogTags 拼 ddtags（真值键序）。
 //
-// ✅ 真值：event:<msg>,arch:<a>,client_type:cli,entrypoint:cli,model:<m>,
+// ✅ 真值：event:<msg>,arch:<a>,client_type:sdk-cli,entrypoint:sdk-cli,model:<m>,
 // platform:<p>,subscription_type:<s>,user_bucket:<b>,user_type:external,
-// version:<v>,version_base:<v>
+// version:<v>,version_base:<v>（8x 存活黄金基准 2026-09-28）
 func reclaudeDatadogTags(env ReclaudeEventEnv, model string, bucket int) string {
 	return strings.Join([]string{
 		"event:" + reclaudeDatadogEventName,
 		"arch:" + env.Arch,
-		"client_type:cli",
-		"entrypoint:cli",
+		"client_type:sdk-cli",
+		"entrypoint:sdk-cli",
 		"model:" + model,
 		"platform:" + env.Platform,
 		"subscription_type:" + reclaudeDatadogSubscription,

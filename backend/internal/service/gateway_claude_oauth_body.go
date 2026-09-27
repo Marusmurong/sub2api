@@ -928,11 +928,18 @@ func expandClaudeOAuthSystemPromptTextTemplate(body []byte, text string, expansi
 		return "", err
 	}
 	fp := computeClaudeCodeFingerprint(body, cliVersion)
+	// 🔴 sdk-cli 入口（reclaude headless `claude -p`）的 system[1] 身份文案是
+	// Agent SDK 文案，不是 official CLI。8x 存活真值实证（见 gateway_service.go
+	// claudeAgentSDKSystemPrompt）。cli / 其它入口仍用 official CLI 文案。
+	systemPrompt := claudeCodeSystemPrompt
+	if entrypoint == "sdk-cli" {
+		systemPrompt = claudeAgentSDKSystemPrompt
+	}
 	replacer := strings.NewReplacer(
 		"{billing_header}", billingText,
 		"{cc_version}", cliVersion,
 		"{fp}", fp,
-		"{claude_code_system_prompt}", claudeCodeSystemPrompt,
+		"{claude_code_system_prompt}", systemPrompt,
 		"{claude_code_expansion_prompt}", expansionPrompt,
 	)
 	return replacer.Replace(text), nil
@@ -1448,4 +1455,33 @@ func systemHasBillingAttributionBlock(body []byte) bool {
 		return true
 	})
 	return found
+}
+
+// rewriteReclaudeIdentityBlockToAgentSDK 把 reclaude 出站 body 里精确等于
+// official-CLI 身份文案的 system text 块，替换成 Agent SDK 文案。
+//
+// 🔴 只替换**精确匹配** claudeCodeSystemPrompt 的那一条 system 块（内嵌 claude 的
+// system[1] 身份块），绝不碰用户正文——用户正文不会恰好逐字等于官方 banner。
+// 只在 reclaude(sdk-cli) 出站路径调用（见 gateway_upstream_request.go）。
+// 8x 存活黄金基准：headless `claude -p` 的 system[1] 是 Agent SDK 文案，不是 CLI。
+func rewriteReclaudeIdentityBlockToAgentSDK(body []byte) []byte {
+	systemResult := gjson.GetBytes(body, "system")
+	if !systemResult.Exists() || !systemResult.IsArray() {
+		return body
+	}
+	target := strings.TrimSpace(claudeCodeSystemPrompt)
+	idx := 0
+	systemResult.ForEach(func(_, item gjson.Result) bool {
+		text := item.Get("text")
+		if text.Exists() && text.Type == gjson.String &&
+			strings.TrimSpace(text.String()) == target {
+			if updated, err := sjson.SetBytes(body,
+				fmt.Sprintf("system.%d.text", idx), claudeAgentSDKSystemPrompt); err == nil {
+				body = updated
+			}
+		}
+		idx++
+		return true
+	})
+	return body
 }
