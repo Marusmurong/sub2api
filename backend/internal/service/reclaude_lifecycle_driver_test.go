@@ -195,8 +195,10 @@ func TestReclaudeLifecycleDriverEmitsEvents(t *testing.T) {
 
 		driver.OnInference(ctx, account, "http://proxy:8080", "claude-opus-5-5")
 
-		calls := waitForCalls(t, forwarder, 12)
+		// 引导 12 条 + event_logging 1 + Datadog 1 = 14。
+		calls := waitForCalls(t, forwarder, 14)
 		events := 0
+		datadog := 0
 		for _, c := range calls {
 			if strings.Contains(c.url, "/api/event_logging/v2/batch") {
 				events++
@@ -205,8 +207,15 @@ func TestReclaudeLifecycleDriverEmitsEvents(t *testing.T) {
 				require.Contains(t, c.headers["user-agent"][0], "claude-code/")
 				require.Equal(t, "claude-code", c.headers["x-service-name"][0])
 			}
+			if strings.Contains(c.url, "datadoghq.com/api/v2/logs") {
+				datadog++
+				// ✅ Datadog 真值：UA axios、dd-api-key、无 authorization。
+				require.Contains(t, c.headers["user-agent"][0], "axios/")
+				require.NotEmpty(t, c.headers["dd-api-key"])
+			}
 		}
 		require.Equal(t, 1, events)
+		require.Equal(t, 1, datadog)
 	})
 
 	t.Run("缺真值身份时整批不发事件，其余流量照常", func(t *testing.T) {

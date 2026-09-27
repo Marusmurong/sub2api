@@ -77,6 +77,12 @@ func (d *ReclaudeLifecycleDriver) OnInference(
 	if _, ok := ReclaudeDaemonProxy(account); ok {
 		return
 	}
+	// 🔴 忠实中继模式：下游真 claude 自己发 bootstrap / event_logging / mcp_servers,
+	// 由中继路由原样转发到 la.route,此处不再合成——否则真+合成双份反而更假。
+	// 默认关,只对做真机对照(E1)的账号开。见 reclaude_relay_mode.go。
+	if ReclaudeRelayLifecycleEnabled(account) {
+		return
+	}
 
 	// 🔴 内层 claude-cli/claude-code UA 用 **claude-cli 版本**(machine_env.cli_version,
 	// 如 2.1.282),不是 reclaude 包装器版本(client_version=v1.4.0)。2026-09-26 抓包实证
@@ -110,11 +116,50 @@ func (d *ReclaudeLifecycleDriver) OnInference(
 	// 批大小差 50 倍、频次差一个量级，这是我自己引入的可判别特征。
 	//
 	// 遥测仍异步：真值里它跟在推理之后几秒，不阻塞推理。
+	//
+	// 🔴 event_logging 与 Datadog 同一个 flush 时机一起发：真客户端一批推理周围
+	// 两路遥测并存（Anthropic event_logging + Datadog intake），且共享同一 session_id /
+	// uptime / env 快照。分开发或只发一路，都会让「两路遥测对不上」成为可判别信号。
 	if event := d.maybeFlushEvents(account, cliVersion, model, now); event != nil {
 		logger.LegacyPrintf("service.reclaude",
 			"lifecycle dispatch: account=%d event_logging", account.ID)
-		d.sender.SendAsync(account, proxyURL, []ReclaudeLifecycleRequest{*event})
+		reqs := []ReclaudeLifecycleRequest{*event}
+		if dd := d.buildDatadogRequest(account, model, now); dd != nil {
+			reqs = append(reqs, *dd)
+		}
+		d.sender.SendAsync(account, proxyURL, reqs)
 	}
+}
+
+// buildDatadogRequest 在遥测 flush 时产出一条 Datadog 日志请求（与 event_logging 同批）。
+//
+// 与 maybeFlushEvents 共享 session_id 与会话起点 —— 两路遥测的 env / process /
+// session_id 必须严格同源（见 driver 顶部 Datadog 说明）。缺真值身份字段时
+// BuildReclaudeDatadogBatch 返回 nil，这里也返回 nil（不发可解释）。
+func (d *ReclaudeLifecycleDriver) buildDatadogRequest(
+	account *Account, model string, now time.Time,
+) *ReclaudeLifecycleRequest {
+	session, ok := d.sessionState(account.ID)
+	if !ok {
+		return nil
+	}
+	batch := BuildReclaudeDatadogBatch(ReclaudeEventContext{
+		Account:   account,
+		SessionID: session.id,
+		Model:     model,
+		Uptime:    now.Sub(session.startAt),
+		Now:       now,
+	})
+	if len(batch) == 0 {
+		return nil
+	}
+	body, err := json.Marshal(batch)
+	if err != nil {
+		return nil
+	}
+	// 真值里 Datadog 跟在推理之后几秒（与 event_logging 同批）。
+	req := BuildReclaudeDatadogRequest(body, 3*time.Second)
+	return &req
 }
 
 // ReclaudeColdStartGap 是「静默多久之后再来的启动算冷启动」。

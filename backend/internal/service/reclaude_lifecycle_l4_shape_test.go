@@ -61,13 +61,37 @@ func TestBuildReclaudeBootstrapRequestsMatchesLiveCapture(t *testing.T) {
 		return ReclaudeLifecycleRequest{}
 	}
 
-	t.Run("冷启动 11 条,暖启动 9 条(少 bootstrap 与 penguin)", func(t *testing.T) {
-		require.Len(t, cold, 11)
-		require.Len(t, warm, 9)
+	t.Run("冷启动 12 条,暖启动 10 条(少 bootstrap 与 penguin)", func(t *testing.T) {
+		// +1 model_selector（2026-09-27 完整会话抓包补齐，跟在 skills 之后）。
+		require.Len(t, cold, 12)
+		require.Len(t, warm, 10)
 		require.Equal(t, 1, countURL(cold, "/api/claude_cli/bootstrap"))
 		require.Equal(t, 1, countURL(cold, "/api/claude_code_penguin_mode"))
 		require.Equal(t, 0, countURL(warm, "/api/claude_cli/bootstrap"))
 		require.Equal(t, 0, countURL(warm, "/api/claude_code_penguin_mode"))
+	})
+
+	t.Run("model_selector/cc 跟在 skills 之后（org 端点，client-platform 跟 cli 画像）", func(t *testing.T) {
+		require.Equal(t, 1, countURL(cold, "/model_selector/cc"))
+		require.Equal(t, 1, countURL(warm, "/model_selector/cc"))
+		ms := find(cold, "/model_selector/cc")
+		require.Equal(t, "GET", ms.Method)
+		require.True(t, ms.NeedsAuthorization)
+		// 🔴 cli 画像：claude_code_cli，不是 sdk 真值的 claude_code_sdk。
+		require.Equal(t, "claude_code_cli", ms.Headers["anthropic-client-platform"])
+		require.Equal(t, "47be3ed1-4b36-4bae-837d-40b5106369ec", ms.Headers["x-organization-uuid"])
+		require.Equal(t, "2023-06-01", ms.Headers["anthropic-version"])
+		require.Equal(t, "claude-cli/2.1.282 (external, cli)", ms.Headers["user-agent"])
+		// 时序：紧跟 skills(212ms)。
+		require.Equal(t, 219*time.Millisecond, ms.Delay)
+	})
+
+	t.Run("skills 缺 org 时 model_selector 也跳过", func(t *testing.T) {
+		noOrg := BuildReclaudeBootstrapRequests(ReclaudeBootstrapParams{
+			CLIVersion: "2.1.282", Model: "claude-opus-5-5", Cold: true,
+		})
+		require.Equal(t, 0, countURL(noOrg, "/model_selector/cc"))
+		require.Equal(t, 0, countURL(noOrg, "/skills/list-skills"))
 	})
 
 	t.Run("mcp_servers 只 1 次,mcp-registry 4 次", func(t *testing.T) {
@@ -143,7 +167,8 @@ func TestReclaudeLifecycleDriverBootstrapsBeforeInference(t *testing.T) {
 		for _, c := range forwarder.snapshot() {
 			require.NotContains(t, c.url, "/api/event_logging/", "event_logging 不在同步批里")
 		}
-		calls := waitForCalls(t, forwarder, 12)
+		// 引导 12 条 + event_logging 1 + Datadog 1 = 14。
+		calls := waitForCalls(t, forwarder, 14)
 		events := 0
 		for _, c := range calls {
 			if strings.Contains(c.url, "/api/event_logging/") {

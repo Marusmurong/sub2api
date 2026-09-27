@@ -68,8 +68,9 @@ func TestBuildReclaudeBootstrapRequests(t *testing.T) {
 		for _, r := range requests {
 			urls = append(urls, r.URL)
 		}
-		// 09-26 真值冷启动 11 条：profile/mcp_servers/skills/bootstrap/penguin/registry×4/settings/grove。
-		require.Len(t, requests, 11)
+		// 冷启动 12 条：profile/mcp_servers/skills/bootstrap/penguin/registry×4/settings/grove/model_selector。
+		// （model_selector 2026-09-27 完整会话抓包补齐。）
+		require.Len(t, requests, 12)
 		for _, u := range urls {
 			// 🔴 eval/sdk-… 路径里带我们编不出来的 SDK 实例 ID，伪造比缺席更危险。
 			require.NotContains(t, u, "/api/eval/")

@@ -24,6 +24,13 @@ const (
 	reclaudeInnerUAClaudeCodeForma = "claude-code/%s"
 )
 
+// reclaudeClientPlatformCLI 是 anthropic-client-platform 头在 cli 画像下的值。
+//
+// 🔴 严格跟画像（2026-09-27 真值两画像逐字对比）：cli=claude_code_cli /
+// sdk-cli=claude_code_sdk。skills 与 model_selector 两个 org 端点都带它。
+// 生产钉 cli，故统一 claude_code_cli；不能照搬 sdk-cli 真值的 sdk 值。
+const reclaudeClientPlatformCLI = "claude_code_cli"
+
 // ReclaudeLifecycleRequest 描述一条要合成的生命周期请求。
 //
 // 只描述**形状**，不含凭据与 traceId —— 那两项由转发器在发送时统一注入，
@@ -150,15 +157,23 @@ func BuildReclaudeBootstrapRequests(p ReclaudeBootstrapParams) []ReclaudeLifecyc
 
 	reqs := []ReclaudeLifecycleRequest{profile, mcpServers}
 
-	// organizations/skills：需要 org uuid;缺则跳过(编不出真 org 更危险)。
+	// organizations/skills 与 model_selector：都需要 org uuid;缺则跳过
+	// (编不出真 org 更危险)。真值时序：skills 紧接着就是 model_selector
+	// （2026-09-27 完整会话抓包，两者相邻）。org 端点辅助函数复用同一套头。
+	orgEndpoint := func(url string, delay time.Duration) ReclaudeLifecycleRequest {
+		r := cli(url, delay, "")
+		r.Headers["content-type"] = "application/json"
+		r.Headers["anthropic-version"] = "2023-06-01"
+		// ✅ 真值定值:不是 OS 平台,是自报的客户端平台标识。
+		// 🔴 严格跟画像:cli=claude_code_cli / sdk-cli=claude_code_sdk（真值两画像
+		// 逐字对比确认）。生产钉 cli，故用 claude_code_cli，不照搬 sdk 值。
+		r.Headers["anthropic-client-platform"] = reclaudeClientPlatformCLI
+		return r
+	}
 	if org := strings.TrimSpace(p.OrgUUID); org != "" {
-		skills := cli("https://api.anthropic.com/api/oauth/organizations/"+org+
+		skills := orgEndpoint("https://api.anthropic.com/api/oauth/organizations/"+org+
 			"/skills/list-skills?include_wiggle_skills=true&entrypoint=cli",
-			212*time.Millisecond, "")
-		skills.Headers["content-type"] = "application/json"
-		skills.Headers["anthropic-version"] = "2023-06-01"
-		// ✅ 真值定值:不是 OS 平台,是 SDK 自报的客户端平台标识。
-		skills.Headers["anthropic-client-platform"] = "claude_code_cli"
+			212*time.Millisecond)
 		skills.Headers["x-organization-uuid"] = org
 		reqs = append(reqs, skills)
 	}
@@ -187,6 +202,16 @@ func BuildReclaudeBootstrapRequests(p ReclaudeBootstrapParams) []ReclaudeLifecyc
 		registry(215*time.Millisecond),
 		cli("https://api.anthropic.com/api/oauth/account/settings", 217*time.Millisecond, "oauth-2025-04-20"),
 		cli("https://api.anthropic.com/api/claude_code_grove", 218*time.Millisecond, "oauth-2025-04-20"),
+	)
+	// model_selector/cc：真值时序紧跟 skills/grove 一批（skills→cc 相邻），
+	// 在末尾 registry 复查之前。需 org（同 skills）；缺 org 则不发。
+	if org := strings.TrimSpace(p.OrgUUID); org != "" {
+		modelSelector := orgEndpoint("https://api.anthropic.com/api/organizations/"+org+
+			"/model_selector/cc", 219*time.Millisecond)
+		modelSelector.Headers["x-organization-uuid"] = org
+		reqs = append(reqs, modelSelector)
+	}
+	reqs = append(reqs,
 		registry(1293*time.Millisecond),
 		registry(1933*time.Millisecond),
 		registry(2436*time.Millisecond),

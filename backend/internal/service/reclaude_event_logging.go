@@ -94,9 +94,15 @@ type ReclaudeEventData struct {
 	IsInteractive   bool              `json:"is_interactive"`
 	ClientType      string            `json:"client_type"`
 	Process         string            `json:"process"`
-	Auth            ReclaudeEventAuth `json:"auth"`
-	EventID         string            `json:"event_id"`
-	DeviceID        string            `json:"device_id"`
+	// AdditionalMetadata 是 base64(JSON) 的事件专属元数据。
+	//
+	// 🔴 真值里 tengu_api_query / tengu_api_cache_breakpoints 恒带它，缺字段是
+	// 「非真实 CLI」的直接特征。按事件名填不同内容（见 reclaude_event_metadata.go）；
+	// 无对应内容的事件此字段为空并 omitempty（真值里也不是每个事件都带）。
+	AdditionalMetadata string            `json:"additional_metadata,omitempty"`
+	Auth               ReclaudeEventAuth `json:"auth"`
+	EventID            string            `json:"event_id"`
+	DeviceID           string            `json:"device_id"`
 }
 
 // ReclaudeEvent 是批次里的一条。
@@ -219,6 +225,12 @@ func BuildReclaudeEventBatch(ctx ReclaudeEventContext, names []string) *Reclaude
 	process := EncodeReclaudeProcess(collectReclaudeProcessStats(ctx.Uptime))
 	timestamp := ctx.Now.UTC().Format("2006-01-02T15:04:05.000Z")
 
+	// 🔴 additional_metadata 的 cc_prompt_id 在同一批（同一会话）内共享 —— 真值样本里
+	// 同批的 query 与 cache_breakpoints 用同一个 cc_prompt_id。
+	ccPromptID := reclaudeNewCCPromptID()
+	subscription := reclaudeDatadogSubscription // 与 Datadog 同源的订阅档位（回落 max）
+	buildAge := reclaudeBuildAgeMins(env.BuildTime, ctx.Now)
+
 	events := make([]ReclaudeEvent, 0, len(names))
 	for _, name := range names {
 		events = append(events, ReclaudeEvent{
@@ -232,6 +244,9 @@ func BuildReclaudeEventBatch(ctx ReclaudeEventContext, names []string) *Reclaude
 				UserType: "external",
 				Betas:    reclaudeEventBetas,
 				Env:      env,
+				// 🔴 按事件名填 additional_metadata（真值 query/cache_breakpoints 恒带）。
+				AdditionalMetadata: reclaudeEventAdditionalMetadata(
+					name, ctx.Model, subscription, ccPromptID, buildAge),
 				// ✅ 真值 entrypoint=cli / client_type=cli / is_interactive=true
 				// （2026-09-27 交互式抓包）。与推理 UA (external, cli)、billing
 				// cc_entrypoint=cli、bootstrap/skills 的 entrypoint=cli 全链路自洽。

@@ -58,10 +58,11 @@ func TestBuildReclaudeEventBatch(t *testing.T) {
 
 		var decoded map[string]json.RawMessage
 		require.NoError(t, json.Unmarshal(raw, &decoded))
+		// additional_metadata：真值里 tengu_api_query 恒带（2026-09-27 抓包）。
 		require.ElementsMatch(t, []string{
 			"event_name", "client_timestamp", "model", "session_id", "user_type",
 			"betas", "env", "entrypoint", "is_interactive", "client_type",
-			"process", "auth", "event_id", "device_id",
+			"process", "additional_metadata", "auth", "event_id", "device_id",
 		}, keysOf(decoded))
 	})
 
