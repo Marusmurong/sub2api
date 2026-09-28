@@ -57,6 +57,13 @@ func ProvideReclaudeRuntime(
 	// 上报器永远取不到，遥测恒为空 —— 而「有推理、零遥测」正是要消除的矛盾。
 	telemetryCollector := NewReclaudeTelemetryCollector()
 	telemetry := NewReclaudeTelemetryReporter(probe, telemetryCollector)
+	// passthrough_hosts 从同机 reclaude passthrough.json 读真值(2026-09-29)。
+	// 账号 extra 的 reclaude_passthrough_file 指定路径;缺省回落到默认路径。
+	// 同机同用户(ubuntu)下 sub 能读 reclaude 的这个文件;非同机则读不到,发空(降级)。
+	telemetry.SetPassthroughLoader(func(account *Account) []ReclaudeTelemetryPassthroughHost {
+		path := ReclaudePassthroughFilePath(account)
+		return LoadReclaudePassthroughHosts(path)
+	})
 
 	quota := NewReclaudeQuotaGate(usageStore)
 	upstream := NewReclaudeUpstream(httpUpstream, cipher, events)

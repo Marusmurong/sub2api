@@ -40,21 +40,39 @@ func telemetryAccount() *Account {
 func TestReclaudeTelemetryReporter(t *testing.T) {
 	at := telemetryAt(t, "2026-09-24T10:00:00Z")
 
-	t.Run("启动后立刻发一次，即使没有任何数据", func(t *testing.T) {
-		// 🔴 真客户端是「先 flush 再进 ticker」。刚上线就沉默五分钟
-		// 与真值的启动时序对不上。
+	// stubPassthrough 让 reporter 有 passthrough 内容(模拟同机 passthrough.json 有观测),
+	// 使窗口/去重逻辑用例满足「三空跳过」门槛(2026-09-29)。
+	stubPassthrough := func(r *ReclaudeTelemetryReporter) {
+		r.SetPassthroughLoader(func(_ *Account) []ReclaudeTelemetryPassthroughHost {
+			return []ReclaudeTelemetryPassthroughHost{{Host: "static.reclaude.ai", N: 1, Listeners: []string{"connect"}}}
+		})
+	}
+
+	t.Run("三空跳过:无 rollup 无 passthrough 不发(对齐真客户端 flushTelemetry)", func(t *testing.T) {
 		poster := &recordingTelemetryPoster{}
 		reporter := NewReclaudeTelemetryReporter(poster, NewReclaudeTelemetryCollector())
+		// 不设 passthroughLoader → passthrough 空 + rollup 空 → 三空跳过。
+		reporter.ReportAt(context.Background(), telemetryAccount(), at)
+		require.Empty(t, poster.payloads, "三空窗口不发(对齐真客户端)")
+	})
+
+	t.Run("有 passthrough 时发一次(含真值 3-key)", func(t *testing.T) {
+		poster := &recordingTelemetryPoster{}
+		reporter := NewReclaudeTelemetryReporter(poster, NewReclaudeTelemetryCollector())
+		stubPassthrough(reporter)
 
 		reporter.ReportAt(context.Background(), telemetryAccount(), at)
 
 		require.Len(t, poster.payloads, 1)
-		require.JSONEq(t, `{"rollups":[],"passthrough_hosts":[]}`, string(poster.payloads[0]))
+		require.JSONEq(t,
+			`{"rollups":[],"passthrough_hosts":[{"host":"static.reclaude.ai","n":1,"listeners":["connect"]}],"passthrough_overflow":0}`,
+			string(poster.payloads[0]))
 	})
 
 	t.Run("同一个窗口内不重复发", func(t *testing.T) {
 		poster := &recordingTelemetryPoster{}
 		reporter := NewReclaudeTelemetryReporter(poster, NewReclaudeTelemetryCollector())
+		stubPassthrough(reporter)
 		account := telemetryAccount()
 
 		// 心跳每分钟调一次，窗口是 5 分钟 —— 中间四次必须静默。
@@ -69,6 +87,7 @@ func TestReclaudeTelemetryReporter(t *testing.T) {
 	t.Run("跨到下一个窗口才再发", func(t *testing.T) {
 		poster := &recordingTelemetryPoster{}
 		reporter := NewReclaudeTelemetryReporter(poster, NewReclaudeTelemetryCollector())
+		stubPassthrough(reporter)
 		account := telemetryAccount()
 
 		reporter.ReportAt(context.Background(), account, at)
@@ -117,6 +136,7 @@ func TestReclaudeTelemetryReporter(t *testing.T) {
 		// 重试会把同一个 window_start_ms 再发一遍，而对端按这个键记账。
 		poster := &recordingTelemetryPoster{err: errors.New("dial timeout")}
 		reporter := NewReclaudeTelemetryReporter(poster, NewReclaudeTelemetryCollector())
+		stubPassthrough(reporter)
 		account := telemetryAccount()
 
 		reporter.ReportAt(context.Background(), account, at)

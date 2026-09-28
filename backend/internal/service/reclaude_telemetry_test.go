@@ -19,20 +19,21 @@ func telemetryAt(t *testing.T, iso string) time.Time {
 
 func TestReclaudeTelemetryPayloadShape(t *testing.T) {
 	t.Run("顶层键与真值样本一致", func(t *testing.T) {
-		// ✅ ~/.reclaude/telemetry-pending.json 顶层只有这两个键。
-		raw, err := BuildReclaudeTelemetryPayload(nil)
+		// 🔴 2026-09-29 逐字节复核真值抓包:顶层**3 个键**,passthrough_overflow 显式带。
+		raw, err := BuildReclaudeTelemetryPayload(nil, nil)
 		require.NoError(t, err)
 
 		var decoded map[string]json.RawMessage
 		require.NoError(t, json.Unmarshal(raw, &decoded))
-		require.ElementsMatch(t, []string{"rollups", "passthrough_hosts"}, keysOf(decoded))
+		require.ElementsMatch(t,
+			[]string{"rollups", "passthrough_hosts", "passthrough_overflow"}, keysOf(decoded))
 	})
 
-	t.Run("空集合序列化成 [] 而不是 null", func(t *testing.T) {
+	t.Run("空集合序列化成 [] 而不是 null + overflow 显式 0", func(t *testing.T) {
 		// null 在对端看来是「字段缺失」，空数组才是「没有数据」。
-		raw, err := BuildReclaudeTelemetryPayload(nil)
+		raw, err := BuildReclaudeTelemetryPayload(nil, nil)
 		require.NoError(t, err)
-		require.JSONEq(t, `{"rollups":[],"passthrough_hosts":[]}`, string(raw))
+		require.JSONEq(t, `{"rollups":[],"passthrough_hosts":[],"passthrough_overflow":0}`, string(raw))
 	})
 
 	t.Run("rollup 字段名逐字对齐真值", func(t *testing.T) {
@@ -40,7 +41,7 @@ func TestReclaudeTelemetryPayloadShape(t *testing.T) {
 			WindowSecs:  ReclaudeTelemetryWindowSecs,
 			TTFTBuckets: make([]int, reclaudeTelemetryBucketCount),
 			DurBuckets:  make([]int, reclaudeTelemetryBucketCount),
-		}})
+		}}, nil)
 		require.NoError(t, err)
 
 		var decoded struct {

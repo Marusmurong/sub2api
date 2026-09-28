@@ -71,16 +71,17 @@ type ReclaudeTelemetryPassthroughHost struct {
 
 // ReclaudeTelemetryRequest 是 POST /client/telemetry 的请求体。
 //
-// ✅ 真值落盘样本的顶层**只有两个键**。PassthroughOverflow 留 omitempty：
-// 反编译里有这个字段，但样本中不出现 —— 两种可能（字段本就是 omitempty 且
-// 当时为 0，或字段不存在）在「当前输出」上无法区分，而 omitempty 在两种
-// 假设下产出的 JSON 都与样本一致，是唯一不会错的写法。
+// 🔴 2026-09-29 逐字节复核真值抓包(reclaude-live-2026-09-27/interactive 两份
+// telemetry body)：顶层**恰好 3 个键**，passthrough_overflow=0 是**显式带的**
+// (`{"rollups":[],"passthrough_hosts":[...],"passthrough_overflow":0}`)。此前注释
+// 说"只有两个键 + omitempty"是样本没逐字节看清的误判 —— 改为显式发 0(去 omitempty),
+// 与真值 3-key 一致;omitempty 会在 0 时省略字段,发出 2-key,与真值不符。
 type ReclaudeTelemetryRequest struct {
 	Rollups []ReclaudeTelemetryRollup `json:"rollups"`
 	// 🔴 必须是 [] 而不是 null：null 在对端看来是「字段缺失」，空数组才是
-	// 「没有数据」。我们不做 MITM，所以恒为空数组。
+	// 「没有数据」。有同机 passthrough.json 时填真值观测,否则空(见 passthrough source)。
 	PassthroughHosts    []ReclaudeTelemetryPassthroughHost `json:"passthrough_hosts"`
-	PassthroughOverflow int64                              `json:"passthrough_overflow,omitempty"`
+	PassthroughOverflow int64                              `json:"passthrough_overflow"`
 }
 
 // ReclaudeTelemetrySample 是热路径上报的一次调用。
@@ -206,6 +207,25 @@ func (c *ReclaudeTelemetryCollector) RecordAt(
 // window_start_ms 被报两次，而对端是按这个键做记账的。
 //
 // 取走即清零：不清零会让同一批请求被反复上报，累计数无限膨胀。
+// PeekHasClosedWindows 非消费性判断该账号是否有已关闭窗口的 rollup 待发。
+//
+// 🔴 与 DrainClosedWindows 的区别:只读不删。用于三空跳过门槛在 shouldReport
+// 之前判有无内容,避免"先 drain 再被 shouldReport 挡下 → rollup 丢失"。
+func (c *ReclaudeTelemetryCollector) PeekHasClosedWindows(accountID int64, now time.Time) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	currentWindow := ReclaudeTelemetryWindowStartMs(now)
+	for key := range c.byWindow {
+		if key.accountID == accountID && key.windowStartMs < currentWindow {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *ReclaudeTelemetryCollector) DrainClosedWindows(
 	accountID int64, now time.Time,
 ) []ReclaudeTelemetryRollup {
@@ -268,14 +288,35 @@ func sortReclaudeRollupsByWindow(rollups []ReclaudeTelemetryRollup) {
 //	遥测侧：该设备报告自己发了 0 次
 //
 // 这个矛盾无法用「用户关了遥测」解释，它精确指向「凭据被第三方程序使用」。
-func BuildReclaudeTelemetryPayload(rollups []ReclaudeTelemetryRollup) ([]byte, error) {
+func BuildReclaudeTelemetryPayload(
+	rollups []ReclaudeTelemetryRollup,
+	passthrough []ReclaudeTelemetryPassthroughHost,
+) ([]byte, error) {
 	if rollups == nil {
 		rollups = []ReclaudeTelemetryRollup{}
 	}
+	if passthrough == nil {
+		// 恒发空数组不发 null(对端把 null 当字段缺失)。
+		passthrough = []ReclaudeTelemetryPassthroughHost{}
+	}
 	return json.Marshal(ReclaudeTelemetryRequest{
 		Rollups:          rollups,
-		PassthroughHosts: []ReclaudeTelemetryPassthroughHost{},
+		PassthroughHosts: passthrough,
+		// passthrough_overflow 显式发 0(去 omitempty,对齐真值 3-key)。
+		PassthroughOverflow: 0,
 	})
+}
+
+// ReclaudeTelemetryHasContent 判断这批数据是否值得上报。
+//
+// 🔴 真客户端 flushTelemetry:rollups + passthrough_hosts + overflow 三者全空则
+// **跳过发送**(2026-09-29 反汇编实证)。sub 对齐这个门槛,不每 300s 硬发一个空体
+// —— 一个"周期性发空 telemetry"本身是可判别特征。
+func ReclaudeTelemetryHasContent(
+	rollups []ReclaudeTelemetryRollup,
+	passthrough []ReclaudeTelemetryPassthroughHost,
+) bool {
+	return len(rollups) > 0 || len(passthrough) > 0
 }
 
 // bucketizeReclaudeDurations 把时延样本装进 18 档直方图。
