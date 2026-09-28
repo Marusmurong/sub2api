@@ -157,8 +157,8 @@ func (s *GatewayService) buildUpstreamRequest(ctx context.Context, c *gin.Contex
 	// === 计算最终 anthropic-beta header（先于 body sanitize 与 CCH 签名）===
 	//
 	// 顺序约束：
-	//   1) 算 finalBeta（纯函数，不依赖 req.Header；mimicry 路径会忽略客户端 beta，
-	//      与原“OAuth + mimicClaudeCode 跳过白名单透传”行为对齐）
+	//   1) 算 finalBeta（纯函数，不依赖 req.Header；mimicry 路径仅保留明确支持的
+	//      客户端兼容性 beta，其余使用固定列表）
 	//   2) 按 finalBeta 做能力维度 body sanitize（如 context-management beta 缺失 →
 	//      strip body.context_management，与 Bedrock 路径对称）
 	//   3) CCH 签名（必须使用 strip 后的 body，否则 hash 与最终 body 不一致 →
@@ -649,11 +649,19 @@ func (s *GatewayService) computeBaseAnthropicBetaWithGates(
 	if tokenType == "oauth" {
 		if mimicClaudeCode {
 			// 按模型族取真实 CLI 的 beta 模板 + 账号门控 + 白名单内的功能 beta
-			//（见 claude.MimicryBetasForModel）。incoming 传空：客户端 beta 已在白名单
-			// 函数里筛过，不能再从这里二次并入，否则等于放行全部客户端 beta，集合大小
-			// 又会随下游变化。Haiku 走它自己的模板（真实 CLI 对 haiku 发 8 个，顺序不同）。
+			//（见 claude.MimicryBetasForModel）。客户端 beta 已在白名单函数里筛过，
+			// 不能再整体并入，否则等于放行全部客户端 beta，集合大小又会随下游变化。
+			// Haiku 走它自己的模板（真实 CLI 对 haiku 发 8 个，顺序不同）。
+			//
+			// 唯一例外（采纳上游 v0.2.9）：客户端**显式**带了 structured-outputs 时追加。
+			// 它是能力开关不是身份标记，缺了这类请求必 400；不带的请求集合不变。
+			// policy drop 仍优先于它。
+			incomingBeta := ""
+			if containsBetaToken(clientBeta, claude.BetaStructuredOutputs) {
+				incomingBeta = claude.BetaStructuredOutputs
+			}
 			return mergeAnthropicBetaDropping(
-				claude.MimicryBetasForModel(modelID, clientBeta, bodyRequestsFastMode(body), gates), "", effectiveDropSet), true
+				claude.MimicryBetasForModel(modelID, clientBeta, bodyRequestsFastMode(body), gates), incomingBeta, effectiveDropSet), true
 		}
 		// 非 OAuth-mimic 的兜底（当前 OAuth 已恒为 mimic，此分支主要留给未来的非 OAuth 场景）
 		return stripBetaTokensWithSet(s.getBetaHeader(modelID, clientBeta), effectiveDropSet), true
@@ -678,7 +686,7 @@ func (s *GatewayService) computeBaseAnthropicBetaWithGates(
 // 两条特殊规则：
 //
 //   - OAuth mimic：requiredBetas 为 FullClaudeCodeMimicryBetas + BetaTokenCounting；
-//     count_tokens 另外保留客户端 beta，而 messages mimic 会忽略客户端 beta。
+//     count_tokens 另外保留客户端 beta，而 messages mimic 仅保留明确支持的兼容性 token。
 //   - OAuth 透传 + 客户端未传 anthropic-beta：补齐 CountTokensBetaHeader
 //   - OAuth 透传 + 客户端传了：补齐 BetaTokenCounting（如果未含）
 //
