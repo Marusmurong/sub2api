@@ -56,9 +56,9 @@ func CLIVersion() string {
 // 列在这里只会造成「标定了却用不了」的矛盾（曾被测试抓到）。
 // 抬基线时把更早的条目一并删掉。
 var CalibratedCLIVersions = []string{
-	// 2026-09-20 抓包核对（Bun 原生 arm64，OAuth/API-key 两种模式头集合一致）；
-	// Opus 5.5 要求 >= 2.1.280，当前基线即此值。
-	"2.1.280",
+	// 2026-09-29 抓包核对（Bun 原生 arm64，对 2.1.280 头/TLS/beta 模板无实质变化）；
+	// 当前基线即此值。Opus 5.5 要求 >= 2.1.280，已满足。
+	"2.1.284",
 }
 
 // isCalibratedCLIVersion 报告该版本是否已抓包标定。

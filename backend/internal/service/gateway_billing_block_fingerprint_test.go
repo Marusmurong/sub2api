@@ -219,3 +219,12 @@ func TestExtractFirstUserTextStopsAtNonMetaMessageWithoutText(t *testing.T) {
 		})
 	}
 }
+
+// 期望值 12a 来自 2026-09-29 本机真实 Claude Code 2.1.284（-p 模式，提示词 "hi"）的
+// 计费块 cc_version=2.1.284.12a。后缀把版本号算进了哈希，抬版本后必须以抓包值对拍。
+func TestComputeClaudeCodeFingerprintMatchesReal2_1_284Capture(t *testing.T) {
+	body := []byte(`{"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]}`)
+	if got := computeClaudeCodeFingerprint(body, "2.1.284"); got != "12a" {
+		t.Fatalf("fingerprint = %q, want %q（真实 2.1.284 抓包值）", got, "12a")
+	}
+}

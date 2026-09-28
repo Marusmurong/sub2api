@@ -115,9 +115,18 @@ const DefaultCacheControlTTL = "5m"
 //     9 sigalg、ALPN 仅 http/1.1、扩展序 23 ff01 10 11 35 16 5 13 18 51 45 43）；
 //   - 唯一差异是 opus/fable 族 beta 多了 mid-conversation-tool-changes-2026-07-01。
 //
+// 2026-09-29 抬到 2.1.284（npm latest）：本机真实 2.1.284（macOS arm64 Bun 原生二进制，
+// -p 模式，假 OAuth token 指向本地替身，存 docs/captures/cc-2.1.284-macos-arm64/）
+// 对 2.1.280 逐项 diff 无实质变化：
+//   - 三族头集合、头顺序、X-Stainless-*、Accept-Encoding、Connection 全同；
+//   - TLS ClientHello 17 cipher / 扩展序 / groups / 9 sigalg / ALPN 全同（JA3 5260242a…）；
+//   - beta 三族模板逐项相同（抓样缺的 context-1m / fallback-credit 是账号级门控，
+//     假 token 没有该资格，不是版本差异）；
+//   - 计费块 cc_version=2.1.284.12a（"hi"）与网关 computeClaudeCodeFingerprint 对拍一致。
+//
 // 注意：只改本常量才有用——identity_service.floorClaudeCLIUserAgentVersion 的存量账号
 // 指纹地板读的就是它，SUB2API_CLAUDE_CLI_VERSION 环境变量抬不动那条地板。
-const CLICurrentVersion = "2.1.280"
+const CLICurrentVersion = "2.1.284"
 
 // CLIPatchVersion 返回当前伪装 CLI 版本的 patch 段（"2.1.263" → "263"）。
 //

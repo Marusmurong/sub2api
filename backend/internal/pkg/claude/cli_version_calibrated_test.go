@@ -4,7 +4,7 @@ import "testing"
 
 // 🔴 版本号不是一个孤立的数字，它是一组**同时变化**的出站字段中的一个：
 //
-//	claude-cli/2.1.280                      ← 自动同步只推进这个
+//	claude-cli/2.1.284                      ← 自动同步只推进这个
 //	X-Stainless-Package-Version: 0.112.1    ← 不动
 //	X-Stainless-Runtime-Version: v26.3.0    ← 不动
 //	anthropic-beta: <三族模板>               ← 不动
@@ -56,7 +56,7 @@ func TestOnlyCalibratedVersionsAreSupported(t *testing.T) {
 	})
 
 	t.Run("格式非法的值仍然被拒", func(t *testing.T) {
-		for _, version := range []string{"", "2.1", "2.1.280-dev", "v2.1.280", "latest"} {
+		for _, version := range []string{"", "2.1", "2.1.284-dev", "v2.1.284", "latest"} {
 			if IsSupportedCLIVersion(version) {
 				t.Fatalf("非法格式 %q 被接受", version)
 			}

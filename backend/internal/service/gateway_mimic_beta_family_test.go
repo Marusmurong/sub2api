@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// 期望值来自 2026-09-23 本机真实 Claude Code 2.1.280 抓包（三族各一次）。
+// 期望值来自 2026-09-23 本机真实 Claude Code 2.1.280 抓包（三族各一次），2026-09-29 用 2.1.284 复核逐项相同。
 // 相对 2.1.263 只有 opus/fable 族多了 mid-conversation-tool-changes-2026-07-01。
 // 这里测的是网关出口的最终字符串：模板取族、账号门控、fast-mode、白名单透传。
 func TestMimicBeta_PerModelFamilyMatchesRealCLI(t *testing.T) {
