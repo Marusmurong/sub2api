@@ -234,7 +234,8 @@ func parseGatewayRequestCurrentBody(parsed *ParsedRequest, protocol string) erro
 	parsed.MetadataUserID = gjson.Get(jsonStr, "metadata.user_id").String()
 
 	thinkingType := gjson.Get(jsonStr, "thinking.type").String()
-	parsed.ThinkingEnabled = thinkingType == "enabled" || thinkingType == "adaptive" || (protocol == domain.PlatformAnthropic && claude.IsOpus55(parsed.Model))
+	parsed.ThinkingEnabled = thinkingType == "enabled" || thinkingType == "adaptive" || thinkingType == "between_tools" ||
+		(protocol == domain.PlatformAnthropic && isClaude55SignedThinkingModel(parsed.Model))
 
 	parsed.OutputEffort = strings.TrimSpace(gjson.Get(jsonStr, "output_config.effort").String())
 	if protocol == domain.PlatformAnthropic {
@@ -679,22 +680,60 @@ func stripEmptyTextBlocksAtPath(body []byte, contentOwnerPath string, owner gjso
 	return body
 }
 
-// validateClaudeOpus55Request rejects settings that the upstream cannot honor.
+// isClaude55SignedThinkingModel identifies models whose default thinking mode
+// requires signed history to survive protocol conversion and request filtering.
+func isClaude55SignedThinkingModel(model string) bool {
+	return claude.IsOpus55(model) || claude.IsSonnet55(model)
+}
+
+// validateClaude55Request rejects settings that the upstream cannot honor.
 // Call before OAuth mimicry can remove tool_choice or alter thinking defaults.
-func validateClaudeOpus55Request(body []byte, model string) error {
-	if !claude.IsOpus55(model) {
+func validateClaude55Request(body []byte, model string) error {
+	if !isClaude55SignedThinkingModel(model) {
 		return nil
 	}
+	isSonnet55 := claude.IsSonnet55(model)
 	switch gjson.GetBytes(body, "thinking.type").String() {
 	case "disabled", "enabled":
+		if isSonnet55 {
+			return fmt.Errorf("claude-sonnet-5-5 requires adaptive thinking or thinking.type=between_tools; omit thinking or use one of those modes")
+		}
 		return fmt.Errorf("claude-opus-5-5 requires adaptive thinking; omit thinking or use thinking.type=adaptive and output_config.effort")
+	case "between_tools":
+		if !isSonnet55 {
+			return fmt.Errorf("claude-opus-5-5 requires adaptive thinking; thinking.type=between_tools is unsupported")
+		}
+		effort := gjson.GetBytes(body, "output_config.effort").String()
+		if effort == "xhigh" || effort == "max" {
+			return fmt.Errorf("claude-sonnet-5-5 thinking.type=between_tools supports only low, medium or high effort")
+		}
+		for _, field := range []string{"thinking.display", "thinking.budget_tokens", "thinking.block_binding"} {
+			if gjson.GetBytes(body, field).Exists() {
+				return fmt.Errorf("claude-sonnet-5-5 thinking.type=between_tools does not support %s", field)
+			}
+		}
+	}
+	modelName := "claude-opus-5-5"
+	if isSonnet55 {
+		modelName = "claude-sonnet-5-5"
 	}
 	if gjson.GetBytes(body, "tool_choice").String() == "required" {
-		return fmt.Errorf("claude-opus-5-5 does not support forced tool_choice; use auto or none")
+		return fmt.Errorf("%s does not support forced tool_choice; use auto or none", modelName)
 	}
 	switch gjson.GetBytes(body, "tool_choice.type").String() {
 	case "any", "tool", "function", "custom", "namespace":
-		return fmt.Errorf("claude-opus-5-5 does not support forced tool_choice; use auto or none")
+		return fmt.Errorf("%s does not support forced tool_choice; use auto or none", modelName)
+	}
+	if isSonnet55 {
+		if temperature := gjson.GetBytes(body, "temperature"); temperature.Exists() && (temperature.Type != gjson.Number || temperature.Float() != 1) {
+			return fmt.Errorf("claude-sonnet-5-5 does not support non-default temperature")
+		}
+		if topP := gjson.GetBytes(body, "top_p"); topP.Exists() && (topP.Type != gjson.Number || topP.Float() < 0.99 || topP.Float() > 1) {
+			return fmt.Errorf("claude-sonnet-5-5 does not support non-default top_p")
+		}
+		if gjson.GetBytes(body, "top_k").Exists() {
+			return fmt.Errorf("claude-sonnet-5-5 does not support top_k")
+		}
 	}
 	return nil
 }
@@ -711,13 +750,13 @@ func validateClaudeOpus55Request(body []byte, model string) error {
 //
 // 策略 (anthropic-strict only)：
 //   - 当 thinking.type 不是 "enabled"/"adaptive"：移除所有 thinking 相关块
-//   - 当 thinking.type 是 "enabled"/"adaptive"：仅移除缺失/无效 signature 的 thinking 块（避免 400）
-//     (blocks with missing/empty/dummy signatures that would cause 400 errors)
+//   - 当 thinking.type 是 "enabled"/"adaptive"：移除缺失/无效 signature 的 thinking 块（避免 400）
+//   - 对要求签名历史完整的 5.5 模型，一旦有无效块，移除历史中的全部 thinking 块
 func FilterThinkingBlocks(body []byte, mappedModel string) []byte {
 	if !ShouldPreFilterThinkingBlocks(mappedModel) {
 		return body
 	}
-	return filterThinkingBlocksInternal(body, claude.IsOpus55(mappedModel))
+	return filterThinkingBlocksInternal(body, isClaude55SignedThinkingModel(mappedModel))
 }
 
 // FilterThinkingBlocksForRetry strips thinking-related constructs for retry scenarios.
@@ -789,6 +828,9 @@ func FilterThinkingBlocksForRetry(body []byte, mappedModel string) []byte {
 		bytes.Contains(body, patternThinkingFieldSpaced)
 	if !hasEmptyContent && !hasEmptyTextBlock && !containsThinkingBlocks {
 		if topThinking := gjson.Get(jsonStr, "thinking"); topThinking.Exists() {
+			if claude.IsSonnet55(mappedModel) && topThinking.Get("type").String() == "between_tools" {
+				return body
+			}
 			if out, err := sjson.DeleteBytes(body, "thinking"); err == nil {
 				out = removeThinkingDependentContextStrategies(out)
 				return out
@@ -879,12 +921,17 @@ func FilterThinkingBlocksForRetry(body []byte, mappedModel string) []byte {
 	})
 
 	// Disable top-level thinking mode for retry to avoid structural/signature constraints upstream.
-	if gjson.GetBytes(out, "thinking").Exists() {
-		if next, err := sjson.DeleteBytes(out, "thinking"); err == nil {
+	keepThinking := false
+	if top := gjson.GetBytes(out, "thinking"); top.Exists() {
+		if claude.IsSonnet55(mappedModel) && top.Get("type").String() == "between_tools" {
+			keepThinking = true
+		} else if next, err := sjson.DeleteBytes(out, "thinking"); err == nil {
 			out = next
 		}
 	}
-	out = removeThinkingDependentContextStrategies(out)
+	if !keepThinking {
+		out = removeThinkingDependentContextStrategies(out)
+	}
 	return out
 }
 
@@ -1399,7 +1446,9 @@ func FilterSignatureSensitiveBlocksForRetry(body []byte, mappedModel string) []b
 // filterThinkingBlocksInternal removes invalid thinking blocks from request
 // 策略：
 //   - 当 thinking.type 不是 "enabled"/"adaptive"：移除所有 thinking 相关块
-//   - 当 thinking.type 是 "enabled"/"adaptive"：仅移除缺失/无效 signature 的 thinking 块
+//   - 当 thinking.type 是 "enabled"/"adaptive"：移除缺失/无效 signature 的 thinking 块
+//   - 对 5.5 模型，只要历史中有无效 thinking，就移除所有 thinking/redacted_thinking，
+//     避免留下不连续的签名历史
 func filterThinkingBlocksInternal(body []byte, alwaysThinking bool) []byte {
 	// Fast path: if body doesn't contain "thinking", skip parsing
 	if !bytes.Contains(body, patternTypeThinking) &&
@@ -1437,6 +1486,7 @@ func filterThinkingBlocksInternal(body []byte, alwaysThinking bool) []byte {
 	// 报在深处的错误。本函数每个带 thinking 的 anthropic 请求都会跑，量级远大于
 	// StripEmptyTextBlocks，是签名错误率的主要来源（2026-07-31 实测 29%）。
 	out := body
+	filtered := false
 	msgs.ForEach(func(msgIdx, msg gjson.Result) bool {
 		role := msg.Get("role").String()
 		content := msg.Get("content")
@@ -1452,6 +1502,57 @@ func filterThinkingBlocksInternal(body []byte, alwaysThinking bool) []byte {
 				continue
 			}
 			if next, err := sjson.DeleteBytes(out, base+strconv.Itoa(i)); err == nil {
+				out = next
+				filtered = true
+			}
+		}
+		return true
+	})
+	if alwaysThinking && filtered {
+		out = stripAllThinkingBlocks(out)
+	}
+	return out
+}
+
+// stripAllThinkingBlocks 删掉所有消息里的 thinking / redacted_thinking 块（含无 type 但带
+// thinking 键的块），删空的消息补占位块。采纳上游 v0.2.10：5.5 模型只要历史里有一个
+// 无效 thinking 块，就整批清掉，避免留下不连续的签名历史。同样只对要删的块做 sjson.Delete。
+func stripAllThinkingBlocks(body []byte) []byte {
+	msgs := gjson.GetBytes(body, "messages")
+	if !msgs.Exists() || !msgs.IsArray() {
+		return body
+	}
+	out := body
+	msgs.ForEach(func(msgIdx, msg gjson.Result) bool {
+		content := msg.Get("content")
+		if !content.Exists() || !content.IsArray() {
+			return true
+		}
+		blocks := content.Array()
+		base := "messages." + msgIdx.String() + ".content."
+		remaining := len(blocks)
+		for i := len(blocks) - 1; i >= 0; i-- {
+			b := blocks[i]
+			if !b.IsObject() {
+				continue
+			}
+			t := b.Get("type").String()
+			isThinking := t == "thinking" || t == "redacted_thinking" ||
+				(t == "" && b.Get("thinking").Exists())
+			if !isThinking {
+				continue
+			}
+			if next, err := sjson.DeleteBytes(out, base+strconv.Itoa(i)); err == nil {
+				out = next
+				remaining--
+			}
+		}
+		if remaining == 0 {
+			placeholder, err := json.Marshal(emptyContentPlaceholder(msg.Get("role").String()))
+			if err != nil {
+				return true
+			}
+			if next, err := sjson.SetRawBytes(out, "messages."+msgIdx.String()+".content", placeholder); err == nil {
 				out = next
 			}
 		}
