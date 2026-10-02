@@ -36,7 +36,7 @@ func newCashbackRouteTestRouter(t *testing.T) *gin.Engine {
 		handler.NewPaymentHandler(nil, nil),
 		&handler.PaymentWebhookHandler{},
 		adminhandler.NewPaymentHandler(nil, nil),
-		jwtAuth, adminAuth, auditLog, nil, nil,
+		jwtAuth, adminAuth, auditLog, nil, nil, nil,
 	)
 	return router
 }
