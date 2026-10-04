@@ -291,3 +291,24 @@ func TestDeviceLimitCache_ActiveDeviceAccounts(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, empty)
 }
+
+// Redis 在进程启动后重启/SCRIPT FLUSH，启动时预加载的脚本丢失：
+// pipeline 里的 EVALSHA 拿到 NOSCRIPT 不会自动回退 EVAL，必须重载后重试，
+// 否则列表徽章恒为 0、设备亲和静默失效。
+func TestDeviceLimitCache_PipelinedReadsSurviveScriptFlush(t *testing.T) {
+	cache, _ := newDeviceLimitCacheForTest(t)
+	ctx := context.Background()
+	windows := map[int64]time.Duration{1: time.Hour}
+	register(t, cache, 1, deviceA, limits(1, time.Hour, 1))
+
+	require.NoError(t, cache.rdb.ScriptFlush(ctx).Err())
+
+	got := counts(t, cache, 1, time.Hour)
+	require.Equal(t, service.DeviceCounts{Active: 1, Daily: 1}, got)
+
+	require.NoError(t, cache.rdb.ScriptFlush(ctx).Err())
+
+	set, err := cache.ActiveDeviceAccounts(ctx, deviceA, []int64{1}, windows)
+	require.NoError(t, err)
+	require.Equal(t, map[int64]struct{}{1: {}}, set)
+}

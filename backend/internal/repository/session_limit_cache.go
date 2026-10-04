@@ -261,25 +261,23 @@ func (c *sessionLimitCache) GetActiveSessionCountBatch(ctx context.Context, acco
 
 	results := make(map[int64]int, len(accountIDs))
 
-	// 使用 pipeline 批量执行
-	pipe := c.rdb.Pipeline()
-
-	cmds := make(map[int64]*redis.Cmd, len(accountIDs))
-	for _, accountID := range accountIDs {
-		key := sessionLimitKey(accountID)
-		// 使用各账号自己的 idleTimeout，如果没有则用默认值
-		idleTimeout := c.defaultIdleTimeout
-		if idleTimeouts != nil {
-			if t, ok := idleTimeouts[accountID]; ok && t > 0 {
-				idleTimeout = t
+	// 使用 pipeline 批量执行，即使部分失败也尝试获取成功的结果
+	var cmds map[int64]*redis.Cmd
+	execScriptPipeline(ctx, c.rdb, []*redis.Script{getActiveSessionCountScript}, func(pipe redis.Pipeliner) {
+		cmds = make(map[int64]*redis.Cmd, len(accountIDs))
+		for _, accountID := range accountIDs {
+			key := sessionLimitKey(accountID)
+			// 使用各账号自己的 idleTimeout，如果没有则用默认值
+			idleTimeout := c.defaultIdleTimeout
+			if idleTimeouts != nil {
+				if t, ok := idleTimeouts[accountID]; ok && t > 0 {
+					idleTimeout = t
+				}
 			}
+			idleTimeoutSeconds := int(idleTimeout.Seconds())
+			cmds[accountID] = getActiveSessionCountScript.Run(ctx, pipe, []string{key}, idleTimeoutSeconds)
 		}
-		idleTimeoutSeconds := int(idleTimeout.Seconds())
-		cmds[accountID] = getActiveSessionCountScript.Run(ctx, pipe, []string{key}, idleTimeoutSeconds)
-	}
-
-	// 执行 pipeline，即使部分失败也尝试获取成功的结果
-	_, _ = pipe.Exec(ctx)
+	})
 
 	for accountID, cmd := range cmds {
 		if result, err := cmd.Int(); err == nil {

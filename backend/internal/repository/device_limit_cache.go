@@ -218,15 +218,15 @@ func (c *deviceLimitCache) GetDeviceCountsBatch(ctx context.Context, accountIDs 
 		return results, nil
 	}
 
-	pipe := c.rdb.Pipeline()
-	cmds := make(map[int64]*redis.Cmd, len(accountIDs))
+	var cmds map[int64]*redis.Cmd
 	daily := dailyWindowSeconds(0)
-	for _, accountID := range accountIDs {
-		cmds[accountID] = deviceCountsScript.Run(ctx, pipe, deviceKeys(accountID), c.windowSeconds(c.windowFor(windows, accountID)), daily)
-	}
-
 	// 执行 pipeline，即使部分失败也尽量返回成功的结果
-	_, _ = pipe.Exec(ctx)
+	execScriptPipeline(ctx, c.rdb, []*redis.Script{deviceCountsScript}, func(pipe redis.Pipeliner) {
+		cmds = make(map[int64]*redis.Cmd, len(accountIDs))
+		for _, accountID := range accountIDs {
+			cmds[accountID] = deviceCountsScript.Run(ctx, pipe, deviceKeys(accountID), c.windowSeconds(c.windowFor(windows, accountID)), daily)
+		}
+	})
 
 	for accountID, cmd := range cmds {
 		vals, err := cmd.Int64Slice()
@@ -255,13 +255,14 @@ func (c *deviceLimitCache) ActiveDeviceAccounts(ctx context.Context, deviceID st
 		return result, nil
 	}
 
-	pipe := c.rdb.Pipeline()
-	cmds := make(map[int64]*redis.Cmd, len(accountIDs))
+	var cmds map[int64]*redis.Cmd
 	daily := dailyWindowSeconds(0)
-	for _, accountID := range accountIDs {
-		cmds[accountID] = isDeviceKnownScript.Run(ctx, pipe, deviceKeys(accountID), c.windowSeconds(c.windowFor(windows, accountID)), daily, deviceID)
-	}
-	_, _ = pipe.Exec(ctx)
+	execScriptPipeline(ctx, c.rdb, []*redis.Script{isDeviceKnownScript}, func(pipe redis.Pipeliner) {
+		cmds = make(map[int64]*redis.Cmd, len(accountIDs))
+		for _, accountID := range accountIDs {
+			cmds[accountID] = isDeviceKnownScript.Run(ctx, pipe, deviceKeys(accountID), c.windowSeconds(c.windowFor(windows, accountID)), daily, deviceID)
+		}
+	})
 
 	for accountID, cmd := range cmds {
 		if known, err := cmd.Int(); err == nil && known == 1 {
