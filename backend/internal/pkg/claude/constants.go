@@ -22,6 +22,9 @@ const (
 	BetaFastMode                 = "fast-mode-2026-02-01"
 	// Legacy structured output compatibility; forwarded only when explicitly requested.
 	BetaStructuredOutputs = "structured-outputs-2025-11-13"
+	// 采纳上游 v0.2.15：客户端显式请求才透传（mid-conversation-tool-changes 见下方，
+	// opus 族模板里本就无条件带）。
+	BetaInlineTools = "inline-tools-2026-09-15"
 
 	// 新增（对齐官方 CLI 2.1.9x 以来的流量）
 	BetaPromptCachingScope          = "prompt-caching-scope-2026-01-05"

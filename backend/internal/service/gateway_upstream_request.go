@@ -690,15 +690,22 @@ func (s *GatewayService) computeBaseAnthropicBetaWithGates(
 			// 不能再整体并入，否则等于放行全部客户端 beta，集合大小又会随下游变化。
 			// Haiku 走它自己的模板（真实 CLI 对 haiku 发 8 个，顺序不同）。
 			//
-			// 唯一例外（采纳上游 v0.2.9）：客户端**显式**带了 structured-outputs 时追加。
-			// 它是能力开关不是身份标记，缺了这类请求必 400；不带的请求集合不变。
+			// 例外（采纳上游 v0.2.9 / v0.2.15）：客户端**显式**带了下列兼容开关时追加，
+			// 让出站 body 与头一致，缺了这类请求必 400；不带的请求集合不变。
+			// 模板里已有的（opus 族的 mid-conversation-tool-changes）由 merge 去重。
 			// policy drop 仍优先于它。
-			incomingBeta := ""
-			if containsBetaToken(clientBeta, claude.BetaStructuredOutputs) {
-				incomingBeta = claude.BetaStructuredOutputs
+			var incomingBetas []string
+			for _, token := range []string{
+				claude.BetaStructuredOutputs,
+				claude.BetaMidConversationToolChanges,
+				claude.BetaInlineTools,
+			} {
+				if containsBetaToken(clientBeta, token) {
+					incomingBetas = append(incomingBetas, token)
+				}
 			}
 			return mergeAnthropicBetaDropping(
-				claude.MimicryBetasForModel(modelID, clientBeta, bodyRequestsFastMode(body), gates), incomingBeta, effectiveDropSet), true
+				claude.MimicryBetasForModel(modelID, clientBeta, bodyRequestsFastMode(body), gates), strings.Join(incomingBetas, ","), effectiveDropSet), true
 		}
 		// 非 OAuth-mimic 的兜底（当前 OAuth 已恒为 mimic，此分支主要留给未来的非 OAuth 场景）
 		return stripBetaTokensWithSet(s.getBetaHeader(modelID, clientBeta), effectiveDropSet), true
