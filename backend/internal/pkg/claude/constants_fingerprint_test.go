@@ -21,7 +21,7 @@ func TestDefaultHeadersMimicAPlausibleEnvironment(t *testing.T) {
 		// 不再需要为旧的 Node 24 profile 压低版本。改这些值必须重新抓包。
 		"X-Stainless-Runtime":         "node",
 		"X-Stainless-Runtime-Version": "v26.3.0",
-		"X-Stainless-Package-Version": "0.112.1",
+		"X-Stainless-Package-Version": "0.128.0",
 		"Accept-Encoding":             "gzip, deflate, br, zstd",
 		"Connection":                  "keep-alive",
 	}

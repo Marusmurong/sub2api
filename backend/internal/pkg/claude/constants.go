@@ -40,6 +40,8 @@ const (
 	BetaMidConversationSystem = "mid-conversation-system-2026-04-07"
 	BetaPerTurnControl        = "per-turn-control-2026-07-01"
 	BetaAdvisorTool           = "advisor-tool-2026-03-01"
+	BetaDangerousToolUse      = "dangerous-tool-use-2026-09-03"
+	BetaAFKMode               = "afk-mode-2026-01-31"
 
 	// 2026-09-23 本机真实 2.1.280 抓包新增：仅 opus/fable 族发，位置在
 	// per-turn-control 之后、advisor-tool 之前。sonnet / haiku 两族的抓样里没有它。
@@ -129,7 +131,7 @@ const DefaultCacheControlTTL = "5m"
 //
 // 注意：只改本常量才有用——identity_service.floorClaudeCLIUserAgentVersion 的存量账号
 // 指纹地板读的就是它，SUB2API_CLAUDE_CLI_VERSION 环境变量抬不动那条地板。
-const CLICurrentVersion = "2.1.284"
+const CLICurrentVersion = "2.1.293"
 
 // CLIPatchVersion 返回当前伪装 CLI 版本的 patch 段（"2.1.263" → "263"）。
 //
@@ -169,10 +171,11 @@ var (
 		BetaPromptCachingScope,
 		BetaMidConversationSystem,
 		BetaPerTurnControl,
-		BetaMidConversationToolChanges, // 2.1.280 新增，仅本族
-		BetaAdvisorTool,
+		BetaMidConversationToolChanges, // 仅 opus 族；2.1.293 起 claude-sonnet-5-5 也走本族
 		BetaEffort,
-		BetaFallbackCreditLegacy, // * 门控；2.1.263/2.1.280 发的都是 2026-06-01 这个 id
+		BetaDangerousToolUse, // 2.1.293 新增，haiku 没有
+		BetaAFKMode,
+		BetaFallbackCreditLegacy, // * 门控
 		BetaExtendedCacheTTL,
 		BetaFastMode, // * body.speed=fast
 	}
@@ -185,8 +188,9 @@ var (
 		BetaContextManagement,
 		BetaPromptCachingScope,
 		BetaMidConversationSystem,
-		BetaAdvisorTool,
 		BetaEffort,
+		BetaDangerousToolUse,
+		BetaAFKMode,
 		BetaExtendedCacheTTL,
 		BetaFastMode, // *
 	}
@@ -197,7 +201,6 @@ var (
 		BetaContextManagement,
 		BetaPromptCachingScope,
 		BetaClaudeCode,
-		BetaAdvisorTool,
 		BetaExtendedCacheTTL,
 		BetaFastMode, // *
 	}
@@ -235,6 +238,8 @@ func mimicryBetaTemplateForModel(model string) []string {
 	switch {
 	case strings.Contains(m, "haiku"):
 		return mimicryBetaTemplateHaiku
+	case strings.Contains(m, "sonnet-5-5"), strings.Contains(m, "sonnet-5.5"):
+		return mimicryBetaTemplateOpus
 	case strings.Contains(m, "sonnet"):
 		return mimicryBetaTemplateSonnet
 	default:
@@ -317,7 +322,7 @@ func DefaultHeaders() map[string]string {
 		// profile 6 与该客户端 ClientHello 逐字段一致（17 cipher / 13 ext 同序 / ALPN 仅
 		// http/1.1 / 无 GREASE），所以 HTTP 层可以直接照抄，不必再为旧的 Node 24 profile 压低
 		// 版本。改任何一项必须重新抓包，见 docs/UPSTREAM_EXPOSURE_AUDIT_2026-09-07.html 附录。
-		"X-Stainless-Package-Version": "0.112.1",
+		"X-Stainless-Package-Version": "0.128.0",
 		// MacOS/arm64 rather than Linux/arm64. Measured against the fingerprints
 		// real clients present to this gateway: of 23 samples, 20 reported
 		// Windows/x64 and 3 MacOS/arm64 — not one reported Linux/arm64. Mimicking a

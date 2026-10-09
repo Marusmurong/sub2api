@@ -16,9 +16,9 @@ import (
 // 这里测的是网关出口的最终字符串：模板取族、账号门控、fast-mode、白名单透传。
 func TestMimicBeta_PerModelFamilyMatchesRealCLI(t *testing.T) {
 	s := &GatewayService{}
-	opus := "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,advisor-tool-2026-03-01,effort-2025-11-24,extended-cache-ttl-2025-04-11"
-	sonnet := "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,advisor-tool-2026-03-01,effort-2025-11-24,extended-cache-ttl-2025-04-11"
-	haiku := "oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,claude-code-20250219,advisor-tool-2026-03-01,extended-cache-ttl-2025-04-11"
+	opus := "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,per-turn-control-2026-07-01,mid-conversation-tool-changes-2026-07-01,effort-2025-11-24,dangerous-tool-use-2026-09-03,afk-mode-2026-01-31,extended-cache-ttl-2025-04-11"
+	sonnet := "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07,effort-2025-11-24,dangerous-tool-use-2026-09-03,afk-mode-2026-01-31,extended-cache-ttl-2025-04-11"
+	haiku := "oauth-2025-04-20,interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,claude-code-20250219,extended-cache-ttl-2025-04-11"
 
 	cases := []struct {
 		name  string
@@ -30,7 +30,7 @@ func TestMimicBeta_PerModelFamilyMatchesRealCLI(t *testing.T) {
 	}{
 		{"fable 走 opus 族，门控默认关", "claude-fable-5-1", nil, `{}`, claude.MimicryBetaGates{}, opus},
 		{"opus 账号开 fallback-credit → 与抓包完全一致", "claude-opus-5", nil, `{}`, claude.MimicryBetaGates{FallbackCredit: true},
-			strings.Replace(opus, "effort-2025-11-24,", "effort-2025-11-24,fallback-credit-2026-06-01,", 1)},
+			strings.Replace(opus, "afk-mode-2026-01-31,", "afk-mode-2026-01-31,fallback-credit-2026-06-01,", 1)},
 		{"sonnet 10 个", "claude-sonnet-5", nil, `{}`, claude.MimicryBetaGates{}, sonnet},
 		{"haiku 8 个，claude-code 在第 6 位", "claude-haiku-4-5", nil, `{}`, claude.MimicryBetaGates{}, haiku},
 		{"客户端头里的非白名单 beta 全部丢弃", "claude-sonnet-5", http.Header{"Anthropic-Beta": {"foo-2026,redact-thinking-2026-02-12"}}, `{}`, claude.MimicryBetaGates{}, sonnet},

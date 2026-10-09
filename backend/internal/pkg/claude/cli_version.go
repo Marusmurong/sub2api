@@ -58,7 +58,7 @@ func CLIVersion() string {
 var CalibratedCLIVersions = []string{
 	// 2026-09-29 抓包核对（Bun 原生 arm64，对 2.1.280 头/TLS/beta 模板无实质变化）；
 	// 当前基线即此值。Opus 5.5 要求 >= 2.1.280，已满足。
-	"2.1.284",
+	"2.1.293",
 }
 
 // isCalibratedCLIVersion 报告该版本是否已抓包标定。

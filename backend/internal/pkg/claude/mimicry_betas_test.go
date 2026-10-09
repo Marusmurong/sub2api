@@ -28,10 +28,11 @@ var (
 		"prompt-caching-scope-2026-01-05",
 		"mid-conversation-system-2026-04-07",
 		"per-turn-control-2026-07-01",
-		"mid-conversation-tool-changes-2026-07-01", // 2.1.280 新增，仅 opus/fable 族
-		"advisor-tool-2026-03-01",
+		"mid-conversation-tool-changes-2026-07-01",
 		"effort-2025-11-24",
-		"fallback-credit-2026-06-01", // 门控：该抓包账号具备
+		"dangerous-tool-use-2026-09-03",
+		"afk-mode-2026-01-31",
+		"fallback-credit-2026-06-01",
 		"extended-cache-ttl-2025-04-11",
 	}
 	real2_1_280SonnetBetas = []string{
@@ -42,8 +43,9 @@ var (
 		"context-management-2025-06-27",
 		"prompt-caching-scope-2026-01-05",
 		"mid-conversation-system-2026-04-07",
-		"advisor-tool-2026-03-01",
 		"effort-2025-11-24",
+		"dangerous-tool-use-2026-09-03",
+		"afk-mode-2026-01-31",
 		"extended-cache-ttl-2025-04-11",
 	}
 	real2_1_280HaikuBetas = []string{
@@ -53,7 +55,6 @@ var (
 		"context-management-2025-06-27",
 		"prompt-caching-scope-2026-01-05",
 		"claude-code-20250219",
-		"advisor-tool-2026-03-01",
 		"extended-cache-ttl-2025-04-11",
 	}
 )

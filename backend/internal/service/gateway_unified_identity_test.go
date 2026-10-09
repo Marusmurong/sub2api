@@ -112,7 +112,7 @@ func TestMimicryBetas_DropsClientIdentityBetasKeepsWhitelistedFeature(t *testing
 	t.Run("白名单内的功能 beta 保留", func(t *testing.T) {
 		got := claude.MimicryBetasWithClientFeatures("context-1m-2025-08-07,afk-mode-2026-01-31")
 		require.Contains(t, got, claude.BetaContext1M, "1M 上下文是功能开关，丢了会让长请求直接超限")
-		require.NotContains(t, got, "afk-mode-2026-01-31")
+		require.NotContains(t, got, "advisor-tool-2026-03-01")
 		require.Len(t, got, len(fixed)+1)
 	})
 

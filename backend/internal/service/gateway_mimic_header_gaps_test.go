@@ -124,7 +124,7 @@ func TestMimicHeaders_MatchRealClaudeCode2_1_257Capture(t *testing.T) {
 	require.NoError(t, err)
 
 	want := map[string]string{
-		"X-Stainless-Package-Version": "0.112.1",
+		"X-Stainless-Package-Version": "0.128.0",
 		"X-Stainless-Runtime-Version": "v26.3.0",
 		"X-Stainless-Runtime":         "node",
 		"X-Stainless-OS":              "MacOS",
